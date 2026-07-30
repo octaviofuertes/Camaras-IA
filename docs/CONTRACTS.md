@@ -2,7 +2,7 @@
 
 > **Este documento gana.** Ante cualquier discrepancia de *contrato de detalle* (nombre de columna, enum, firma de manifest, ruta de endpoint, serialización) entre este archivo y las secciones `00`–`09`, **prevalece lo definido aquí**. Las secciones describen la arquitectura y el *porqué*; este archivo congela el *cómo exacto* que el código debe respetar. Todo lo aquí definido vive físicamente en `packages/contracts` y `packages/py-contracts` del monorepo y se genera/valida en CI.
 
-**Versión del contrato:** `v1.0.1` · **Fecha:** 2026-07-30 · **Estado:** congelado para Fase 1 (MVP).
+**Versión del contrato:** `v1.0.2` · **Fecha:** 2026-07-30 · **Estado:** congelado para Fase 1 (MVP) — **esquema verificado contra PostgreSQL 15 + TimescaleDB real**.
 **Regla de cambio:** cualquier modificación a este archivo es un cambio de contrato → bump semver + entrada en el changelog al final + regeneración de tipos (`proto`, `ts`, `py`) + migración de BD si aplica.
 
 Resuelve las 4 inconsistencias **bloqueantes** y las 11 **importantes/menores** listadas en [`00-vision-general-y-decisiones.md`](00-vision-general-y-decisiones.md#inconsistencias-detectadas).
@@ -360,7 +360,7 @@ CREATE POLICY events_tenant_isolation ON events
     USING (organization_id = current_setting('app.current_org', true)::uuid);
 ```
 
-> Nota de compresión/retención (TimescaleDB): comprimir chunks tras 7 días (`compress_after`), retención por `drop_chunks` según plan/retención contratada. Detalle operativo en [`02-modelo-de-datos.md`](02-modelo-de-datos.md).
+> Nota de compresión/retención (TimescaleDB) — **v1.0.2**: la compresión columnar (columnstore) es **incompatible con Row-Level Security** sobre la misma tabla (error verificado contra TimescaleDB pg15: `columnstore cannot be used on table with row security`). Como RLS es innegociable, `events`/`audit_logs` **no llevan compresión nativa**; la palanca de costo es la **retención por `drop_chunks`** (compatible con RLS) según plan contratado. Revisitar si TimescaleDB levanta la restricción. Detalle operativo en [`02-modelo-de-datos.md`](02-modelo-de-datos.md).
 
 ---
 
@@ -651,6 +651,7 @@ Al implementar, alinear cada sección a este contrato:
 
 | Versión | Fecha | Cambio |
 |---------|-------|--------|
+| v1.0.2 | 2026-07-30 | Verificado contra TimescaleDB pg15 real: (a) compresión columnar **eliminada** de `events`/`audit_logs` — incompatible con RLS (`columnstore cannot be used on table with row security`); la palanca de costo pasa a ser la retención por `drop_chunks`; (b) rol de conexión de aplicación **`percepta_app`** (`LOGIN NOBYPASSRLS`, no superuser) añadido a la migración canónica — los servicios se conectan con él para que `FORCE ROW LEVEL SECURITY` sea inevitable; el superusuario queda solo para migraciones/operación; (c) fix de overflow en el shim `uuidv7()` (máscara en bigint antes del cast a int4). Invariantes probadas en vivo: RLS bloquea lecturas y escrituras cross-tenant; `events_human_review_chk` impide transiciones sin revisor humano. |
 | v1.0.1 | 2026-07-30 | Correcciones por límites reales de TimescaleDB: (a) `events` sin dimensión de espacio por `organization_id` (incompatible con la PK/índices únicos declarados); (b) `evidences`/`notifications` → `events` pasa de FK física a **referencia lógica compuesta** (TimescaleDB no soporta FKs hacia hypertables); integridad a cargo de `event-service` y de los jobs de retención. |
 | v1.0.0 | 2026-07-30 | Contrato inicial. Resuelve las 4 bloqueantes (events, PerceptaModule, module.json, Protobuf) y unifica enums de estado/status, catálogo de permisos, endpoint WHEP, referencia de evidencias, `confidence`, topología de colas y multitenancy de `ai_modules`. |
 

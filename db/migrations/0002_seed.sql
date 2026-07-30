@@ -111,3 +111,30 @@ VALUES (
   '1.0.0', 'available'
 )
 ON CONFLICT DO NOTHING;
+
+-- Zona de trabajo de la cámara demo (polígono normalizado 0..1).
+-- helmet-detection declara requiresZones=true y su config exige "zones".
+INSERT INTO zones (id, organization_id, site_id, camera_id, name, kind, geometry) VALUES
+  ('00000000-0000-4000-d000-000000000001', '00000000-0000-4000-b000-000000000001',
+   '00000000-0000-4000-b000-000000000002', '00000000-0000-4000-b000-000000000003',
+   'Área de carga', 'polygon',
+   '{"points": [[0.10,0.35],[0.90,0.35],[0.90,0.95],[0.10,0.95]]}')
+ON CONFLICT DO NOTHING;
+
+-- Asignación módulo ↔ cámara: la relación central del producto (una cámara ejecuta
+-- N módulos, cada uno con su propia configuración). Config validada contra el
+-- config_schema del módulo en config_schema_version.
+INSERT INTO camera_module_configs (organization_id, camera_id, ai_module_id, module_version,
+                                   config_schema_version, config, priority, enabled, schedule)
+VALUES (
+  '00000000-0000-4000-b000-000000000001',
+  '00000000-0000-4000-b000-000000000003',
+  '00000000-0000-4000-c000-000000000001',
+  '1.2.0', '1.0.0',
+  '{"zones": ["00000000-0000-4000-d000-000000000001"], "minConfidence": 0.6,
+    "minPersistenceFrames": 5, "cooldownSeconds": 300}',
+  100, true,
+  '{"days": ["mon","tue","wed","thu","fri"], "windows": [["06:00","22:00"]],
+    "tz": "America/Argentina/Mendoza"}'
+)
+ON CONFLICT (camera_id, ai_module_id) DO NOTHING;

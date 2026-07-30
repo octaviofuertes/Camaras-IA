@@ -15,12 +15,13 @@ DECLARE
   unix_ms bigint := floor(extract(epoch FROM clock_timestamp()) * 1000);
   buf bytea := gen_random_bytes(16);
 BEGIN
-  buf := set_byte(buf, 0, (unix_ms >> 40)::int & 255);
-  buf := set_byte(buf, 1, (unix_ms >> 32)::int & 255);
-  buf := set_byte(buf, 2, (unix_ms >> 24)::int & 255);
-  buf := set_byte(buf, 3, (unix_ms >> 16)::int & 255);
-  buf := set_byte(buf, 4, (unix_ms >> 8)::int  & 255);
-  buf := set_byte(buf, 5, unix_ms::int & 255);
+  -- máscara en bigint ANTES del cast a int4 (el cast directo desborda)
+  buf := set_byte(buf, 0, ((unix_ms >> 40) & 255)::int);
+  buf := set_byte(buf, 1, ((unix_ms >> 32) & 255)::int);
+  buf := set_byte(buf, 2, ((unix_ms >> 24) & 255)::int);
+  buf := set_byte(buf, 3, ((unix_ms >> 16) & 255)::int);
+  buf := set_byte(buf, 4, ((unix_ms >> 8)  & 255)::int);
+  buf := set_byte(buf, 5, (unix_ms & 255)::int);
   buf := set_byte(buf, 6, ((get_byte(buf, 6) & 15) | 112)); -- version 7
   buf := set_byte(buf, 8, ((get_byte(buf, 8) & 63) | 128)); -- variant
   RETURN encode(buf, 'hex')::uuid;
@@ -420,9 +421,25 @@ CREATE POLICY users_tenant_isolation ON users
     USING (organization_id IS NULL
            OR organization_id = current_setting('app.current_org', true)::uuid);
 
--- Compresión y retención (TimescaleDB)
-ALTER TABLE events SET (timescaledb.compress,
-    timescaledb.compress_segmentby = 'organization_id',
-    timescaledb.compress_orderby   = 'occurred_at DESC');
-SELECT add_compression_policy('events', INTERVAL '7 days');
+-- Compresión (TimescaleDB): DESACTIVADA en events/audit_logs — el columnstore es
+-- incompatible con Row-Level Security en la misma tabla y RLS es innegociable
+-- (CONTRACTS v1.0.2). La retención por drop_chunks sí convive con RLS y es la
+-- palanca principal de costo. Revisitar si TimescaleDB levanta la restricción.
 -- Retención por plan: gestionada por job de la app (drop_chunks selectivo), no política global.
+
+-- ─────────────────────────────────────────────────────────────
+-- Rol de aplicación (defensa en profundidad — CONTRACTS/ADR-2):
+-- los microservicios se conectan como percepta_app (NOBYPASSRLS, no superuser),
+-- de modo que FORCE ROW LEVEL SECURITY sea estructuralmente inevitable.
+-- El superusuario queda SOLO para migraciones y operación.
+-- ─────────────────────────────────────────────────────────────
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'percepta_app') THEN
+    CREATE ROLE percepta_app LOGIN PASSWORD 'percepta_app_dev_pw' NOBYPASSRLS;
+  END IF;
+END $$;
+GRANT USAGE ON SCHEMA public TO percepta_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO percepta_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO percepta_app;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO percepta_app;

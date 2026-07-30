@@ -46,12 +46,28 @@ services:
       - "5672:5672"     # AMQP
       - "15672:15672"   # management UI
     volumes:
-      - rabbitmqdata:/var/lib/rabbitmq
+      # Solo el directorio de datos (mnesia), NO todo /var/lib/rabbitmq: montar la raíz
+      # rompe los permisos de .erlang.cookie y el broker no arranca ("eacces").
+      - rabbitmqdata:/var/lib/rabbitmq/mnesia
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
       retries: 10
+
+  # Declara las 6 exchanges canónicas del bus (docs/CONTRACTS.md §12)
+  rabbitmq-init:
+    image: rabbitmq:3.13-management-alpine
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      for ex in detections.raw events.created evidence.ready notifications.dispatch usage.metered audit.log; do
+        rabbitmqadmin -H rabbitmq -u ${RABBITMQ_USER:-percepta} -p ${RABBITMQ_PASSWORD:-percepta_dev_pw} declare exchange name=$$ex type=topic durable=true;
+      done;
+      echo 'exchanges listas';
+      "
 
   minio:
     image: minio/minio:latest
