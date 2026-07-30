@@ -32,9 +32,20 @@ Camaras+IA/
 
 ## Requisitos
 
-- Node.js 18.14+ y [pnpm](https://pnpm.io) 9+
-- Docker + Docker Compose
+- Node.js 18.14+ y [pnpm](https://pnpm.io) 9+ (`npm i -g pnpm@9`)
+- Docker Desktop (para la infraestructura: Postgres/Timescale, Redis, RabbitMQ, MinIO)
+
+  ```bash
+  winget install -e --id Docker.DockerDesktop --accept-package-agreements --accept-source-agreements
+  ```
+
+  > Requiere virtualización (WSL2) y posiblemente un reinicio la primera vez.
+
 - Python 3.11+ (para `ai-worker` y `py-contracts`)
+
+  ```bash
+  winget install -e --id Python.Python.3.11 --scope user --accept-package-agreements --accept-source-agreements
+  ```
 
 ## Quickstart (desarrollo)
 
