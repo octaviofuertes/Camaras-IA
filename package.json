@@ -1,0 +1,30 @@
+{
+  "name": "percepta",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Percepta — Plataforma SaaS de Análisis Inteligente de Video con IA modular",
+  "packageManager": "pnpm@9.6.0",
+  "engines": {
+    "node": ">=18.14.0 <19"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "contracts:gen": "pnpm --filter @percepta/contracts run gen",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "infra:logs": "docker compose logs -f",
+    "db:migrate": "docker compose exec -T postgres psql -U percepta -d percepta -v ON_ERROR_STOP=1 -f /migrations/0001_init.sql -f /migrations/0002_seed.sql",
+    "smoke": "tsc -p tools/smoke/tsconfig.json && node tools/smoke/build/tools/smoke/smoke.js"
+  },
+  "devDependencies": {
+    "@percepta/contracts": "workspace:*",
+    "@types/node": "^18.19.0",
+    "turbo": "^2.0.6",
+    "typescript": "^5.4.5",
+    "prettier": "^3.3.2"
+  }
+}

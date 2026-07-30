@@ -1,0 +1,43 @@
+# Dependencias
+node_modules/
+.pnpm-store/
+__pycache__/
+*.egg-info/
+.venv/
+venv/
+
+# Builds
+dist/
+build/
+out/
+.angular/
+*.tsbuildinfo
+.turbo/
+
+# Generado por codegen (proto -> ts/py)
+packages/contracts/src/generated/
+packages/py-contracts/percepta_contracts/generated/
+
+# Entorno y secretos
+.env
+.env.local
+*.local
+
+# Modelos / pesos (grandes; van al model registry, no al git)
+*.pt
+*.onnx
+*.engine
+models/**/weights/
+
+# Datos y evidencias locales
+.data/
+tmp/
+*.log
+
+# IDE / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+tools/smoke/build/

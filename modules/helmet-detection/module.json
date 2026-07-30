@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "1.0.0",
+  "moduleKey": "helmet-detection",
+  "name": "Uso de casco (EPP)",
+  "description": "Asistencia: señala personas cuyo casco de seguridad no es visible, para revisión humana.",
+  "version": "1.2.0",
+  "pluginApiVersion": "1.0.0",
+  "category": "hr",
+  "vendor": "percepta-core",
+  "model": {
+    "backend": "yolo",
+    "artifactRef": "models://ppe/helmet-yolov8m@1.2.0",
+    "classes": ["person", "helmet", "no_helmet"]
+  },
+  "input": { "requiresZones": true, "minFps": 2, "maxFps": 8, "colorSpace": "bgr" },
+  "configSchemaRef": "./config.schema.json",
+  "configSchemaVersion": "1.0.0",
+  "eventTypes": [
+    { "type": "ppe.helmet_missing", "defaultSeverity": "high", "eventClass": "alert" }
+  ],
+  "resources": { "gpu": true, "vramMb": 1400, "targetFps": 6 }
+}

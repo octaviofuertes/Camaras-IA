@@ -1,0 +1,18 @@
+[project]
+name = "percepta-contracts"
+version = "1.0.0"
+description = "Contrato Python del plugin de IA de Percepta (clase base PerceptaModule). Fuente: docs/CONTRACTS.md §3"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "mypy>=1.10"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["percepta_contracts*"]

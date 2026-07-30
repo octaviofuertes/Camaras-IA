@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://percepta.io/modules/helmet-detection/config/v1.json",
+  "title": "Configuración: Uso de casco (EPP)",
+  "description": "El frontend renderiza este formulario dinámicamente. rules-engine evalúa estas reglas; el módulo solo detecta.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "zones": {
+      "title": "Sectores donde aplica",
+      "type": "array",
+      "items": { "type": "string", "format": "uuid" },
+      "minItems": 1
+    },
+    "schedule": {
+      "title": "Turnos / horarios",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "days": {
+          "type": "array",
+          "items": { "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] },
+          "default": ["mon", "tue", "wed", "thu", "fri"]
+        },
+        "windows": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "prefixItems": [
+              { "type": "string", "pattern": "^\\d{2}:\\d{2}$" },
+              { "type": "string", "pattern": "^\\d{2}:\\d{2}$" }
+            ],
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "default": [["06:00", "22:00"]]
+        },
+        "tz": { "type": "string", "default": "America/Argentina/Mendoza" }
+      }
+    },
+    "minConfidence": {
+      "title": "Confianza mínima",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 0.6
+    },
+    "minPersistenceFrames": {
+      "title": "Frames consecutivos para alertar",
+      "description": "Evita falsos positivos por oclusión momentánea del casco.",
+      "type": "integer",
+      "minimum": 1,
+      "default": 5
+    },
+    "cooldownSeconds": {
+      "title": "Enfriamiento entre alertas por track",
+      "type": "integer",
+      "minimum": 0,
+      "default": 300
+    }
+  },
+  "required": ["zones"]
+}

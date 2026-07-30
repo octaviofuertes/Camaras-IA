@@ -1,0 +1,5 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+# Nota: apps/web (Angular) y apps/ai-worker (Python) están en el workspace por conveniencia
+# de tooling, pero el worker de Python se gestiona con su propio pyproject/venv.

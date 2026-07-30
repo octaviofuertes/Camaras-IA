@@ -1,0 +1,42 @@
+syntax = "proto3";
+package percepta.detections.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Fuente canónica: docs/CONTRACTS.md §2.
+// Un lote de detecciones producidas por UN módulo sobre UN frame de UNA cámara.
+// Es el ÚNICO payload del exchange RabbitMQ "detections.raw" y del stream gRPC worker->orchestrator.
+message DetectionBatch {
+  string schema_version   = 1;  // "1.0.0" (SemVer del .proto)
+  string organization_id  = 2;  // UUID (routing key = org.<id>.cam.<camera_id>.<module_key>)
+  string site_id          = 3;  // UUID
+  string camera_id        = 4;  // UUID
+  string ai_module_id     = 5;  // UUID del módulo del catálogo
+  string module_key       = 6;  // ej. "helmet-detection"
+  string module_version   = 7;  // SemVer del módulo que produjo esto
+  uint64 frame_seq        = 8;  // secuencia monotónica del frame
+  google.protobuf.Timestamp captured_at = 9;  // instante de captura del frame (UTC)
+  double inference_ms     = 10; // latencia de inferencia de este módulo
+  repeated Detection detections = 11;
+  FrameRef frame_ref      = 12; // puntero al frame en el ring-buffer (para evidencias)
+}
+
+message Detection {
+  string class_label      = 1;
+  int32  class_id         = 2;
+  float  confidence       = 3;  // 0.0..1.0 CRUDO, SIN umbralizar (rules-engine decide)
+  BoundingBox bbox        = 4;  // coordenadas normalizadas 0..1
+  int64  track_id         = 5;  // -1 si el módulo no hace tracking
+  repeated Keypoint keypoints = 6;
+  repeated string in_zones = 7;
+  map<string, string> attributes = 8;
+}
+
+message BoundingBox { float x = 1; float y = 2; float w = 3; float h = 4; }
+message Keypoint    { string name = 1; float x = 2; float y = 3; float score = 4; }
+
+message FrameRef {
+  string ring_buffer_key = 1;
+  int32  width           = 2;
+  int32  height          = 3;
+}

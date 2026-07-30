@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "lib": ["ES2022"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "rootDir": "../..",
+    "outDir": "build",
+    "types": ["node"]
+  },
+  "include": [
+    "smoke.ts",
+    "../../apps/rules-engine/src/domain/**/*.ts",
+    "../../apps/event-service/src/domain/**/*.ts"
+  ]
+}

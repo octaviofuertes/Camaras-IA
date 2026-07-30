@@ -1,0 +1,91 @@
+# Percepta — infraestructura de desarrollo local.
+# Levanta el plano de datos/plataforma. Los microservicios se corren con `pnpm dev`
+# (o se añaden aquí más adelante para un entorno 100% contenerizado).
+
+services:
+  postgres:
+    image: timescale/timescaledb-ha:pg15
+    container_name: percepta-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-percepta}
+      POSTGRES_USER: ${POSTGRES_USER:-percepta}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-percepta_dev_pw}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/migrations:/migrations:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-percepta} -d ${POSTGRES_DB:-percepta}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: percepta-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: percepta-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-percepta}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-percepta_dev_pw}
+    ports:
+      - "5672:5672"     # AMQP
+      - "15672:15672"   # management UI
+    volumes:
+      - rabbitmqdata:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: percepta-minio
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-percepta}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-percepta_dev_pw}
+    ports:
+      - "9000:9000"     # API S3
+      - "9001:9001"     # consola web
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Crea el bucket de evidencias al arrancar
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${S3_ACCESS_KEY:-percepta} ${S3_SECRET_KEY:-percepta_dev_pw} &&
+      mc mb -p local/${S3_BUCKET_EVIDENCES:-percepta-evidences} &&
+      mc anonymous set none local/${S3_BUCKET_EVIDENCES:-percepta-evidences} &&
+      echo 'bucket listo';
+      "
+
+volumes:
+  pgdata:
+  redisdata:
+  rabbitmqdata:
+  miniodata:
