@@ -67,6 +67,26 @@ pnpm --filter @percepta/contracts build
 pnpm dev
 ```
 
+### Entorno Python (`ai-worker`)
+
+```bash
+# Crear venv e instalar contratos + worker (py-contracts PRIMERO: pip resuelve
+# la dependencia local 'percepta-contracts' desde lo ya instalado)
+python -m venv .venv
+.venv/Scripts/pip install -e packages/py-contracts
+.venv/Scripts/pip install -e apps/ai-worker
+
+# Arrancar el worker (descubre los plugins de ./modules y expone /health en :3010)
+AI_MODULES_PATH=./modules .venv/Scripts/python -m ai_worker.main
+```
+
+### Verificación rápida
+
+```bash
+# 18 escenarios del slice MVP (evaluador de reglas + workflow human-in-the-loop)
+pnpm smoke
+```
+
 Servicios de infra expuestos en dev:
 
 | Servicio | URL |
