@@ -87,6 +87,40 @@ AI_MODULES_PATH=./modules .venv/Scripts/python -m ai_worker.main
 pnpm smoke
 ```
 
+## Probar el `event-service`
+
+Es el primer servicio conectado a la base de verdad. Con la infra levantada y el esquema aplicado:
+
+```bash
+node apps/event-service/dist/main.js
+```
+
+Y en otra terminal, la demo del ciclo completo de una alerta:
+
+```bash
+pnpm demo
+```
+
+Recorre el workflow human-in-the-loop (nueva → reconocida → resuelta) y comprueba los
+controles de seguridad: saltear la revisión humana da 422, un auditor sin permiso 403,
+otro tenant 404 y sin token 401.
+
+Para hacer peticiones a mano necesitás un token (aún no hay `identity-service`):
+
+```bash
+pnpm token operator
+```
+
+| Comando | Para qué |
+|---|---|
+| `pnpm demo` | Recorre el workflow completo y los controles de seguridad |
+| `pnpm demo:seed-event` | Crea una alerta nueva de ejemplo |
+| `pnpm token <rol>` | Emite un token de desarrollo (`operator`, `org_admin`, `auditor`, `site_admin`, `platform_superadmin`) |
+| `pnpm db:reset` | Recrea la base desde cero y vuelve a migrar |
+
+> ⚠️ `tools/dev-token.js` es **solo para desarrollo**: firma tokens con el secreto del `.env`.
+> Los emitirá `identity-service` cuando exista.
+
 Servicios de infra expuestos en dev:
 
 | Servicio | URL |
