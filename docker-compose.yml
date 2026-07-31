@@ -12,7 +12,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-percepta}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-percepta_dev_pw}
     ports:
-      - "5432:5432"
+      # 5433 en el host: el 5432 suele estar tomado por un PostgreSQL nativo
+      # instalado en la máquina. Dentro de la red de Docker sigue siendo 5432.
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db/migrations:/migrations:ro
