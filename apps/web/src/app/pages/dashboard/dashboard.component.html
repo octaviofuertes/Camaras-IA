@@ -1,0 +1,234 @@
+<px-page-header
+  title="Dashboard"
+  subtitle="Resumen general del sistema"
+  [showDateRange]="true"
+/>
+
+<div class="page">
+  <!-- KPIs -->
+  <section class="kpis">
+    <div class="panel kpi">
+      <div class="kpi-icon" style="background: rgba(59,130,246,.15); color: #60a5fa">
+        <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="6" width="14" height="12" rx="2" /><path d="m16 11 6-3v8l-6-3z" />
+        </svg>
+      </div>
+      <div class="kpi-body">
+        <div class="kpi-label">Cámaras conectadas</div>
+        <div class="kpi-value">48 <span class="kpi-of">/ 52</span></div>
+        <div class="kpi-delta up">92% en línea</div>
+      </div>
+    </div>
+
+    <div class="panel kpi">
+      <div class="kpi-icon" style="background: rgba(34,197,94,.15); color: #4ade80">
+        <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 12h4l3 8 4-16 3 8h4" />
+        </svg>
+      </div>
+      <div class="kpi-body">
+        <div class="kpi-label">Eventos hoy</div>
+        <div class="kpi-value">124</div>
+        <div class="kpi-delta up">↑ 18% vs ayer</div>
+      </div>
+    </div>
+
+    <div class="panel kpi">
+      <div class="kpi-icon" style="background: rgba(239,68,68,.15); color: #f87171">
+        <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 3 2 20h20L12 3Z" /><path d="M12 10v4M12 17.5v.5" />
+        </svg>
+      </div>
+      <div class="kpi-body">
+        <div class="kpi-label">Eventos críticos</div>
+        <div class="kpi-value">24</div>
+        <div class="kpi-delta down">↑ 33% vs ayer</div>
+      </div>
+    </div>
+
+    <div class="panel kpi">
+      <div class="kpi-icon" style="background: rgba(234,179,8,.15); color: #facc15">
+        <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="9" cy="8" r="3" /><path d="M3 20a6 6 0 0 1 12 0" /><circle cx="17" cy="8" r="2.4" />
+        </svg>
+      </div>
+      <div class="kpi-body">
+        <div class="kpi-label">Personas detectadas</div>
+        <div class="kpi-value">1.429</div>
+        <div class="kpi-delta up">↑ 12% vs ayer</div>
+      </div>
+    </div>
+
+    <div class="panel kpi">
+      <div class="kpi-icon" style="background: rgba(139,92,246,.15); color: #a78bfa">
+        <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="4" width="18" height="7" rx="2" /><rect x="3" y="13" width="18" height="7" rx="2" />
+          <path d="M7 7.5v.01M7 16.5v.01" />
+        </svg>
+      </div>
+      <div class="kpi-body">
+        <div class="kpi-label">Almacenamiento</div>
+        <div class="kpi-value">2.45 <span class="kpi-of">TB / 10 TB</span></div>
+        <div class="bar"><i style="width: 24%"></i></div>
+      </div>
+      <span class="kpi-pct">24%</span>
+    </div>
+  </section>
+
+  <!-- Cámaras en vivo + Eventos recientes -->
+  <section class="mid">
+    <div class="panel">
+      <div class="panel-head">
+        <h2 class="panel-title">
+          Cámaras en vivo
+          <span class="mute" style="font-weight: 400; font-size: 12.5px">• {{ cameras.length }} en línea</span>
+        </h2>
+        <div class="head-actions">
+          <button class="icon-btn active" title="Cuadrícula">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
+            </svg>
+          </button>
+          <button class="icon-btn" title="Mosaico">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="11" height="18" rx="1" /><rect x="16" y="3" width="5" height="8" rx="1" />
+              <rect x="16" y="13" width="5" height="8" rx="1" />
+            </svg>
+          </button>
+          <button class="select-sm">
+            Todas las cámaras
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </button>
+          <button class="icon-btn" title="Pantalla completa">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="cam-grid">
+        <article class="cam" *ngFor="let cam of cameras">
+          <header class="cam-head">
+            <span class="cam-name">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
+              </svg>
+              {{ cam.code }} - {{ cam.name }}
+            </span>
+            <span class="cam-status"><i class="dot"></i>En línea</span>
+          </header>
+          <px-camera-feed [scene]="cam.thumbnail" [live]="cam.code === '01' || cam.code === '02'" />
+          <footer class="cam-actions">
+            <button class="icon-btn" title="Grabar">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="6" width="14" height="12" rx="2" /><path d="m16 11 6-3v8l-6-3z" />
+              </svg>
+            </button>
+            <button class="icon-btn" title="Zoom">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
+              </svg>
+            </button>
+            <button class="icon-btn" title="Configurar">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H1a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 2.6 7a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H7a1.6 1.6 0 0 0 1-1.5V1a2 2 0 1 1 4 0v.1A1.6 1.6 0 0 0 15 2.6a1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V7a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z" />
+              </svg>
+            </button>
+            <span class="rec"></span>
+          </footer>
+        </article>
+      </div>
+    </div>
+
+    <!-- Eventos recientes -->
+    <div class="panel">
+      <div class="panel-head">
+        <h2 class="panel-title">Eventos recientes</h2>
+        <a routerLink="/eventos" class="link">Ver todos</a>
+      </div>
+      <div class="ev-list">
+        <article class="ev" *ngFor="let e of events; trackBy: trackEvent">
+          <px-module-icon
+            [icon]="moduleIcon(e.moduleKey).icon"
+            [color]="moduleIcon(e.moduleKey).color"
+            [size]="40"
+          />
+          <div class="ev-body">
+            <div class="ev-title">{{ e.title }}</div>
+            <div class="ev-meta">{{ e.siteName }} - {{ e.cameraName }}</div>
+            <div class="ev-foot">
+              <span class="badge" [ngClass]="sevClass[e.severity]">{{ sevLabel[e.severity] }}</span>
+              <span class="ev-time">{{ e.occurredAt }}</span>
+            </div>
+          </div>
+          <div class="ev-thumb"><px-camera-feed [scene]="'warehouse'" [compact]="true" [timestamp]="''" /></div>
+        </article>
+      </div>
+      <div class="panel-foot"><a routerLink="/eventos" class="link">Ver todos</a></div>
+    </div>
+  </section>
+
+  <!-- Analítica -->
+  <section class="charts">
+    <div class="panel">
+      <div class="panel-head"><h2 class="panel-title">Eventos por tipo (hoy)</h2></div>
+      <div class="donut-wrap">
+        <svg viewBox="0 0 100 100" class="donut">
+          <circle
+            *ngFor="let s of donut"
+            cx="50" cy="50" r="42"
+            fill="none"
+            [attr.stroke]="s.color"
+            stroke-width="13"
+            [attr.stroke-dasharray]="s.dash"
+            [attr.stroke-dashoffset]="s.offset"
+            transform="rotate(-90 50 50)"
+          />
+          <text x="50" y="47" text-anchor="middle" class="d-total">{{ totalByType }}</text>
+          <text x="50" y="60" text-anchor="middle" class="d-sub">Total</text>
+        </svg>
+        <ul class="legend">
+          <li *ngFor="let s of donut">
+            <i [style.background]="s.color"></i>
+            <span class="l-name">{{ s.label }}</span>
+            <span class="l-val">{{ s.value }} <span class="mute">({{ s.pct }}%)</span></span>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2 class="panel-title">Eventos por hora (hoy)</h2></div>
+      <div class="area-wrap">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" class="area">
+          <defs>
+            <linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.45" />
+              <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.02" />
+            </linearGradient>
+          </defs>
+          <path [attr.d]="areaPath" fill="url(#ag)" />
+          <path [attr.d]="linePath" fill="none" stroke="#60a5fa" stroke-width="1.4" vector-effect="non-scaling-stroke" />
+        </svg>
+        <div class="x-axis"><span>00:00</span><span>04:00</span><span>08:00</span><span>12:00</span><span>16:00</span><span>20:00</span><span>24:00</span></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2 class="panel-title">Top módulos IA</h2></div>
+      <ul class="top-list">
+        <li *ngFor="let m of topModules">
+          <px-module-icon [icon]="m.icon" [color]="m.color" [size]="32" />
+          <span class="t-name">{{ m.name }}</span>
+          <span class="t-bar"><i [style.width.%]="m.pct" [style.background]="m.color"></i></span>
+          <span class="t-pct">{{ m.pct }}%</span>
+        </li>
+      </ul>
+    </div>
+  </section>
+</div>

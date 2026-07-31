@@ -1,0 +1,129 @@
+.page {
+  padding: 20px 26px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.notice,
+.demo-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 13px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.notice {
+  background: rgba(59, 130, 246, 0.09);
+  border: 1px solid rgba(59, 130, 246, 0.28);
+  color: #bfdbfe;
+}
+.demo-banner {
+  background: rgba(245, 158, 11, 0.09);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fcd34d;
+}
+.notice svg,
+.demo-banner svg { flex-shrink: 0; margin-top: 1px; }
+code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11.5px;
+}
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 1300px) { .split { grid-template-columns: 1fr; } }
+
+.filters { display: flex; flex-wrap: wrap; gap: 7px; }
+
+.loading {
+  display: flex; align-items: center; gap: 10px;
+  padding: 30px; color: var(--text-dim); font-size: 13px;
+}
+
+/* ─── Tabla ────────────────────────────────────────────── */
+.tbl { width: 100%; border-collapse: collapse; }
+.tbl th {
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-mute);
+  font-weight: 600;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.tbl td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  vertical-align: middle;
+}
+.tbl tbody tr { cursor: pointer; }
+.tbl tbody tr:hover { background: var(--panel-2); }
+.tbl tbody tr.sel { background: var(--accent-soft); }
+
+.cell-ev { display: flex; align-items: center; gap: 11px; }
+.ev-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+.time { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.conf { display: flex; align-items: center; gap: 8px; }
+.conf-bar {
+  width: 58px; height: 5px;
+  background: var(--panel-2);
+  border-radius: 3px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.conf-bar i { display: block; height: 100%; background: var(--accent-light); }
+.conf-num { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text-dim); }
+
+.status {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+  background: var(--panel-2);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+.status[data-s='new'] { background: rgba(59, 130, 246, 0.16); color: #93c5fd; border-color: transparent; }
+.status[data-s='acknowledged'] { background: rgba(234, 179, 8, 0.16); color: #fcd34d; border-color: transparent; }
+.status[data-s='confirmed'] { background: rgba(239, 68, 68, 0.16); color: #fca5a5; border-color: transparent; }
+.status[data-s='false_positive'] { background: rgba(34, 197, 94, 0.14); color: #86efac; border-color: transparent; }
+
+.actions { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.btn.sm { padding: 6px 11px; font-size: 12px; }
+.btn.sm.ok { border-color: rgba(34, 197, 94, 0.4); color: #86efac; }
+.btn.sm.ok:hover { background: rgba(34, 197, 94, 0.14); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.closed { font-size: 12px; }
+
+/* ─── Detalle ──────────────────────────────────────────── */
+.detail { position: sticky; top: 20px; }
+.detail-body { padding: 16px 18px 20px; display: flex; flex-direction: column; gap: 15px; }
+.d-title { display: flex; align-items: center; gap: 11px; }
+.d-list { margin: 0; display: flex; flex-direction: column; gap: 9px; }
+.d-list > div {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; font-size: 12.5px;
+}
+.d-list dt { color: var(--text-dim); }
+.d-list dd { margin: 0; font-weight: 500; text-align: right; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.clip-note {
+  font-size: 11.5px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  line-height: 1.5;
+}

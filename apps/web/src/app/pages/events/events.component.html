@@ -1,0 +1,160 @@
+<px-page-header title="Eventos" subtitle="Alertas de asistencia para revisión humana" [showDateRange]="true" />
+
+<div class="page">
+  <!-- Aviso: los eventos son asistencia, no decisiones automáticas -->
+  <div class="notice">
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8v.01" />
+    </svg>
+    <span>
+      Cada detección es una <strong>alerta de asistencia</strong> con su nivel de confianza.
+      Ninguna acción se toma automáticamente: requiere revisión y confirmación de un operador.
+    </span>
+  </div>
+
+  <div class="demo-banner" *ngIf="demoMode">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M12 3 2 20h20L12 3Z" /><path d="M12 10v4M12 17.5v.5" />
+    </svg>
+    <span>
+      <strong>Modo demostración</strong> — la API no respondió. Se muestran datos de ejemplo y las
+      acciones de revisión están deshabilitadas. Levantá <code>event-service</code> y guardá un token
+      con <code>localStorage.setItem('px_token', '&lt;token&gt;')</code>.
+    </span>
+  </div>
+
+  <section class="split">
+    <div class="panel">
+      <div class="panel-head">
+        <h2 class="panel-title">
+          Cola de revisión
+          <span class="mute" style="font-weight: 400; font-size: 12.5px">
+            • {{ events.length }} evento(s)
+          </span>
+        </h2>
+        <div class="filters">
+          <button
+            class="chip"
+            *ngFor="let f of filters"
+            [class.active]="activeFilter === f.key"
+            (click)="setFilter(f.key)"
+          >
+            {{ f.label }}
+          </button>
+        </div>
+      </div>
+
+      <div class="loading" *ngIf="loading"><span class="spinner"></span> Cargando eventos…</div>
+
+      <div class="empty" *ngIf="!loading && !events.length">
+        No hay eventos que coincidan con este filtro.
+      </div>
+
+      <table class="tbl" *ngIf="!loading && events.length">
+        <thead>
+          <tr>
+            <th>Evento</th>
+            <th>Ubicación</th>
+            <th>Confianza</th>
+            <th>Estado</th>
+            <th>Hora</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            *ngFor="let e of events; trackBy: trackEvent"
+            (click)="select(e)"
+            [class.sel]="selected?.id === e.id"
+          >
+            <td>
+              <div class="cell-ev">
+                <px-module-icon
+                  [icon]="moduleIcon(e.moduleKey).icon"
+                  [color]="moduleIcon(e.moduleKey).color"
+                  [size]="34"
+                />
+                <div>
+                  <div class="ev-title">{{ e.title }}</div>
+                  <span class="badge" [ngClass]="sevClass[e.severity]">{{ sevLabel[e.severity] }}</span>
+                </div>
+              </div>
+            </td>
+            <td class="muted">{{ e.siteName }} · {{ e.cameraName }}</td>
+            <td>
+              <div class="conf">
+                <span class="conf-bar"><i [style.width.%]="confidencePct(e.confidence)"></i></span>
+                <span class="conf-num">{{ confidencePct(e.confidence) }}%</span>
+              </div>
+            </td>
+            <td>
+              <span class="status" [attr.data-s]="e.status">{{ statusLabel[e.status] }}</span>
+            </td>
+            <td class="muted time">{{ e.occurredAt }}</td>
+            <td class="actions" (click)="$event.stopPropagation()">
+              <span class="spinner" *ngIf="busy === e.id"></span>
+              <ng-container *ngIf="busy !== e.id">
+                <button
+                  class="btn sm"
+                  *ngIf="e.status === 'new'"
+                  [disabled]="demoMode"
+                  (click)="acknowledge(e)"
+                >
+                  Reconocer
+                </button>
+                <ng-container *ngIf="e.status === 'acknowledged'">
+                  <button class="btn sm ok" [disabled]="demoMode" (click)="resolve(e, 'confirmed')">
+                    Confirmar
+                  </button>
+                  <button class="btn sm" [disabled]="demoMode" (click)="resolve(e, 'false_positive')">
+                    Falso positivo
+                  </button>
+                </ng-container>
+                <span class="mute closed" *ngIf="e.status !== 'new' && e.status !== 'acknowledged'">
+                  Revisado
+                </span>
+              </ng-container>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Detalle / evidencia -->
+    <div class="panel detail">
+      <div class="panel-head"><h2 class="panel-title">Evidencia</h2></div>
+
+      <div class="empty" *ngIf="!selected">Seleccioná un evento para ver su evidencia.</div>
+
+      <div class="detail-body" *ngIf="selected as e">
+        <px-camera-feed [scene]="'warehouse'" [timestamp]="e.occurredAt" />
+
+        <div class="d-title">
+          <px-module-icon
+            [icon]="moduleIcon(e.moduleKey).icon"
+            [color]="moduleIcon(e.moduleKey).color"
+            [size]="34"
+          />
+          <div>
+            <div class="ev-title">{{ e.title }}</div>
+            <div class="mute" style="font-size: 11.5px">{{ e.eventType }}</div>
+          </div>
+        </div>
+
+        <dl class="d-list">
+          <div><dt>Ubicación</dt><dd>{{ e.siteName }} · {{ e.cameraName }}</dd></div>
+          <div><dt>Módulo</dt><dd>{{ e.moduleKey }}</dd></div>
+          <div><dt>Confianza IA</dt><dd>{{ confidencePct(e.confidence) }}%</dd></div>
+          <div><dt>Severidad</dt><dd><span class="badge" [ngClass]="sevClass[e.severity]">{{ sevLabel[e.severity] }}</span></dd></div>
+          <div><dt>Estado</dt><dd><span class="status" [attr.data-s]="e.status">{{ statusLabel[e.status] }}</span></dd></div>
+          <div><dt>Hora</dt><dd>{{ e.occurredAt }}</dd></div>
+          <div *ngIf="e.reviewedBy"><dt>Revisado por</dt><dd class="mono">{{ e.reviewedBy }}</dd></div>
+        </dl>
+
+        <div class="clip-note mute">
+          El clip incluye 10 s previos al evento, el momento y 10 s posteriores.
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
