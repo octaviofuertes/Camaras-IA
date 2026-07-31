@@ -10,22 +10,30 @@ import os
 
 from fastapi import FastAPI
 
-from ai_worker.loader import discover_modules
+from ai_worker.loader import discover
 
 app = FastAPI(title="percepta-ai-worker")
 
 MODULES_PATH = os.environ.get("AI_MODULES_PATH", "./modules")
-_discovered = discover_modules(MODULES_PATH)
+_discovery = discover(MODULES_PATH)
 
 
 @app.get("/health")
 def health() -> dict:
+    """Estado del worker.
+
+    ok=False si algún módulo falló al cargar: un fallo silencioso significaría
+    que una cámara cree tener una capacidad activa que en realidad no corre.
+    """
     return {
-        "ok": True,
+        "ok": not _discovery.failed,
         "service": "ai-worker",
         "device": os.environ.get("AI_WORKER_DEVICE", "cpu"),
         "modules": [
-            {"moduleKey": m.module_key, "version": m.version} for m in _discovered
+            {"moduleKey": m.module_key, "version": m.version} for m in _discovery.loaded
+        ],
+        "failedModules": [
+            {"name": f.name, "reason": f.reason} for f in _discovery.failed
         ],
     }
 

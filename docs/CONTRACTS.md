@@ -2,7 +2,7 @@
 
 > **Este documento gana.** Ante cualquier discrepancia de *contrato de detalle* (nombre de columna, enum, firma de manifest, ruta de endpoint, serialización) entre este archivo y las secciones `00`–`09`, **prevalece lo definido aquí**. Las secciones describen la arquitectura y el *porqué*; este archivo congela el *cómo exacto* que el código debe respetar. Todo lo aquí definido vive físicamente en `packages/contracts` y `packages/py-contracts` del monorepo y se genera/valida en CI.
 
-**Versión del contrato:** `v1.0.2` · **Fecha:** 2026-07-30 · **Estado:** congelado para Fase 1 (MVP) — **esquema verificado contra PostgreSQL 15 + TimescaleDB real**.
+**Versión del contrato:** `v1.0.3` · **Fecha:** 2026-07-31 · **Estado:** congelado para Fase 1 (MVP) — **esquema verificado contra PostgreSQL 15 + TimescaleDB 2.28.3 real y auditado adversarialmente**.
 **Regla de cambio:** cualquier modificación a este archivo es un cambio de contrato → bump semver + entrada en el changelog al final + regeneración de tipos (`proto`, `ts`, `py`) + migración de BD si aplica.
 
 Resuelve las 4 inconsistencias **bloqueantes** y las 11 **importantes/menores** listadas en [`00-vision-general-y-decisiones.md`](00-vision-general-y-decisiones.md#inconsistencias-detectadas).
@@ -368,7 +368,7 @@ CREATE POLICY events_tenant_isolation ON events
 
 Como la PK de `events` es compuesta `(id, occurred_at)`, **toda** referencia debe serlo. Se elimina la variante `evidences.event_id UUID` a secas.
 
-> **v1.0.1 — referencia lógica, no FK física:** TimescaleDB **no soporta** foreign keys desde tablas planas *hacia* hypertables. Por lo tanto `(event_id, event_occurred_at)` es una **referencia lógica**: la integridad la garantiza `event-service` (único escritor de ambas tablas) y la limpieza se alinea con la retención de `events` (el job que hace `drop_chunks` borra las evidencias del rango). El par de columnas y el índice compuesto se mantienen exactamente como estaban.
+> **v1.0.3 — FK física restaurada (corrige un error de v1.0.1).** La nota anterior afirmaba que TimescaleDB no soporta foreign keys hacia hypertables. **Es falso** en TimescaleDB 2.28.3: la FK compuesta se crea y **se hace cumplir** (verificado — un `INSERT` de evidencia con `event_id` inexistente es rechazado). La restricción se restaura en `db/migrations/0003_rls_hardening.sql`. Lección: la afirmación de v1.0.1 se documentó como "límite real" sin haberla probado contra el motor.
 
 ```sql
 CREATE TABLE evidences (
@@ -651,6 +651,7 @@ Al implementar, alinear cada sección a este contrato:
 
 | Versión | Fecha | Cambio |
 |---------|-------|--------|
+| v1.0.3 | 2026-07-31 | **Auditoría adversarial** (fugas cross-tenant confirmadas y corregidas en `0003_rls_hardening.sql`): (a) `audit_logs`, `organizations`, `roles`, `user_roles`, `role_permissions` estaban **sin RLS** — un tenant leía y escribía registros de otra organización; `audit_logs` pasa además a **append-only** (`REVOKE UPDATE, DELETE`); (b) las policies `FOR ALL` de `ai_modules`/`users` usaban `USING (organization_id IS NULL OR …)` **sin `WITH CHECK`** — Postgres reutiliza `USING` como check de escritura, habilitando **mutar el catálogo global desde cualquier tenant**; ahora la visibilidad (`FOR SELECT`) está separada de la mutación; (c) **FK `evidences → events` restaurada**: la justificación de v1.0.1 para quitarla era incorrecta. |
 | v1.0.2 | 2026-07-30 | Verificado contra TimescaleDB pg15 real: (a) compresión columnar **eliminada** de `events`/`audit_logs` — incompatible con RLS (`columnstore cannot be used on table with row security`); la palanca de costo pasa a ser la retención por `drop_chunks`; (b) rol de conexión de aplicación **`percepta_app`** (`LOGIN NOBYPASSRLS`, no superuser) añadido a la migración canónica — los servicios se conectan con él para que `FORCE ROW LEVEL SECURITY` sea inevitable; el superusuario queda solo para migraciones/operación; (c) fix de overflow en el shim `uuidv7()` (máscara en bigint antes del cast a int4). Invariantes probadas en vivo: RLS bloquea lecturas y escrituras cross-tenant; `events_human_review_chk` impide transiciones sin revisor humano. |
 | v1.0.1 | 2026-07-30 | Correcciones por límites reales de TimescaleDB: (a) `events` sin dimensión de espacio por `organization_id` (incompatible con la PK/índices únicos declarados); (b) `evidences`/`notifications` → `events` pasa de FK física a **referencia lógica compuesta** (TimescaleDB no soporta FKs hacia hypertables); integridad a cargo de `event-service` y de los jobs de retención. |
 | v1.0.0 | 2026-07-30 | Contrato inicial. Resuelve las 4 bloqueantes (events, PerceptaModule, module.json, Protobuf) y unifica enums de estado/status, catálogo de permisos, endpoint WHEP, referencia de evidencias, `confidence`, topología de colas y multitenancy de `ai_modules`. |
