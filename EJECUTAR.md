@@ -24,57 +24,49 @@ Si es la primera vez o querés empezar de cero:
 pnpm db:reset
 ```
 
-## 2. Los cuatro servicios
-
-Cada uno en su propia terminal.
-
-**a) event-service** (API de eventos, puerto 3004)
+## 2. Todo el stack, un comando
 
 ```bash
-node apps/event-service/dist/main.js
+pnpm start
 ```
 
-**b) media-service** (captura de video, puerto 3020)
+Levanta los cinco servicios (device, event, media, ai-worker y dashboard), espera a que
+cada uno esté listo antes de arrancar el siguiente, y al final imprime la línea con el
+token para iniciar sesión. `Ctrl+C` detiene todo.
 
-```bash
-.venv/Scripts/python -m media_service.main
-```
-
-**c) ai-worker** (inferencia YOLO, puerto 3010) — necesita un token de servicio:
-
-```bash
-SERVICE_TOKEN=$(node tools/dev-token.js service) AI_MODULES_PATH=./modules PIPELINE_FPS=3 .venv/Scripts/python -m ai_worker.main
-```
-
-**d) dashboard** (puerto 4200)
-
-```bash
-cd apps/web && npx ng serve
-```
+| Servicio | Puerto | Qué hace |
+|---|---|---|
+| device-service | 3003 | Cámaras, catálogo de módulos y asignaciones |
+| event-service | 3004 | Eventos y workflow de revisión |
+| ai-worker | 3010 | Inferencia YOLO por cámara |
+| media-service | 3020 | Captura de video, snapshots y clips |
+| dashboard | 4200 | Interfaz web |
 
 ## 3. Entrar al dashboard
 
-Abrí **http://localhost:4200**. Para ver eventos reales necesitás un token de operador:
+Abrí **http://localhost:4200** y pegá en la consola del navegador (F12) la línea que
+imprimió `pnpm start`. Si la perdiste:
 
 ```bash
-node tools/dev-token.js operator
+pnpm token
 ```
 
-Copialo y pegalo en la consola del navegador (F12):
-
-```js
-localStorage.setItem('px_token', 'PEGAR_TOKEN_ACA'); location.reload();
-```
-
-> El token dura 15 minutos. Cuando expire, generá otro. Esto desaparece cuando exista `identity-service` con login real.
+> El token dura 8 horas. Desaparece cuando exista `identity-service` con login real.
 
 ---
 
 ## Configurar cámaras
 
-### Webcams USB (las actuales)
+### Desde el dashboard (recomendado)
 
-`cameras.json` en la raíz. Hay **dos cámaras configuradas como fuentes independientes**:
+En **Cámaras → Agregar cámara**: nombre, tipo (USB o IP/WiFi), origen y fps. La cámara
+se guarda en la base y `media-service` la detecta y empieza a capturar en menos de 10 s,
+sin reiniciar nada. Para asignarle capacidades, arrastrá un módulo del catálogo sobre
+ella: eso escribe `camera_module_configs` y el `ai-worker` lo levanta en su próximo ciclo.
+
+### Las cámaras actuales
+
+Hay **dos webcams configuradas como fuentes independientes**:
 
 | `source` | Dispositivo | Nombre en el sistema |
 |---|---|---|
@@ -107,14 +99,17 @@ Para encontrar la URL RTSP de tu cámara, buscá el modelo + "rtsp url". Formato
 | Reolink | `rtsp://user:pass@IP:554/h264Preview_01_main` |
 | ONVIF genérica | `rtsp://user:pass@IP:554/onvif1` |
 
-Toda cámara nueva necesita además su fila en la tabla `cameras` y su asignación de módulos
-(hoy en `assignments.json`; cuando exista `device-service` se hará desde el dashboard).
+Cargala desde **Agregar cámara** eligiendo *Cámara IP / WiFi* y pegando la URL.
 
 ---
 
 ## Ajustar la sensibilidad
 
-En `assignments.json`, dentro de `config`:
+Cada asignación cámara↔módulo tiene su propia configuración en `camera_module_configs.config`.
+Las dos cámaras actuales están deliberadamente distintas: la integrada alerta con 1 persona;
+la Logitech, sólo con 3 o más (regla de aglomeración).
+
+Parámetros:
 
 | Parámetro | Qué hace |
 |---|---|
@@ -124,7 +119,7 @@ En `assignments.json`, dentro de `config`:
 | `minPersons` | Cuántas personas simultáneas disparan la alerta |
 | `classes` | Qué detectar: `person`, `car`, `truck`, `backpack`… |
 
-Después de cambiarlo, reiniciá el `ai-worker`.
+Después de cambiarlos, el `ai-worker` los toma al reiniciarse.
 
 ---
 
@@ -150,6 +145,6 @@ docker compose exec -T postgres psql "postgresql://percepta_app:percepta_app_dev
 
 ## Estado real
 
-**Funciona de verdad:** captura simultánea de varias cámaras USB/RTSP con reconexión · detección YOLO de personas y vehículos · reglas de confianza/persistencia/cooldown · eventos persistidos con aislamiento multi-tenant · workflow de revisión humana con auditoría · video en vivo con cajas de detección.
+**Funciona de verdad:** alta y baja de cámaras desde el dashboard · asignación de módulos por drag & drop que persiste en la base · captura simultánea de varias cámaras USB/RTSP con reconexión · detección YOLO de personas y vehículos · reglas de confianza/persistencia/cooldown · eventos persistidos con aislamiento multi-tenant · workflow de revisión humana con auditoría · video en vivo con cajas de detección.
 
-**Todavía no:** el alta de cámaras desde el dashboard (falta `device-service`), el drag & drop no persiste en la base, los clips se guardan en disco pero no suben a MinIO, no hay login (se usan tokens de desarrollo), y `helmet-detection` sigue siendo un stub — **detectar EPP necesita un modelo entrenado para eso**, que YOLO base no trae.
+**Todavía no:** los clips se guardan en disco pero no suben a MinIO, no hay login (se usan tokens de desarrollo), y `helmet-detection` sigue siendo un stub — **detectar EPP necesita un modelo entrenado para eso**, que YOLO base no trae.

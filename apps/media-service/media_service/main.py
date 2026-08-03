@@ -27,7 +27,7 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import StreamingResponse
 
 from .clips import build_clip
-from .source import CameraSource
+from .registry import CameraRegistry
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("media-service")
@@ -35,59 +35,22 @@ log = logging.getLogger("media-service")
 app = FastAPI(title="percepta-media-service")
 
 EVIDENCE_DIR = Path(os.environ.get("EVIDENCE_DIR", "./.data/evidence"))
-SOURCES_FILE = Path(os.environ.get("CAMERA_SOURCES", "./cameras.json"))
 
-_sources: dict[str, CameraSource] = {}
-
-
-def _parse_source(raw: str | int) -> str | int:
-    """'0' -> índice de webcam USB; 'rtsp://…' -> URL de cámara IP."""
-    if isinstance(raw, int):
-        return raw
-    s = str(raw).strip()
-    return int(s) if s.isdigit() else s
-
-
-def load_sources() -> None:
-    """Carga las cámaras desde cameras.json (o una webcam por defecto)."""
-    if SOURCES_FILE.is_file():
-        cfg = json.loads(SOURCES_FILE.read_text(encoding="utf-8"))
-    else:
-        cfg = [{"id": "cam-usb-0", "name": "Webcam local", "source": 0}]
-        log.warning("%s no existe; usando webcam 0 por defecto", SOURCES_FILE)
-
-    delay = 0.0
-    for c in cfg:
-        if not c.get("enabled", True):
-            continue
-        cam_id = c["id"]
-        src = CameraSource(
-            camera_id=cam_id,
-            source=_parse_source(c["source"]),
-            width=int(c.get("width", 1280)),
-            height=int(c.get("height", 720)),
-            target_fps=float(c.get("fps", 12)),
-        )
-        _sources[cam_id] = src
-        src.start(delay=delay)
-        log.info("cámara registrada: %s -> %r (arranque en +%.0fs)", cam_id, c["source"], delay)
-        # Escalonar: abrir dos cámaras USB simultáneamente cuelga el driver.
-        delay += 4.0 if isinstance(src.source, int) else 0.5
+_registry = CameraRegistry()
 
 
 @app.on_event("startup")
 def _startup() -> None:
-    load_sources()
+    _registry.start()
 
 
 @app.on_event("shutdown")
 def _shutdown() -> None:
-    for s in _sources.values():
-        s.stop()
+    _registry.stop()
 
 
-def _get(camera_id: str) -> CameraSource:
-    src = _sources.get(camera_id)
+def _get(camera_id: str):
+    src = _registry.get(camera_id)
     if src is None:
         raise HTTPException(status_code=404, detail=f"cámara {camera_id} no registrada")
     return src
@@ -95,18 +58,21 @@ def _get(camera_id: str) -> CameraSource:
 
 @app.get("/health")
 def health() -> dict:
-    connected = [s for s in _sources.values() if s.connected]
+    stats = _registry.stats()
+    connected = [s for s in stats if s["connected"]]
     return {
-        "ok": bool(connected),
+        "ok": True,
         "service": "media-service",
-        "cameras": len(_sources),
+        "cameras": len(stats),
         "connected": len(connected),
+        "fuenteConfig": "device-service" if _registry.using_api else "cameras.json",
+        "syncError": _registry.last_sync_error,
     }
 
 
 @app.get("/cameras")
 def list_cameras() -> dict:
-    return {"items": [s.stats() for s in _sources.values()]}
+    return {"items": _registry.stats()}
 
 
 @app.get("/cameras/{camera_id}/snapshot.jpg")

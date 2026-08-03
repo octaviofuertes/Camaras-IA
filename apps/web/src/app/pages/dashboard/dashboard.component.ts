@@ -7,9 +7,9 @@ import { CameraFeedComponent } from '../../shared/camera-feed.component';
 import { ModuleIconComponent } from '../../shared/module-icon.component';
 import { AI_MODULES } from '../../core/catalog';
 import { EVENTS_BY_HOUR, EVENTS_BY_TYPE, TOP_MODULES } from '../../core/demo-data';
-import { CamerasService, type LiveDetection } from '../../core/cameras.service';
+import { CamerasService, type ApiCamera, type LiveDetection, type MediaStatus } from '../../core/cameras.service';
 import { EventsService } from '../../core/events.service';
-import { SEVERITY_CLASS, SEVERITY_LABEL, type Camera, type EventItem } from '../../core/models';
+import { SEVERITY_CLASS, SEVERITY_LABEL, type EventItem } from '../../core/models';
 
 interface DonutSlice {
   label: string;
@@ -32,7 +32,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private readonly eventsApi = inject(EventsService);
   private subs = new Subscription();
 
-  cameras: Camera[] = [];
+  cameras: (ApiCamera & { media?: MediaStatus })[] = [];
   events: EventItem[] = [];
   detections: Record<string, LiveDetection[]> = {};
   camsDemo = false;
@@ -66,13 +66,25 @@ export class DashboardComponent implements OnInit, OnDestroy {
   readonly linePath = this.buildLine(EVENTS_BY_HOUR);
 
   ngOnInit(): void {
-    // Estado de cámaras cada 5 s
+    // Cámaras reales (device-service) cada 8 s
     this.subs.add(
-      interval(5000)
-        .pipe(startWith(0), switchMap(() => this.camsApi.list()))
-        .subscribe((res) => {
-          this.cameras = res.items;
-          this.camsDemo = res.demo;
+      interval(8000)
+        .pipe(startWith(0), switchMap(() => this.camsApi.listCameras()))
+        .subscribe((cams) => {
+          this.camsDemo = cams === null;
+          if (cams === null) return;
+          const prev = new Map(this.cameras.map((c) => [c.id, c.media]));
+          this.cameras = cams.map((c) => ({ ...c, media: prev.get(c.id) }));
+        }),
+    );
+
+    // Estado de captura (media-service) cada 4 s
+    this.subs.add(
+      interval(4000)
+        .pipe(startWith(0), switchMap(() => this.camsApi.mediaStatus()))
+        .subscribe((ms) => {
+          const byId = new Map(ms.map((m) => [m.cameraId, m]));
+          this.cameras.forEach((c) => (c.media = byId.get(c.id)));
         }),
     );
 
@@ -99,15 +111,19 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   get onlineCount(): number {
-    return this.cameras.filter((c) => c.status === 'online').length;
+    return this.cameras.filter((c) => c.media?.connected).length;
   }
 
-  snapshotUrl(cam: Camera): string | null {
-    return cam.live ? this.camsApi.snapshotUrl(cam.id) : null;
+  snapshotUrl(cam: ApiCamera & { media?: MediaStatus }): string | null {
+    return cam.media?.connected ? this.camsApi.snapshotUrl(cam.id) : null;
   }
 
-  detectionsFor(cam: Camera): LiveDetection[] {
+  detectionsFor(cam: ApiCamera): LiveDetection[] {
     return this.detections[cam.id] ?? [];
+  }
+
+  isOnline(cam: ApiCamera & { media?: MediaStatus }): boolean {
+    return !!cam.media?.connected;
   }
 
   private scaleX(i: number, n: number): number {
@@ -138,7 +154,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return e.id;
   }
 
-  trackCam(_: number, c: Camera): string {
+  trackCam(_: number, c: ApiCamera): string {
     return c.id;
   }
 }

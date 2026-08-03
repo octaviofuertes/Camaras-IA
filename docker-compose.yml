@@ -18,6 +18,8 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db/migrations:/migrations:ro
+    # Vuelve a levantarse sola cuando arranca Docker o si el contenedor muere.
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-percepta} -d ${POSTGRES_DB:-percepta}"]
       interval: 5s
@@ -32,6 +34,8 @@ services:
       - "6379:6379"
     volumes:
       - redisdata:/data
+    # Vuelve a levantarse sola cuando arranca Docker o si el contenedor muere.
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -51,6 +55,8 @@ services:
       # Solo el directorio de datos (mnesia), NO todo /var/lib/rabbitmq: montar la raíz
       # rompe los permisos de .erlang.cookie y el broker no arranca ("eacces").
       - rabbitmqdata:/var/lib/rabbitmq/mnesia
+    # Vuelve a levantarse sola cuando arranca Docker o si el contenedor muere.
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -83,6 +89,8 @@ services:
       - "9001:9001"     # consola web
     volumes:
       - miniodata:/data
+    # Vuelve a levantarse sola cuando arranca Docker o si el contenedor muere.
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 10s

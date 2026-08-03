@@ -1,20 +1,44 @@
-import { Component } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { CdkDrag, CdkDragDrop, CdkDropList, CdkDropListGroup } from '@angular/cdk/drag-drop';
+import { Subscription, forkJoin, interval, startWith, switchMap } from 'rxjs';
 import { PageHeaderComponent } from '../../shared/page-header.component';
 import { CameraFeedComponent } from '../../shared/camera-feed.component';
 import { ModuleIconComponent } from '../../shared/module-icon.component';
-import { AI_MODULES, CATEGORY_FILTERS } from '../../core/catalog';
-import { DEMO_CAMERAS } from '../../core/demo-data';
-import { CATEGORY_LABEL, type AiModule, type Camera, type ModuleCategory } from '../../core/models';
+import {
+  CamerasService,
+  type ApiAssignment,
+  type ApiCamera,
+  type ApiModule,
+  type LiveDetection,
+  type MediaStatus,
+} from '../../core/cameras.service';
+import { CATEGORY_LABEL, type ModuleCategory } from '../../core/models';
+import { ICON_BY_CATEGORY, ICON_BY_KEY } from '../../core/module-visuals';
 
 type FilterKey = 'all' | ModuleCategory;
+
+const FILTERS: { key: FilterKey; label: string }[] = [
+  { key: 'all', label: 'Todos' },
+  { key: 'security', label: 'Seguridad' },
+  { key: 'hr', label: 'Personas' },
+  { key: 'productivity', label: 'Operaciones' },
+  { key: 'logistics', label: 'Logística' },
+];
+
+/** Vista compuesta: cámara + su estado de captura + sus módulos. */
+export interface CameraView extends ApiCamera {
+  media?: MediaStatus;
+  assignments: ApiAssignment[];
+}
 
 @Component({
   selector: 'px-cameras',
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
     CdkDrag,
     CdkDropList,
     CdkDropListGroup,
@@ -25,67 +49,231 @@ type FilterKey = 'all' | ModuleCategory;
   templateUrl: './cameras.component.html',
   styleUrls: ['./cameras.component.scss'],
 })
-export class CamerasComponent {
-  readonly filters = CATEGORY_FILTERS;
+export class CamerasComponent implements OnInit, OnDestroy {
+  private readonly api = inject(CamerasService);
+  private subs = new Subscription();
+
+  readonly filters = FILTERS;
   readonly catLabel = CATEGORY_LABEL;
+
+  cameras: CameraView[] = [];
+  modules: ApiModule[] = [];
+  visibleModules: ApiModule[] = [];
+  detections: Record<string, LiveDetection[]> = {};
 
   activeFilter: FilterKey = 'all';
   view: 'grid' | 'list' = 'grid';
-  cameras: Camera[] = DEMO_CAMERAS.map((c) => ({ ...c, modules: [...c.modules] }));
-  visibleModules: AiModule[] = AI_MODULES;
+  loading = true;
+  /** null = la API no respondió (distinto de "no hay cámaras"). */
+  apiDown = false;
+  busy: string | null = null;
+  notice: { text: string; kind: 'ok' | 'error' } | null = null;
 
-  /** Módulo recién asignado, para resaltarlo un instante tras el drop. */
-  private justAssigned: { cameraId: string; moduleKey: string } | null = null;
+  // Formulario de alta
+  showForm = false;
+  form = { name: '', location: '', sourceKind: 'usb' as 'usb' | 'rtsp', usbIndex: '0', rtspUrl: '', fps: 10 };
+  formError: string | null = null;
+  saving = false;
 
+  ngOnInit(): void {
+    this.reload();
+    // Estado de captura y detecciones en vivo
+    this.subs.add(
+      interval(4000).pipe(startWith(0), switchMap(() => this.api.mediaStatus())).subscribe((ms) => {
+        const byId = new Map(ms.map((m) => [m.cameraId, m]));
+        this.cameras.forEach((c) => (c.media = byId.get(c.id)));
+      }),
+    );
+    this.subs.add(
+      interval(1000).pipe(startWith(0), switchMap(() => this.api.detections())).subscribe((d) => (this.detections = d)),
+    );
+    // Refresco periódico de la lista (una cámara nueva aparece sola)
+    this.subs.add(interval(15000).subscribe(() => this.reload(true)));
+  }
+
+  ngOnDestroy(): void {
+    this.subs.unsubscribe();
+  }
+
+  reload(silent = false): void {
+    if (!silent) this.loading = true;
+    forkJoin({
+      cams: this.api.listCameras(),
+      mods: this.api.listModules(),
+      assigns: this.api.listAssignments(),
+    }).subscribe(({ cams, mods, assigns }) => {
+      this.loading = false;
+      this.apiDown = cams === null;
+      if (cams === null) {
+        this.cameras = [];
+        return;
+      }
+      const prevMedia = new Map(this.cameras.map((c) => [c.id, c.media]));
+      this.cameras = cams.map((c) => ({
+        ...c,
+        media: prevMedia.get(c.id),
+        assignments: assigns.filter((a) => a.cameraId === c.id),
+      }));
+      this.modules = mods;
+      this.applyFilter();
+    });
+  }
+
+  // ── catálogo ───────────────────────────────────────────────────────
   setFilter(key: FilterKey): void {
     this.activeFilter = key;
-    this.visibleModules = key === 'all' ? AI_MODULES : AI_MODULES.filter((m) => m.category === key);
+    this.applyFilter();
+  }
+
+  private applyFilter(): void {
+    this.visibleModules =
+      this.activeFilter === 'all' ? this.modules : this.modules.filter((m) => m.category === this.activeFilter);
   }
 
   setView(v: 'grid' | 'list'): void {
     this.view = v;
   }
 
-  modulesOf(cam: Camera): AiModule[] {
-    return cam.modules
-      .map((k) => AI_MODULES.find((m) => m.moduleKey === k))
-      .filter((m): m is AiModule => !!m);
+  iconOf(m: { moduleKey: string; category: ModuleCategory }): { icon: string; color: string } {
+    return ICON_BY_KEY[m.moduleKey] ?? ICON_BY_CATEGORY[m.category] ?? { icon: 'zone', color: '#3b82f6' };
   }
 
+  // ── asignación (drag & drop) ───────────────────────────────────────
   /**
-   * Suelta un módulo sobre una cámara.
-   *
-   * En la API real esto crea una fila en `camera_module_configs` y abre el
-   * formulario de configuración generado desde el `config.schema.json` del
-   * módulo (CONTRACTS §4). Acá se refleja el estado local de inmediato.
+   * Soltar un módulo sobre una cámara PERSISTE la asignación: crea la fila en
+   * camera_module_configs y el ai-worker la levanta en su próximo ciclo.
    */
-  onDrop(event: CdkDragDrop<Camera>, camera: Camera): void {
-    const mod = event.item.data as AiModule | undefined;
+  onDrop(event: CdkDragDrop<CameraView>, camera: CameraView): void {
+    const mod = event.item.data as ApiModule | undefined;
     if (!mod) return;
+    if (camera.assignments.some((a) => a.aiModuleId === mod.id)) {
+      this.flash(`"${mod.name}" ya está asignado a ${camera.name}`, 'error');
+      return;
+    }
 
-    // Una cámara no ejecuta el mismo módulo dos veces:
-    // UNIQUE (camera_id, ai_module_id) en la base.
-    if (camera.modules.includes(mod.moduleKey)) return;
-
-    camera.modules = [...camera.modules, mod.moduleKey];
-    this.justAssigned = { cameraId: camera.id, moduleKey: mod.moduleKey };
-    setTimeout(() => (this.justAssigned = null), 1600);
+    this.busy = camera.id;
+    const config = this.defaultConfigFor(mod);
+    this.api.assignModule(camera.id, mod.id, config).subscribe((ok) => {
+      this.busy = null;
+      if (ok) {
+        this.flash(`"${mod.name}" asignado a ${camera.name}`, 'ok');
+        this.reload(true);
+      } else {
+        this.flash('No se pudo asignar el módulo', 'error');
+      }
+    });
   }
 
-  removeModule(camera: Camera, moduleKey: string): void {
-    camera.modules = camera.modules.filter((k) => k !== moduleKey);
+  /** Valores por defecto tomados del JSON Schema del módulo (CONTRACTS §4). */
+  private defaultConfigFor(m: ApiModule): Record<string, unknown> {
+    const props = (m.configSchema?.['properties'] ?? {}) as Record<string, { default?: unknown }>;
+    const cfg: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(props)) {
+      if (v?.default !== undefined) cfg[k] = v.default;
+    }
+    return cfg;
   }
 
-  isJustAssigned(cameraId: string, moduleKey: string): boolean {
-    const j = this.justAssigned;
-    return !!j && j.cameraId === cameraId && j.moduleKey === moduleKey;
+  removeModule(camera: CameraView, a: ApiAssignment): void {
+    this.busy = camera.id;
+    this.api.unassignModule(camera.id, a.aiModuleId).subscribe((ok) => {
+      this.busy = null;
+      if (ok) {
+        this.flash(`"${a.moduleName}" quitado de ${camera.name}`, 'ok');
+        this.reload(true);
+      } else {
+        this.flash('No se pudo quitar el módulo', 'error');
+      }
+    });
   }
 
-  trackCam(_: number, c: Camera): string {
+  // ── alta de cámara ─────────────────────────────────────────────────
+  openForm(): void {
+    this.showForm = true;
+    this.formError = null;
+    this.form = { name: '', location: '', sourceKind: 'usb', usbIndex: '0', rtspUrl: '', fps: 10 };
+  }
+
+  closeForm(): void {
+    this.showForm = false;
+  }
+
+  saveCamera(): void {
+    const name = this.form.name.trim();
+    const source = this.form.sourceKind === 'usb' ? this.form.usbIndex.trim() : this.form.rtspUrl.trim();
+    if (!name) {
+      this.formError = 'Poné un nombre para la cámara.';
+      return;
+    }
+    if (!source) {
+      this.formError = this.form.sourceKind === 'usb' ? 'Indicá el índice USB.' : 'Pegá la URL RTSP.';
+      return;
+    }
+
+    this.saving = true;
+    this.formError = null;
+    this.api
+      .createCamera({ name, location: this.form.location.trim() || undefined, source, fps: Number(this.form.fps) || 10 })
+      .subscribe((res) => {
+        this.saving = false;
+        if ('error' in res) {
+          this.formError = res.error;
+          return;
+        }
+        this.showForm = false;
+        this.flash(`Cámara "${res.name}" creada. La captura arranca en unos segundos.`, 'ok');
+        this.reload(true);
+      });
+  }
+
+  deleteCamera(c: CameraView): void {
+    if (!confirm(`¿Eliminar la cámara "${c.name}"? Se borran también sus módulos asignados.`)) return;
+    this.busy = c.id;
+    this.api.deleteCamera(c.id).subscribe((ok) => {
+      this.busy = null;
+      this.flash(ok ? `Cámara "${c.name}" eliminada` : 'No se pudo eliminar', ok ? 'ok' : 'error');
+      this.reload(true);
+    });
+  }
+
+  // ── ayudas de vista ────────────────────────────────────────────────
+  snapshotUrl(c: CameraView): string | null {
+    return c.media?.connected ? this.api.snapshotUrl(c.id) : null;
+  }
+
+  detectionsFor(c: CameraView): LiveDetection[] {
+    return this.detections[c.id] ?? [];
+  }
+
+  sourceLabel(c: CameraView): string {
+    if (!c.source) return 'sin origen';
+    return /^\d+$/.test(c.source) ? `USB ${c.source}` : c.source.replace(/\/\/[^@]*@/, '//•••@');
+  }
+
+  statusOf(c: CameraView): { text: string; ok: boolean } {
+    if (c.media?.connected) return { text: 'En línea', ok: true };
+    if (c.media) return { text: c.media.lastError ? 'Sin señal' : 'Conectando…', ok: false };
+    return { text: 'Sin captura', ok: false };
+  }
+
+  get connectedCount(): number {
+    return this.cameras.filter((c) => c.media?.connected).length;
+  }
+
+  get totalAssignments(): number {
+    return this.cameras.reduce((a, c) => a + c.assignments.length, 0);
+  }
+
+  private flash(text: string, kind: 'ok' | 'error'): void {
+    this.notice = { text, kind };
+    setTimeout(() => (this.notice = null), 3800);
+  }
+
+  trackCam(_: number, c: CameraView): string {
     return c.id;
   }
 
-  trackMod(_: number, m: AiModule): string {
+  trackMod(_: number, m: ApiModule): string {
     return m.id;
   }
 }

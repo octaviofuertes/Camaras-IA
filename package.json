@@ -16,13 +16,14 @@
     "contracts:gen": "pnpm --filter @percepta/contracts run gen",
     "demo": "node tools/demo-events.js",
     "demo:seed-event": "docker compose exec -T postgres psql -U percepta -d percepta -c \"SET app.current_org='00000000-0000-4000-b000-000000000001'; INSERT INTO events (occurred_at, organization_id, site_id, camera_id, ai_module_id, module_key, module_version, event_type, severity, confidence, dedup_key, detection) SELECT now(), '00000000-0000-4000-b000-000000000001', s.id, c.id, m.id, 'helmet-detection', '1.2.0', 'ppe.helmet_missing', 'high', 0.9312, 'demo-' || gen_random_uuid(), '{\\\"bbox\\\":[0.4,0.5,0.1,0.2],\\\"classLabel\\\":\\\"no_helmet\\\"}' FROM sites s, cameras c, ai_modules m WHERE m.module_key='helmet-detection' LIMIT 1;\"",
-    "token": "node tools/dev-token.js",
+    "token": "node tools/dev-token.js org_admin",
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down",
     "infra:logs": "docker compose logs -f",
     "db:migrate": "docker compose exec -T postgres psql -U percepta -d percepta -v ON_ERROR_STOP=1 -f /migrations/0001_init.sql -f /migrations/0003_rls_hardening.sql -f /migrations/0002_seed.sql",
     "db:reset": "docker compose exec -T postgres psql -U percepta -d postgres -c \"DROP DATABASE IF EXISTS percepta WITH (FORCE);\" -c \"CREATE DATABASE percepta OWNER percepta;\" && pnpm db:migrate",
-    "smoke": "tsc -p tools/smoke/tsconfig.json && node tools/smoke/build/tools/smoke/smoke.js"
+    "smoke": "tsc -p tools/smoke/tsconfig.json && node tools/smoke/build/tools/smoke/smoke.js",
+    "start": "node tools/start-all.js"
   },
   "devDependencies": {
     "@percepta/contracts": "workspace:*",

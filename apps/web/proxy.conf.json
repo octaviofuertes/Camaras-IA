@@ -6,6 +6,13 @@
     "changeOrigin": true,
     "logLevel": "warn"
   },
+  "/device": {
+    "target": "http://127.0.0.1:3003",
+    "secure": false,
+    "changeOrigin": true,
+    "logLevel": "warn",
+    "pathRewrite": { "^/device": "" }
+  },
   "/media": {
     "target": "http://127.0.0.1:3020",
     "secure": false,

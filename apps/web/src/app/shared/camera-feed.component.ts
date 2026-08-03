@@ -7,6 +7,7 @@ import {
   OnDestroy,
   ViewChild,
   inject,
+  ChangeDetectorRef,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import type { LiveDetection } from '../core/cameras.service';
@@ -208,19 +209,8 @@ export class CameraFeedComponent implements AfterViewInit, OnDestroy {
   private loading = false;
 
   ngAfterViewInit(): void {
-    if (!this.snapshotUrl) return;
-
-    // Sondeo de snapshots en lugar de MJPEG.
-    //
-    // Un <img> con multipart/x-mixed-replace mantiene una conexión HTTP ABIERTA
-    // por cámara. El navegador permite ~6 por host, así que un mosaico de varias
-    // cámaras se queda sin conexiones; además Chrome pinta en negro algunos de
-    // esos streams cuando hay varios a la vez (los datos llegan pero no compone).
-    // Pidiendo un JPEG por cuadro, cada request se cierra enseguida: escala a
-    // muchas cámaras y evita ese fallo de render.
-    //
-    // Se escribe el src del <img> directamente (fuera de la zona de Angular)
-    // para que refrescar el video no cueste un ciclo de detección de cambios.
+    // Ya no retornamos temprano si snapshotUrl no está listo, 
+    // porque tick() lo validará en cada iteración.
     this.zone.runOutsideAngular(() => {
       this.tick();
       this.timer = setInterval(() => this.tick(), Math.max(1000 / this.fps, 80));
@@ -232,6 +222,8 @@ export class CameraFeedComponent implements AfterViewInit, OnDestroy {
   }
 
   /** Pide el siguiente cuadro. No encima pedidos si la red va lenta. */
+  private readonly cdr = inject(ChangeDetectorRef);
+
   private tick(): void {
     const el = this.videoRef?.nativeElement;
     if (!this.snapshotUrl || !el || this.loading) return;
@@ -240,15 +232,17 @@ export class CameraFeedComponent implements AfterViewInit, OnDestroy {
     const url = `${this.snapshotUrl}?t=${Date.now()}`;
     const pre = new Image();
     pre.onload = () => {
-      // Ya está decodificado: al asignarlo, el cambio en pantalla es inmediato
-      // y sin parpadeo.
+      console.log('Imagen cargada OK', url);
       el.src = url;
       this.failed = false;
       this.loading = false;
+      this.cdr.detectChanges();
     };
-    pre.onerror = () => {
+    pre.onerror = (err) => {
+      console.error('Error al cargar imagen', url, err);
       this.failed = true;
       this.loading = false;
+      this.cdr.detectChanges();
     };
     pre.src = url;
   }

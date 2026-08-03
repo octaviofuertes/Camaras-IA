@@ -27,6 +27,7 @@ app = FastAPI(title="percepta-ai-worker")
 MODULES_PATH = os.environ.get("AI_MODULES_PATH", "./modules")
 MEDIA_URL = os.environ.get("MEDIA_SERVICE_URL", "http://localhost:3020")
 EVENT_URL = os.environ.get("EVENT_SERVICE_URL", "http://localhost:3004")
+DEVICE_URL = os.environ.get("DEVICE_SERVICE_URL", "http://127.0.0.1:3003")
 SERVICE_TOKEN = os.environ.get("SERVICE_TOKEN", "")
 DEVICE = os.environ.get("AI_WORKER_DEVICE", "cpu")
 ASSIGNMENTS_FILE = Path(os.environ.get("ASSIGNMENTS_FILE", "./assignments.json"))
@@ -37,16 +38,71 @@ _instances: dict[str, PerceptaModule] = {}
 _pipelines: list[CameraPipeline] = []
 
 
-def _load_assignments() -> list[CameraAssignment]:
-    """Asignaciones cámara↔módulo.
+def _assignments_from_api() -> list[CameraAssignment] | None:
+    """Asignaciones cámara↔módulo desde `camera_module_configs` (device-service).
 
-    En producción vienen de `camera_module_configs`; acá se leen de un archivo
-    para poder correr el pipeline sin depender de que device-service exista.
+    Es la fuente de verdad: soltar un módulo sobre una cámara en el dashboard
+    escribe esa tabla, y el worker lo levanta de acá.
     """
+    if not SERVICE_TOKEN:
+        return None
+    headers = {"Authorization": f"Bearer {SERVICE_TOKEN}"}
+    try:
+        cams = requests.get(f"{DEVICE_URL}/api/v1/cameras", headers=headers, timeout=5)
+        assigns = requests.get(f"{DEVICE_URL}/api/v1/camera-module-configs", headers=headers, timeout=5)
+        if cams.status_code != 200 or assigns.status_code != 200:
+            log.warning("device-service respondió %s/%s", cams.status_code, assigns.status_code)
+            return None
+    except requests.RequestException as exc:
+        log.warning("device-service no disponible: %s", exc)
+        return None
+
+    by_camera: dict[str, list[dict]] = {}
+    for a in assigns.json().get("items", []):
+        if not a.get("enabled", True):
+            continue
+        cfg = a.get("config") or {}
+        by_camera.setdefault(a["cameraId"], []).append(
+            {
+                "moduleKey": a["moduleKey"],
+                "aiModuleId": a["aiModuleId"],
+                "moduleVersion": a.get("moduleVersion", "1.0.0"),
+                # Tipo y severidad del evento: configurables por cámara, con
+                # un valor por defecto derivado del módulo.
+                "eventType": cfg.get("eventType", f"{a['moduleKey'].split('-')[0]}.detected"),
+                "severity": cfg.get("severity", "medium"),
+                "config": cfg,
+            }
+        )
+
+    out: list[CameraAssignment] = []
+    for c in cams.json().get("items", []):
+        mods = by_camera.get(c["id"], [])
+        if not mods or c.get("status") == "disabled":
+            continue
+        out.append(
+            CameraAssignment(
+                camera_id=c["id"],
+                site_id=c["siteId"],
+                organization_id=c["organizationId"],
+                modules=mods,
+            )
+        )
+    return out
+
+
+def _load_assignments() -> list[CameraAssignment]:
+    """Asignaciones desde la API; si no está disponible, desde el archivo."""
+    api = _assignments_from_api()
+    if api is not None:
+        log.info("asignaciones desde device-service: %d cámara(s)", len(api))
+        return api
+
     if not ASSIGNMENTS_FILE.is_file():
-        log.warning("%s no existe: no hay cámaras que procesar", ASSIGNMENTS_FILE)
+        log.warning("sin API y sin %s: no hay cámaras que procesar", ASSIGNMENTS_FILE)
         return []
     raw = json.loads(ASSIGNMENTS_FILE.read_text(encoding="utf-8"))
+    log.info("asignaciones desde %s (respaldo)", ASSIGNMENTS_FILE)
     return [
         CameraAssignment(
             camera_id=a["cameraId"],

@@ -37,7 +37,7 @@ if (!secret) {
 // tiene events:ingest.
 let perms;
 if (role === 'service') {
-  perms = ['events:ingest', 'events:read'];
+  perms = ['events:ingest', 'events:read', 'cameras:read', 'camera-module-configs:read', 'modules:read'];
 } else {
   const granted = SYSTEM_ROLE_PERMISSIONS[role];
   if (!granted) {

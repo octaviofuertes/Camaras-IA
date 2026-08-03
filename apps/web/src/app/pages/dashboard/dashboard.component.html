@@ -121,18 +121,18 @@
               <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
               </svg>
-              {{ cam.code }} - {{ cam.name }}
+              {{ cam.name }}
             </span>
-            <span class="cam-status" [class.off]="cam.status !== 'online'">
-              <i class="dot" [class.dot-off]="cam.status !== 'online'"></i>
-              {{ cam.status === 'online' ? 'En línea' : 'Sin señal' }}
+            <span class="cam-status" [class.off]="!isOnline(cam)">
+              <i class="dot" [class.dot-off]="!isOnline(cam)"></i>
+              {{ isOnline(cam) ? 'En línea' : 'Sin señal' }}
             </span>
           </header>
           <px-camera-feed
-            [scene]="cam.thumbnail"
+            
             [snapshotUrl]="snapshotUrl(cam)"
             [detections]="detectionsFor(cam)"
-            [live]="cam.status === 'online'"
+            [live]="isOnline(cam)"
           />
           <footer class="cam-actions">
             <button class="icon-btn" title="Grabar">
