@@ -15,8 +15,8 @@
       </div>
       <div class="kpi-body">
         <div class="kpi-label">Cámaras conectadas</div>
-        <div class="kpi-value">48 <span class="kpi-of">/ 52</span></div>
-        <div class="kpi-delta up">92% en línea</div>
+        <div class="kpi-value">{{ onlineCount }} <span class="kpi-of">/ {{ cameras.length }}</span></div>
+        <div class="kpi-delta up">{{ cameras.length ? 'capturando video real' : 'sin cámaras' }}</div>
       </div>
     </div>
 
@@ -81,7 +81,7 @@
       <div class="panel-head">
         <h2 class="panel-title">
           Cámaras en vivo
-          <span class="mute" style="font-weight: 400; font-size: 12.5px">• {{ cameras.length }} en línea</span>
+          <span class="mute" style="font-weight: 400; font-size: 12.5px">• {{ onlineCount }} en línea</span>
         </h2>
         <div class="head-actions">
           <button class="icon-btn active" title="Cuadrícula">
@@ -110,8 +110,12 @@
         </div>
       </div>
 
-      <div class="cam-grid">
-        <article class="cam" *ngFor="let cam of cameras">
+      <div class="empty" *ngIf="!cameras.length">
+        No hay cámaras capturando. Levantá <code>media-service</code>.
+      </div>
+
+      <div class="cam-grid" *ngIf="cameras.length">
+        <article class="cam" *ngFor="let cam of cameras; trackBy: trackCam">
           <header class="cam-head">
             <span class="cam-name">
               <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
@@ -119,9 +123,17 @@
               </svg>
               {{ cam.code }} - {{ cam.name }}
             </span>
-            <span class="cam-status"><i class="dot"></i>En línea</span>
+            <span class="cam-status" [class.off]="cam.status !== 'online'">
+              <i class="dot" [class.dot-off]="cam.status !== 'online'"></i>
+              {{ cam.status === 'online' ? 'En línea' : 'Sin señal' }}
+            </span>
           </header>
-          <px-camera-feed [scene]="cam.thumbnail" [live]="cam.code === '01' || cam.code === '02'" />
+          <px-camera-feed
+            [scene]="cam.thumbnail"
+            [streamUrl]="streamUrl(cam)"
+            [detections]="detectionsFor(cam)"
+            [live]="cam.status === 'online'"
+          />
           <footer class="cam-actions">
             <button class="icon-btn" title="Grabar">
               <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
@@ -151,6 +163,8 @@
         <h2 class="panel-title">Eventos recientes</h2>
         <a routerLink="/eventos" class="link">Ver todos</a>
       </div>
+      <div class="empty" *ngIf="!events.length">Sin eventos todavía.</div>
+
       <div class="ev-list">
         <article class="ev" *ngFor="let e of events; trackBy: trackEvent">
           <px-module-icon
@@ -166,7 +180,7 @@
               <span class="ev-time">{{ e.occurredAt }}</span>
             </div>
           </div>
-          <div class="ev-thumb"><px-camera-feed [scene]="'warehouse'" [compact]="true" [timestamp]="''" /></div>
+          <div class="ev-thumb"><px-camera-feed [scene]="'office'" [compact]="true" /></div>
         </article>
       </div>
       <div class="panel-foot"><a routerLink="/eventos" class="link">Ver todos</a></div>

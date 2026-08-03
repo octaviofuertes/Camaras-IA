@@ -1,0 +1,25 @@
+[
+  {
+    "_nota": "El id es el MISMO UUID que en la tabla cameras: media-service, ai-worker y la API hablan de la misma cámara sin traducciones.",
+    "id": "00000000-0000-4000-b000-00000000ca01",
+    "name": "Webcam Logitech",
+    "site": "Escritorio",
+    "source": 0,
+    "width": 1280,
+    "height": 720,
+    "fps": 12,
+    "enabled": true
+  },
+
+  {
+    "_nota": "Cámara IP/WiFi: mismo código, sólo cambia 'source' por la URL RTSP.",
+    "id": "00000000-0000-4000-b000-00000000cam2",
+    "name": "Cámara IP de ejemplo",
+    "site": "Depósito",
+    "source": "rtsp://usuario:clave@192.168.1.50:554/stream1",
+    "width": 1280,
+    "height": 720,
+    "fps": 10,
+    "enabled": false
+  }
+]

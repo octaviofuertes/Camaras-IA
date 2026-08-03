@@ -9,6 +9,9 @@ export const PERMISSIONS = [
   'modules:read', 'modules:install',
   'camera-module-configs:read', 'camera-module-configs:write',
   'events:read', 'events:acknowledge', 'events:resolve',
+  // Alta de eventos: la ejercen los SERVICIOS del pipeline (rules-engine /
+  // ai-worker), no las personas. Ningún rol de usuario la incluye.
+  'events:ingest',
   'evidences:read',
   'notifications:read', 'notifications:write',
   'users:read', 'users:write',

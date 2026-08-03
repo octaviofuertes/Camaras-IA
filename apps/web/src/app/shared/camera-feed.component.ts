@@ -1,29 +1,55 @@
 import { Component, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import type { LiveDetection } from '../core/cameras.service';
 
 /**
  * Marco de video de una cámara.
  *
- * Hasta que `media-service` entregue WebRTC (WHEP), se dibuja una escena
- * sintética por ubicación: comunica el encuadre sin depender de imágenes
- * externas ni mostrar placeholders rotos.
+ * Con `streamUrl` muestra el MJPEG REAL de media-service (USB o RTSP) y dibuja
+ * encima las cajas de detección. Sin él, dibuja una escena sintética para no
+ * mostrar un placeholder roto.
  */
 @Component({
   selector: 'px-camera-feed',
   standalone: true,
   imports: [CommonModule],
   template: `
-    <div class="feed" [class.compact]="compact" [ngClass]="'scene-' + scene">
-      <div class="scene">
-        <div class="floor"></div>
-        <div class="prop p1"></div>
-        <div class="prop p2"></div>
-        <div class="prop p3"></div>
-        <div class="figure f1"></div>
-        <div class="figure f2"></div>
-      </div>
-      <div class="grain"></div>
-      <span class="ts">{{ timestamp }}</span>
+    <div class="feed" [class.compact]="compact" [ngClass]="streamUrl ? 'is-live' : 'scene-' + scene">
+      <!-- Video real -->
+      <ng-container *ngIf="streamUrl; else synthetic">
+        <img class="video" [src]="streamUrl" [alt]="'Vista en vivo'" (error)="onError()" />
+
+        <!-- Cajas de detección sobre el video (coordenadas normalizadas 0..1) -->
+        <div class="boxes" *ngIf="detections?.length">
+          <div
+            class="box"
+            *ngFor="let d of detections"
+            [style.left.%]="d.bbox[0] * 100"
+            [style.top.%]="d.bbox[1] * 100"
+            [style.width.%]="d.bbox[2] * 100"
+            [style.height.%]="d.bbox[3] * 100"
+          >
+            <span class="box-tag">{{ d.classLabel }} {{ (d.confidence * 100).toFixed(0) }}%</span>
+          </div>
+        </div>
+
+        <span class="err" *ngIf="failed">Sin señal</span>
+      </ng-container>
+
+      <!-- Escena sintética (sin cámara real conectada) -->
+      <ng-template #synthetic>
+        <div class="scene">
+          <div class="floor"></div>
+          <div class="prop p1"></div>
+          <div class="prop p2"></div>
+          <div class="prop p3"></div>
+          <div class="figure f1"></div>
+          <div class="figure f2"></div>
+        </div>
+        <div class="grain"></div>
+      </ng-template>
+
+      <span class="ts" *ngIf="timestamp">{{ timestamp }}</span>
       <span class="live" *ngIf="live"><i></i>LIVE</span>
     </div>
   `,
@@ -37,6 +63,37 @@ import { CommonModule } from '@angular/common';
         background: #0a0e14;
       }
       .feed.compact { aspect-ratio: 16 / 10; }
+      .video { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+      .boxes { position: absolute; inset: 0; pointer-events: none; }
+      .box {
+        position: absolute;
+        border: 2px solid #3cf;
+        border-radius: 2px;
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+      }
+      .box-tag {
+        position: absolute;
+        top: -19px;
+        left: -2px;
+        background: #3cf;
+        color: #06202b;
+        font-size: 10px;
+        font-weight: 700;
+        padding: 1px 5px;
+        border-radius: 3px;
+        white-space: nowrap;
+      }
+      .err {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: rgba(0, 0, 0, 0.6);
+        color: var(--text-mute);
+        font-size: 12px;
+      }
+
       .scene { position: absolute; inset: 0; }
       .floor {
         position: absolute;
@@ -50,13 +107,10 @@ import { CommonModule } from '@angular/common';
       .grain {
         position: absolute;
         inset: 0;
-        background: repeating-linear-gradient(
-          0deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 3px
-        );
+        background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 3px);
         pointer-events: none;
       }
 
-      /* Escenas por ubicación */
       .scene-lobby   { background: linear-gradient(160deg, #1e293b, #0f172a); }
       .scene-lobby .p1 { width: 22%; height: 46%; left: 8%;  top: 16%; background: rgba(148, 197, 255, 0.13); }
       .scene-lobby .p2 { width: 22%; height: 46%; left: 34%; top: 16%; background: rgba(148, 197, 255, 0.10); }
@@ -126,7 +180,16 @@ import { CommonModule } from '@angular/common';
 })
 export class CameraFeedComponent {
   @Input() scene = 'lobby';
-  @Input() timestamp = '10:25:18';
+  @Input() timestamp = '';
   @Input() live = false;
   @Input() compact = false;
+  /** Si viene, se muestra el MJPEG real en lugar de la escena sintética. */
+  @Input() streamUrl: string | null = null;
+  @Input() detections: LiveDetection[] | null = null;
+
+  failed = false;
+
+  onError(): void {
+    this.failed = true;
+  }
 }

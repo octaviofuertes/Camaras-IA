@@ -1,0 +1,19 @@
+[project]
+name = "percepta-media-service"
+version = "0.1.0"
+description = "Percepta media-service: captura RTSP/USB, vista en vivo MJPEG, ring buffer y clips de evidencia"
+requires-python = ">=3.11"
+dependencies = [
+    "opencv-python-headless>=4.9",
+    "numpy>=1.26",
+    "fastapi>=0.111",
+    "uvicorn>=0.30",
+    "requests>=2.32",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["media_service*"]

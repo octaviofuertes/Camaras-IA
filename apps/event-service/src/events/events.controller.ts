@@ -62,6 +62,42 @@ export class EventsController {
     return { items, total, limit, offset };
   }
 
+  /**
+   * Alta desde el pipeline (rules-engine / ai-worker). Requiere `events:ingest`,
+   * que ningún rol de usuario tiene: es una llamada entre servicios.
+   */
+  @Post()
+  @RequirePermissions('events:ingest')
+  async ingest(@Req() req: Request, @Body() body: Record<string, unknown>): Promise<{ created: boolean; event: EventDto | null }> {
+    const required = ['siteId', 'cameraId', 'aiModuleId', 'moduleKey', 'moduleVersion', 'eventType', 'severity', 'confidence', 'dedupKey'];
+    const missing = required.filter((k) => body?.[k] === undefined || body?.[k] === null);
+    if (missing.length) {
+      throw new BadRequestException(`Faltan campos: ${missing.join(', ')}`);
+    }
+    const confidence = Number(body['confidence']);
+    if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+      throw new BadRequestException('confidence debe estar entre 0 y 1');
+    }
+    const event = await this.events.ingest(req.auth as AuthContext, {
+      siteId: String(body['siteId']),
+      cameraId: String(body['cameraId']),
+      aiModuleId: String(body['aiModuleId']),
+      moduleKey: String(body['moduleKey']),
+      moduleVersion: String(body['moduleVersion']),
+      eventType: String(body['eventType']),
+      eventClass: body['eventClass'] ? String(body['eventClass']) : undefined,
+      severity: String(body['severity']),
+      confidence,
+      dedupKey: String(body['dedupKey']),
+      zoneIds: Array.isArray(body['zoneIds']) ? (body['zoneIds'] as string[]) : undefined,
+      trackId: body['trackId'] !== undefined ? Number(body['trackId']) : undefined,
+      detection: (body['detection'] as Record<string, unknown>) ?? undefined,
+      metadata: (body['metadata'] as Record<string, unknown>) ?? undefined,
+    });
+    // event === null => la deduplicación lo descartó. No es error.
+    return { created: !!event, event };
+  }
+
   @Get(':id')
   @RequirePermissions('events:read')
   async findOne(

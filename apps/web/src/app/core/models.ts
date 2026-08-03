@@ -24,6 +24,10 @@ export interface Camera {
   thumbnail: string;
   /** moduleKeys asignados a esta cámara (= filas en camera_module_configs). */
   modules: string[];
+  /** true si media-service está capturando video real de esta cámara. */
+  live?: boolean;
+  fps?: number;
+  bufferSeconds?: number;
 }
 
 export interface EventItem {

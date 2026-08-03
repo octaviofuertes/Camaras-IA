@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Configuración de Detección de personas",
+  "type": "object",
+  "properties": {
+    "minConfidence": {
+      "type": "number",
+      "title": "Confianza mínima",
+      "description": "Por debajo de este valor la detección no genera alerta.",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 0.45
+    },
+    "minPersistenceFrames": {
+      "type": "integer",
+      "title": "Frames de persistencia",
+      "description": "Cuántos frames seguidos debe verse antes de alertar (evita parpadeos).",
+      "minimum": 1,
+      "maximum": 60,
+      "default": 3
+    },
+    "cooldownSeconds": {
+      "type": "integer",
+      "title": "Enfriamiento (s)",
+      "description": "Tiempo mínimo entre alertas de la misma cámara y módulo.",
+      "minimum": 0,
+      "default": 60
+    },
+    "minPersons": {
+      "type": "integer",
+      "title": "Personas mínimas",
+      "description": "Cantidad de personas simultáneas que dispara la alerta.",
+      "minimum": 1,
+      "default": 1
+    },
+    "classes": {
+      "type": "array",
+      "title": "Clases a detectar",
+      "items": {
+        "type": "string",
+        "enum": ["person", "bicycle", "car", "motorcycle", "bus", "truck", "backpack", "handbag", "suitcase"]
+      },
+      "default": ["person"]
+    },
+    "imgsz": {
+      "type": "integer",
+      "title": "Resolución de inferencia",
+      "enum": [320, 480, 640, 960],
+      "default": 640
+    }
+  },
+  "additionalProperties": false
+}

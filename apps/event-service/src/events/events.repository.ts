@@ -183,6 +183,54 @@ export class EventsRepository {
     return rows[0] ? toDto(rows[0]) : null;
   }
 
+  /**
+   * Alta de un evento desde el pipeline (rules-engine / ai-worker).
+   *
+   * `dedup_key` es la defensa contra el spam de alertas: si el mismo motivo ya
+   * generó un evento en la ventana de deduplicación, el INSERT no crea otro.
+   */
+  async insert(
+    client: PoolClient,
+    e: {
+      organizationId: string;
+      siteId: string;
+      cameraId: string;
+      aiModuleId: string;
+      moduleKey: string;
+      moduleVersion: string;
+      eventType: string;
+      eventClass?: string;
+      severity: string;
+      confidence: number;
+      dedupKey: string;
+      zoneIds?: string[];
+      trackId?: number;
+      detection?: Record<string, unknown>;
+      metadata?: Record<string, unknown>;
+    },
+  ): Promise<EventDto | null> {
+    const { rows } = await client.query<EventRow>(
+      `INSERT INTO events (occurred_at, organization_id, site_id, camera_id, ai_module_id,
+                           module_key, module_version, event_type, event_class, severity,
+                           confidence, dedup_key, zone_ids, track_id, detection, metadata)
+       -- Casts explícitos: sin ellos Postgres infiere text para los parámetros
+       -- dentro de COALESCE y falla contra uuid[]/jsonb.
+       VALUES (now(), $1, $2, $3, $4, $5, $6, $7, COALESCE($8,'alert'), $9, $10, $11,
+               COALESCE($12::uuid[], '{}'::uuid[]), $13,
+               COALESCE($14::jsonb, '{}'::jsonb), COALESCE($15::jsonb, '{}'::jsonb))
+       ON CONFLICT (dedup_key, occurred_at) DO NOTHING
+       RETURNING ${COLUMNS}`,
+      [
+        e.organizationId, e.siteId, e.cameraId, e.aiModuleId,
+        e.moduleKey, e.moduleVersion, e.eventType, e.eventClass ?? 'alert',
+        e.severity, e.confidence, e.dedupKey, e.zoneIds ?? [],
+        e.trackId ?? null,
+        JSON.stringify(e.detection ?? {}), JSON.stringify(e.metadata ?? {}),
+      ],
+    );
+    return rows[0] ? toDto(rows[0]) : null;
+  }
+
   /** Rastro de auditoría append-only, en la MISMA transacción que la transición. */
   async writeAudit(
     client: PoolClient,

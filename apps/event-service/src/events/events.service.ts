@@ -7,6 +7,23 @@ import type { AuthContext } from '../auth/auth.types';
 
 type Resolution = Extract<EventStatus, 'confirmed' | 'dismissed' | 'false_positive'>;
 
+export interface IngestInput {
+  siteId: string;
+  cameraId: string;
+  aiModuleId: string;
+  moduleKey: string;
+  moduleVersion: string;
+  eventType: string;
+  eventClass?: string;
+  severity: string;
+  confidence: number;
+  dedupKey: string;
+  zoneIds?: string[];
+  trackId?: number;
+  detection?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+}
+
 @Injectable()
 export class EventsService {
   constructor(
@@ -16,6 +33,16 @@ export class EventsService {
 
   async list(auth: AuthContext, filters: ListFilters): Promise<{ items: EventDto[]; total: number }> {
     return this.db.withTenant(auth.organizationId, (c) => this.repo.list(c, filters));
+  }
+
+  /**
+   * Alta desde el pipeline. Devuelve null si la deduplicación lo descartó
+   * (no es un error: es la protección contra ráfagas de alertas repetidas).
+   */
+  async ingest(auth: AuthContext, e: IngestInput): Promise<EventDto | null> {
+    return this.db.withTenant(auth.organizationId, (c) =>
+      this.repo.insert(c, { ...e, organizationId: auth.organizationId }),
+    );
   }
 
   async findOne(auth: AuthContext, id: string, occurredAt?: string): Promise<EventDto> {

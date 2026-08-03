@@ -32,12 +32,22 @@ if (!secret) {
   process.exit(1);
 }
 
-const granted = SYSTEM_ROLE_PERMISSIONS[role];
-if (!granted) {
-  console.error(`Rol desconocido: ${role}. Válidos: ${Object.keys(SYSTEM_ROLE_PERMISSIONS).join(', ')}`);
-  process.exit(1);
+// `service` no es un rol de usuario: es la identidad que usan los servicios del
+// pipeline (ai-worker / rules-engine) para dar de alta eventos. Ningún humano
+// tiene events:ingest.
+let perms;
+if (role === 'service') {
+  perms = ['events:ingest', 'events:read'];
+} else {
+  const granted = SYSTEM_ROLE_PERMISSIONS[role];
+  if (!granted) {
+    console.error(
+      `Rol desconocido: ${role}. Válidos: service, ${Object.keys(SYSTEM_ROLE_PERMISSIONS).join(', ')}`,
+    );
+    process.exit(1);
+  }
+  perms = granted[0] === '*' ? [...PERMISSIONS] : granted;
 }
-const perms = granted[0] === '*' ? [...PERMISSIONS] : granted;
 
 const token = jwt.sign({ sub: userId, org, perms }, secret, {
   algorithm: 'HS256',

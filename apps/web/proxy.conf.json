@@ -1,8 +1,23 @@
 {
+  "_nota": "127.0.0.1 y no localhost: Node resuelve localhost a ::1 (IPv6) y los servicios Python escuchan en IPv4, lo que devolvía 504.",
   "/api": {
-    "target": "http://localhost:3004",
+    "target": "http://127.0.0.1:3004",
     "secure": false,
     "changeOrigin": true,
     "logLevel": "warn"
+  },
+  "/media": {
+    "target": "http://127.0.0.1:3020",
+    "secure": false,
+    "changeOrigin": true,
+    "logLevel": "warn",
+    "pathRewrite": { "^/media": "" }
+  },
+  "/ai": {
+    "target": "http://127.0.0.1:3010",
+    "secure": false,
+    "changeOrigin": true,
+    "logLevel": "warn",
+    "pathRewrite": { "^/ai": "" }
   }
 }

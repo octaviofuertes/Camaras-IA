@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "1.0.0",
+  "moduleKey": "person-detection",
+  "name": "Detección de personas",
+  "description": "Detecta personas y objetos de contexto. Base de los módulos de conteo, merodeo y zonas.",
+  "version": "1.0.0",
+  "pluginApiVersion": "1.0.0",
+  "category": "hr",
+  "vendor": "percepta-core",
+  "model": {
+    "backend": "yolo",
+    "artifactRef": "yolov8n.pt",
+    "classes": ["person", "bicycle", "car", "motorcycle", "bus", "truck", "backpack", "handbag", "suitcase"]
+  },
+  "input": {
+    "requiresZones": false,
+    "minFps": 1,
+    "maxFps": 15,
+    "colorSpace": "bgr"
+  },
+  "configSchemaRef": "./config.schema.json",
+  "configSchemaVersion": "1.0.0",
+  "eventTypes": [
+    { "type": "person.detected", "defaultSeverity": "info", "eventClass": "alert" },
+    { "type": "person.count", "defaultSeverity": "info", "eventClass": "telemetry" }
+  ],
+  "resources": {
+    "gpu": false,
+    "vramMb": 0,
+    "targetFps": 6
+  }
+}
