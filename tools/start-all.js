@@ -4,9 +4,9 @@
  *
  *   node tools/start-all.js
  *
- * Arranca, en orden: device-service, event-service, media-service, ai-worker y
- * el dashboard. Emite un token de servicio para el pipeline y muestra al final
- * un token de operador listo para pegar en el navegador.
+ * Libera los puertos, arranca identity, device, event, media, ai-worker y el
+ * dashboard en orden, esperando a que cada uno responda. El dashboard inicia
+ * sesión solo contra identity-service: no hay que pegar ningún token.
  *
  * Requiere que la infraestructura esté levantada (pnpm infra:up).
  */
@@ -33,6 +33,47 @@ if (fs.existsSync(envPath)) {
 
 function token(role) {
   return execSync(`node "${path.join(__dirname, 'dev-token.js')}" ${role}`, { cwd: ROOT }).toString().trim();
+}
+
+/** Puertos que ocupa el stack. Se liberan antes de arrancar. */
+const PORTS = { identity: 3001, device: 3003, event: 3004, 'ai-worker': 3010, media: 3020, web: 4200 };
+
+/**
+ * Mata lo que esté escuchando en un puerto del stack.
+ *
+ * Sin esto, una corrida anterior a medio cerrar (o un servicio levantado a mano)
+ * hace que TODO falle con EADDRINUSE, y el mensaje real queda enterrado entre
+ * decenas de líneas de log.
+ */
+function freePort(port) {
+  try {
+    const out =
+      process.platform === 'win32'
+        ? execSync(`netstat -ano -p tcp | findstr LISTENING | findstr :${port}`, { stdio: ['ignore', 'pipe', 'ignore'] })
+            .toString()
+        : execSync(`lsof -ti tcp:${port}`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+
+    const pids = new Set(
+      out
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .map((l) => (process.platform === 'win32' ? l.split(/\s+/).pop() : l))
+        .filter((pid) => pid && pid !== '0' && Number(pid) !== process.pid),
+    );
+
+    for (const pid of pids) {
+      try {
+        execSync(process.platform === 'win32' ? `taskkill /F /PID ${pid}` : `kill -9 ${pid}`, { stdio: 'ignore' });
+        console.log(`  puerto ${port}: liberado (proceso ${pid})`);
+      } catch {
+        console.log(`  puerto ${port}: NO se pudo liberar el proceso ${pid} — cerralo a mano`);
+      }
+    }
+    return pids.size > 0;
+  } catch {
+    return false; // nada escuchando: el caso normal
+  }
 }
 
 /** Espera a que un puerto responda (o se rinde). */
@@ -99,16 +140,24 @@ process.on('SIGTERM', shutdown);
     process.exit(1);
   }
 
+  console.log('Liberando puertos…');
+  let freed = false;
+  for (const port of Object.values(PORTS)) freed = freePort(port) || freed;
+  if (!freed) console.log('  (todos libres)');
+  else await new Promise((r) => setTimeout(r, 1500));
+
   const svcToken = token('service');
 
-  console.log('Levantando Percepta…\n');
+  console.log('\nLevantando Percepta…\n');
 
+  run('identity', 'node', ['apps/identity-service/dist/main.js']);
   run('device', 'node', ['apps/device-service/dist/main.js']);
   run('event', 'node', ['apps/event-service/dist/main.js']);
 
+  const identityOk = await waitPort(3001, '/api/v1/health', 25000);
   const deviceOk = await waitPort(3003, '/api/v1/health', 25000);
   const eventOk = await waitPort(3004, '/api/v1/health', 25000);
-  if (!deviceOk || !eventOk) {
+  if (!identityOk || !deviceOk || !eventOk) {
     console.error(
       '\nLas APIs no respondieron. Causa habitual: la base no está levantada.\n' +
         'Abrí Docker Desktop y corré:  pnpm infra:up\n',
@@ -142,7 +191,6 @@ process.on('SIGTERM', shutdown);
   console.log('\n' + '─'.repeat(66));
   console.log(webOk ? '  Percepta levantado:  http://localhost:4200' : '  El dashboard todavía está compilando…');
   console.log('─'.repeat(66));
-  console.log('\n  Pegá esto en la consola del navegador (F12) para iniciar sesión:\n');
-  console.log(`localStorage.setItem('px_token','${token('org_admin')}');location.reload()`);
-  console.log('\n  (el token dura 8 h)   ·   Ctrl+C para detener todo\n');
+  console.log('\n  La sesión se inicia sola con admin@percepta.local.');
+  console.log('  Ctrl+C detiene todo.\n');
 })();

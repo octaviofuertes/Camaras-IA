@@ -30,12 +30,12 @@ pnpm db:reset
 pnpm start
 ```
 
-Levanta los cinco servicios (device, event, media, ai-worker y dashboard), espera a que
-cada uno esté listo antes de arrancar el siguiente, y al final imprime la línea con el
-token para iniciar sesión. `Ctrl+C` detiene todo.
+Libera los puertos que hayan quedado ocupados, levanta los seis servicios en orden
+esperando a que cada uno responda, y deja el dashboard servido. `Ctrl+C` detiene todo.
 
 | Servicio | Puerto | Qué hace |
 |---|---|---|
+| identity-service | 3001 | Login y emisión de tokens |
 | device-service | 3003 | Cámaras, catálogo de módulos y asignaciones |
 | event-service | 3004 | Eventos y workflow de revisión |
 | ai-worker | 3010 | Inferencia YOLO por cámara |
@@ -44,14 +44,15 @@ token para iniciar sesión. `Ctrl+C` detiene todo.
 
 ## 3. Entrar al dashboard
 
-Abrí **http://localhost:4200** y pegá en la consola del navegador (F12) la línea que
-imprimió `pnpm start`. Si la perdiste:
+Abrí **http://localhost:4200**. Listo: **la sesión se inicia sola**.
 
-```bash
-pnpm token
-```
+El dashboard se autentica contra `identity-service` con el usuario de desarrollo
+`admin@percepta.local` (contraseña `percepta`). Es autenticación real —bcrypt contra la
+tabla `users`, y los permisos del token salen de los roles que ese usuario tiene en la
+base—, sólo que las credenciales están precargadas. Si el token vence, se renueva sola.
 
-> El token dura 8 horas. Desaparece cuando exista `identity-service` con login real.
+> Para producción: creá los usuarios reales, borrá el de desarrollo (migración `0004`)
+> y reemplazá el auto-login de `auth.service.ts` por una pantalla de ingreso.
 
 ---
 
@@ -147,4 +148,4 @@ docker compose exec -T postgres psql "postgresql://percepta_app:percepta_app_dev
 
 **Funciona de verdad:** alta y baja de cámaras desde el dashboard · asignación de módulos por drag & drop que persiste en la base · captura simultánea de varias cámaras USB/RTSP con reconexión · detección YOLO de personas y vehículos · reglas de confianza/persistencia/cooldown · eventos persistidos con aislamiento multi-tenant · workflow de revisión humana con auditoría · video en vivo con cajas de detección.
 
-**Todavía no:** los clips se guardan en disco pero no suben a MinIO, no hay login (se usan tokens de desarrollo), y `helmet-detection` sigue siendo un stub — **detectar EPP necesita un modelo entrenado para eso**, que YOLO base no trae.
+**Todavía no:** no hay pantalla de login (la sesión se inicia sola con el usuario de desarrollo), los clips se guardan en disco pero no suben a MinIO, no hay login (se usan tokens de desarrollo), y `helmet-detection` sigue siendo un stub — **detectar EPP necesita un modelo entrenado para eso**, que YOLO base no trae.

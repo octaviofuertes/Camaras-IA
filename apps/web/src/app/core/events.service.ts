@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Observable, catchError, map, of } from 'rxjs';
 import type { EventItem, EventStatus, Severity } from './models';
 import { DEMO_EVENTS } from './demo-data';
@@ -47,18 +47,9 @@ export class EventsService {
   private readonly http = inject(HttpClient);
   private readonly base = '/api/v1';
 
-  /**
-   * El token lo emitirá `identity-service`. Mientras tanto se lee de
-   * localStorage (`px_token`), que es lo que llena `tools/dev-token.js`.
-   */
-  private headers(): HttpHeaders {
-    const token = localStorage.getItem('px_token') ?? '';
-    return new HttpHeaders(token ? { Authorization: `Bearer ${token}` } : {});
-  }
-
   list(status?: EventStatus): Observable<EventsResult> {
     const qs = status ? `?status=${status}&limit=50` : '?limit=50';
-    return this.http.get<ApiPage>(`${this.base}/events${qs}`, { headers: this.headers() }).pipe(
+    return this.http.get<ApiPage>(`${this.base}/events${qs}`).pipe(
       map((page) => ({
         items: page.items.map((e) => this.toItem(e)),
         total: page.total,
@@ -76,13 +67,13 @@ export class EventsService {
 
   acknowledge(id: string, note?: string): Observable<boolean> {
     return this.http
-      .post(`${this.base}/events/${id}/acknowledge`, { note }, { headers: this.headers() })
+      .post(`${this.base}/events/${id}/acknowledge`, { note })
       .pipe(map(() => true), catchError(() => of(false)));
   }
 
   resolve(id: string, resolution: 'confirmed' | 'dismissed' | 'false_positive', note?: string): Observable<boolean> {
     return this.http
-      .post(`${this.base}/events/${id}/resolve`, { resolution, note }, { headers: this.headers() })
+      .post(`${this.base}/events/${id}/resolve`, { resolution, note })
       .pipe(map(() => true), catchError(() => of(false)));
   }
 
