@@ -102,8 +102,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return this.cameras.filter((c) => c.status === 'online').length;
   }
 
-  streamUrl(cam: Camera): string | null {
-    return cam.live ? this.camsApi.streamUrl(cam.id) : null;
+  snapshotUrl(cam: Camera): string | null {
+    return cam.live ? this.camsApi.snapshotUrl(cam.id) : null;
   }
 
   detectionsFor(cam: Camera): LiveDetection[] {

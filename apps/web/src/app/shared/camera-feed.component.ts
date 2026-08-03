@@ -1,4 +1,13 @@
-import { Component, Input } from '@angular/core';
+import {
+  AfterViewInit,
+  Component,
+  ElementRef,
+  Input,
+  NgZone,
+  OnDestroy,
+  ViewChild,
+  inject,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import type { LiveDetection } from '../core/cameras.service';
 
@@ -14,10 +23,10 @@ import type { LiveDetection } from '../core/cameras.service';
   standalone: true,
   imports: [CommonModule],
   template: `
-    <div class="feed" [class.compact]="compact" [ngClass]="streamUrl ? 'is-live' : 'scene-' + scene">
+    <div class="feed" [class.compact]="compact" [ngClass]="snapshotUrl ? 'is-live' : 'scene-' + scene">
       <!-- Video real -->
-      <ng-container *ngIf="streamUrl; else synthetic">
-        <img class="video" [src]="streamUrl" [alt]="'Vista en vivo'" (error)="onError()" />
+      <ng-container *ngIf="snapshotUrl; else synthetic">
+        <img #video class="video" alt="Vista en vivo" />
 
         <!-- Cajas de detección sobre el video (coordenadas normalizadas 0..1) -->
         <div class="boxes" *ngIf="detections?.length">
@@ -178,18 +187,69 @@ import type { LiveDetection } from '../core/cameras.service';
     `,
   ],
 })
-export class CameraFeedComponent {
+export class CameraFeedComponent implements AfterViewInit, OnDestroy {
+  private readonly zone = inject(NgZone);
+
+  @ViewChild('video') videoRef?: ElementRef<HTMLImageElement>;
+
   @Input() scene = 'lobby';
   @Input() timestamp = '';
   @Input() live = false;
   @Input() compact = false;
-  /** Si viene, se muestra el MJPEG real en lugar de la escena sintética. */
-  @Input() streamUrl: string | null = null;
+  /** Si viene, se muestra el video real de esa cámara en lugar de la escena. */
+  @Input() snapshotUrl: string | null = null;
   @Input() detections: LiveDetection[] | null = null;
+  /** Cuadros por segundo del refresco. */
+  @Input() fps = 6;
 
   failed = false;
 
-  onError(): void {
-    this.failed = true;
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private loading = false;
+
+  ngAfterViewInit(): void {
+    if (!this.snapshotUrl) return;
+
+    // Sondeo de snapshots en lugar de MJPEG.
+    //
+    // Un <img> con multipart/x-mixed-replace mantiene una conexión HTTP ABIERTA
+    // por cámara. El navegador permite ~6 por host, así que un mosaico de varias
+    // cámaras se queda sin conexiones; además Chrome pinta en negro algunos de
+    // esos streams cuando hay varios a la vez (los datos llegan pero no compone).
+    // Pidiendo un JPEG por cuadro, cada request se cierra enseguida: escala a
+    // muchas cámaras y evita ese fallo de render.
+    //
+    // Se escribe el src del <img> directamente (fuera de la zona de Angular)
+    // para que refrescar el video no cueste un ciclo de detección de cambios.
+    this.zone.runOutsideAngular(() => {
+      this.tick();
+      this.timer = setInterval(() => this.tick(), Math.max(1000 / this.fps, 80));
+    });
+  }
+
+  ngOnDestroy(): void {
+    if (this.timer) clearInterval(this.timer);
+  }
+
+  /** Pide el siguiente cuadro. No encima pedidos si la red va lenta. */
+  private tick(): void {
+    const el = this.videoRef?.nativeElement;
+    if (!this.snapshotUrl || !el || this.loading) return;
+    this.loading = true;
+
+    const url = `${this.snapshotUrl}?t=${Date.now()}`;
+    const pre = new Image();
+    pre.onload = () => {
+      // Ya está decodificado: al asignarlo, el cambio en pantalla es inmediato
+      // y sin parpadeo.
+      el.src = url;
+      this.failed = false;
+      this.loading = false;
+    };
+    pre.onerror = () => {
+      this.failed = true;
+      this.loading = false;
+    };
+    pre.src = url;
   }
 }

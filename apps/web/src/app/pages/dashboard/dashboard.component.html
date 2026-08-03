@@ -130,7 +130,7 @@
           </header>
           <px-camera-feed
             [scene]="cam.thumbnail"
-            [streamUrl]="streamUrl(cam)"
+            [snapshotUrl]="snapshotUrl(cam)"
             [detections]="detectionsFor(cam)"
             [live]="cam.status === 'online'"
           />
