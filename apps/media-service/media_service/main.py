@@ -56,6 +56,7 @@ def load_sources() -> None:
         cfg = [{"id": "cam-usb-0", "name": "Webcam local", "source": 0}]
         log.warning("%s no existe; usando webcam 0 por defecto", SOURCES_FILE)
 
+    delay = 0.0
     for c in cfg:
         if not c.get("enabled", True):
             continue
@@ -68,8 +69,10 @@ def load_sources() -> None:
             target_fps=float(c.get("fps", 12)),
         )
         _sources[cam_id] = src
-        src.start()
-        log.info("cámara registrada: %s -> %r", cam_id, c["source"])
+        src.start(delay=delay)
+        log.info("cámara registrada: %s -> %r (arranque en +%.0fs)", cam_id, c["source"], delay)
+        # Escalonar: abrir dos cámaras USB simultáneamente cuelga el driver.
+        delay += 4.0 if isinstance(src.source, int) else 0.5
 
 
 @app.on_event("startup")

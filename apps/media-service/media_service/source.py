@@ -7,6 +7,7 @@ pruebas a cámaras WiFi/IP es cambiar la cadena de conexión, no el código.
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 import time
 from collections import deque
@@ -65,12 +66,16 @@ class CameraSource:
         self.last_error: str | None = None
         self.frames_captured = 0
         self.started_at = time.time()
+        self._start_delay = 0.0
 
     # ── ciclo de vida ────────────────────────────────────────────────
-    def start(self) -> None:
+    def start(self, delay: float = 0.0) -> None:
+        """Arranca la captura. `delay` escalona la apertura cuando hay varias
+        cámaras USB: abrirlas a la vez suele colgar el driver en Windows."""
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
+        self._start_delay = delay
         self._thread = threading.Thread(target=self._run, name=f"cap-{self.camera_id}", daemon=True)
         self._thread.start()
 
@@ -82,10 +87,32 @@ class CameraSource:
 
     # ── captura ──────────────────────────────────────────────────────
     def _open(self) -> cv2.VideoCapture | None:
-        cap = cv2.VideoCapture(self.source)
+        # En Windows, el backend por defecto (MSMF) tarda ~54 s en abrir una
+        # webcam USB y se cuelga si ya hay otra capturando. DirectShow abre la
+        # misma cámara en 0,7 s y permite varias en paralelo. Medido en esta
+        # máquina con la Logitech C925e.
+        if isinstance(self.source, int) and sys.platform == "win32":
+            cap = cv2.VideoCapture(self.source, cv2.CAP_DSHOW)
+            if not cap.isOpened():
+                cap.release()
+                cap = cv2.VideoCapture(self.source)  # último recurso
+        else:
+            cap = cv2.VideoCapture(self.source)
+
         if not cap.isOpened():
             cap.release()
             return None
+
+        # USB: pedir MJPG en la cámara ANTES de fijar la resolución.
+        # Sin comprimir (YUY2), una sola cámara a 720p ya satura un bus USB 2.0
+        # (~1,3 Gbps contra 480 Mbps), así que dos cámaras a la vez no arrancan.
+        # Con MJPG el ancho de banda cae ~10x y conviven sin problema.
+        if isinstance(self.source, int):
+            try:
+                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+            except Exception:
+                pass
+
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
         # Buffer mínimo: preferimos el frame más reciente antes que uno viejo
@@ -101,6 +128,9 @@ class CameraSource:
         interval = 1.0 / self.target_fps
         backoff = 1.0
         cap: cv2.VideoCapture | None = None
+
+        if getattr(self, "_start_delay", 0.0) > 0:
+            self._stop.wait(self._start_delay)
 
         while not self._stop.is_set():
             if cap is None:

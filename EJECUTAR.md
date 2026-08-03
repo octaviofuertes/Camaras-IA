@@ -72,15 +72,22 @@ localStorage.setItem('px_token', 'PEGAR_TOKEN_ACA'); location.reload();
 
 ## Configurar cámaras
 
-### Webcam USB (la actual)
+### Webcams USB (las actuales)
 
-`cameras.json` en la raíz:
+`cameras.json` en la raíz. Hay **dos cámaras configuradas como fuentes independientes**:
 
-```json
-{ "id": "00000000-0000-4000-b000-00000000ca01", "name": "Webcam Logitech", "source": 0, "fps": 12, "enabled": true }
-```
+| `source` | Dispositivo | Nombre en el sistema |
+|---|---|---|
+| `0` | Webcam integrada de la notebook | Webcam Integrada |
+| `1` | Logitech C925e (externa) | Logitech C925e |
 
-`source` es el índice del dispositivo (`0` = primera cámara).
+`source` es el índice del dispositivo. Para saber cuál es cuál, mirá el snapshot:
+`http://localhost:3020/cameras/<id>/snapshot.jpg`
+
+> **Backend DirectShow (Windows).** El backend por defecto de OpenCV (MSMF) tarda
+> ~54 s en abrir una webcam USB y **se cuelga si ya hay otra capturando**. Por eso
+> `media-service` usa `CAP_DSHOW` en Windows: abre la misma cámara en 0,7 s y
+> permite varias en paralelo. Sin esto, la segunda cámara nunca conecta.
 
 ### Cámara IP / WiFi
 
@@ -143,6 +150,6 @@ docker compose exec -T postgres psql "postgresql://percepta_app:percepta_app_dev
 
 ## Estado real
 
-**Funciona de verdad:** captura USB/RTSP con reconexión · detección YOLO de personas y vehículos · reglas de confianza/persistencia/cooldown · eventos persistidos con aislamiento multi-tenant · workflow de revisión humana con auditoría · video en vivo con cajas de detección.
+**Funciona de verdad:** captura simultánea de varias cámaras USB/RTSP con reconexión · detección YOLO de personas y vehículos · reglas de confianza/persistencia/cooldown · eventos persistidos con aislamiento multi-tenant · workflow de revisión humana con auditoría · video en vivo con cajas de detección.
 
 **Todavía no:** el alta de cámaras desde el dashboard (falta `device-service`), el drag & drop no persiste en la base, los clips se guardan en disco pero no suben a MinIO, no hay login (se usan tokens de desarrollo), y `helmet-detection` sigue siendo un stub — **detectar EPP necesita un modelo entrenado para eso**, que YOLO base no trae.

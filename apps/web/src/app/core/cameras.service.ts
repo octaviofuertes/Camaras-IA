@@ -31,8 +31,13 @@ export interface CamerasResult {
 /** Nombres legibles por cámara mientras device-service no exista. */
 const NAMES: Record<string, { name: string; site: string; scene: string }> = {
   '00000000-0000-4000-b000-00000000ca01': {
-    name: 'Webcam Logitech',
-    site: 'Escritorio',
+    name: 'Webcam Integrada',
+    site: 'Puesto de trabajo',
+    scene: 'office',
+  },
+  '00000000-0000-4000-b000-00000000ca02': {
+    name: 'Logitech C925e',
+    site: 'Vista general oficina',
     scene: 'office',
   },
 };
