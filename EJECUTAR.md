@@ -126,6 +126,9 @@ Después de cambiarlos, el `ai-worker` los toma al reiniciarse.
 
 ## Detalles que ya nos mordieron
 
+- **`ng serve` escucha en IPv6** (`[::1]:4200`), no en `0.0.0.0`. Si buscás su proceso con
+  `netstat -p tcp` no aparece: ese filtro sólo lista IPv4. Por eso `pnpm start` usa
+  `netstat -ano` sin filtro para liberar el puerto.
 - **`proxy.conf.json` no se recarga en caliente.** Si tocás las rutas del proxy del
   dashboard, hay que reiniciar `ng serve` (o `pnpm start`); si no, seguís con la config
   vieja y las llamadas nuevas dan 404.

@@ -47,9 +47,12 @@ const PORTS = { identity: 3001, device: 3003, event: 3004, 'ai-worker': 3010, me
  */
 function freePort(port) {
   try {
+    // Sin `-p tcp`: ese filtro deja fuera los sockets IPv6, y `ng serve` escucha
+    // en [::1]:4200. Con él, el dev-server quedaba vivo entre reinicios y seguía
+    // sirviendo una configuración de proxy vieja.
     const out =
       process.platform === 'win32'
-        ? execSync(`netstat -ano -p tcp | findstr LISTENING | findstr :${port}`, { stdio: ['ignore', 'pipe', 'ignore'] })
+        ? execSync(`netstat -ano | findstr LISTENING | findstr :${port}`, { stdio: ['ignore', 'pipe', 'ignore'] })
             .toString()
         : execSync(`lsof -ti tcp:${port}`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
 
