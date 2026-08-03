@@ -124,6 +124,20 @@ Después de cambiarlos, el `ai-worker` los toma al reiniciarse.
 
 ---
 
+## Detalles que ya nos mordieron
+
+- **`proxy.conf.json` no se recarga en caliente.** Si tocás las rutas del proxy del
+  dashboard, hay que reiniciar `ng serve` (o `pnpm start`); si no, seguís con la config
+  vieja y las llamadas nuevas dan 404.
+- **`localhost` vs `127.0.0.1`.** Node resuelve `localhost` a IPv6 (`::1`) y tanto Docker
+  como los servicios Python publican en IPv4: usar `localhost` da `ECONNREFUSED`. Por eso
+  todas las cadenas de conexión y el proxy apuntan a `127.0.0.1`.
+- **Puerto 5432 ocupado.** Hay un PostgreSQL nativo instalado en Windows; el contenedor
+  del proyecto usa el **5433** para no chocar.
+- **Docker Desktop no arranca con Windows** y alguna vez murió dejando un socket huérfano
+  en `%LOCALAPPDATA%\docker-secrets-engine`. Si no levanta, renombrá esa carpeta y volvé
+  a abrirlo.
+
 ## Verificar que funciona
 
 ```bash
