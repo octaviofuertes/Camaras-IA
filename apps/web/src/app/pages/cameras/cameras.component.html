@@ -70,7 +70,16 @@
       </div>
 
       <div class="cam-grid" [class.list]="view === 'list'" *ngIf="!loading && cameras.length">
-        <article class="cam" *ngFor="let cam of cameras; trackBy: trackCam" [class.busy]="busy === cam.id">
+        <!-- TODA la tarjeta acepta el drop, no sólo la franja punteada: soltar
+             unos píxeles afuera no debe perder la acción. -->
+        <article
+          class="cam"
+          *ngFor="let cam of cameras; trackBy: trackCam"
+          [class.busy]="busy === cam.id"
+          cdkDropList
+          [cdkDropListData]="cam"
+          (cdkDropListDropped)="onDrop($event, cam)"
+        >
           <div class="cam-media">
             <px-camera-feed
               [snapshotUrl]="snapshotUrl(cam)"
@@ -114,8 +123,30 @@
               </span>
             </div>
 
-            <div class="dropzone" cdkDropList [cdkDropListData]="cam" (cdkDropListDropped)="onDrop($event, cam)">
-              <span class="dz-text">Arrastrá módulos aquí</span>
+            <!-- Alternativa al arrastre: elegir de una lista. Más rápido y no
+                 depende de la puntería. -->
+            <div class="add-row">
+              <button class="add-btn" (click)="togglePicker(cam)">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                Agregar módulo
+              </button>
+              <span class="dz-hint">o arrastrá uno del catálogo</span>
+            </div>
+
+            <div class="picker" *ngIf="pickerFor === cam.id">
+              <button
+                class="picker-item"
+                *ngFor="let m of assignableFor(cam)"
+                (click)="assignFromPicker(cam, m)"
+              >
+                <px-module-icon [icon]="iconOf(m).icon" [color]="iconOf(m).color" [size]="22" />
+                <span>{{ m.name }}</span>
+              </button>
+              <div class="picker-empty" *ngIf="!assignableFor(cam).length">
+                Esta cámara ya tiene todos los módulos del catálogo.
+              </div>
             </div>
           </div>
         </article>

@@ -138,6 +138,25 @@ export class CamerasComponent implements OnInit, OnDestroy {
     return ICON_BY_KEY[m.moduleKey] ?? ICON_BY_CATEGORY[m.category] ?? { icon: 'zone', color: '#3b82f6' };
   }
 
+  // ── asignación por lista (alternativa al arrastre) ─────────────────
+  /** Cámara cuyo selector de módulos está abierto, si hay alguno. */
+  pickerFor: string | null = null;
+
+  togglePicker(cam: CameraView): void {
+    this.pickerFor = this.pickerFor === cam.id ? null : cam.id;
+  }
+
+  /** Módulos del catálogo que esta cámara todavía no tiene. */
+  assignableFor(cam: CameraView): ApiModule[] {
+    const puestos = new Set(cam.assignments.map((a) => a.aiModuleId));
+    return this.modules.filter((m) => !puestos.has(m.id));
+  }
+
+  assignFromPicker(cam: CameraView, m: ApiModule): void {
+    this.pickerFor = null;
+    this.assign(cam, m);
+  }
+
   // ── asignación (drag & drop) ───────────────────────────────────────
   /**
    * Soltar un módulo sobre una cámara PERSISTE la asignación: crea la fila en
@@ -145,7 +164,17 @@ export class CamerasComponent implements OnInit, OnDestroy {
    */
   onDrop(event: CdkDragDrop<CameraView>, camera: CameraView): void {
     const mod = event.item.data as ApiModule | undefined;
-    if (!mod) return;
+    if (!mod) {
+      // Si el drop llega sin módulo hay un problema de configuración del
+      // arrastre: se avisa en lugar de no hacer nada en silencio.
+      this.flash('No se pudo leer el módulo arrastrado', 'error');
+      return;
+    }
+    this.assign(camera, mod);
+  }
+
+  /** Punto único de asignación: lo usan tanto el arrastre como el selector. */
+  private assign(camera: CameraView, mod: ApiModule): void {
     if (camera.assignments.some((a) => a.aiModuleId === mod.id)) {
       this.flash(`"${mod.name}" ya está asignado a ${camera.name}`, 'error');
       return;
@@ -153,14 +182,20 @@ export class CamerasComponent implements OnInit, OnDestroy {
 
     this.busy = camera.id;
     const config = this.defaultConfigFor(mod);
-    this.api.assignModule(camera.id, mod.id, config).subscribe((ok) => {
-      this.busy = null;
-      if (ok) {
-        this.flash(`"${mod.name}" asignado a ${camera.name}`, 'ok');
-        this.reload(true);
-      } else {
-        this.flash('No se pudo asignar el módulo', 'error');
-      }
+    this.api.assignModule(camera.id, mod.id, config).subscribe({
+      next: (ok) => {
+        this.busy = null;
+        if (ok) {
+          this.flash(`"${mod.name}" asignado a ${camera.name}. Reiniciá el ai-worker para que lo tome.`, 'ok');
+          this.reload(true);
+        } else {
+          this.flash('No se pudo asignar el módulo', 'error');
+        }
+      },
+      error: (e) => {
+        this.busy = null;
+        this.flash(`No se pudo asignar: ${e?.message ?? e}`, 'error');
+      },
     });
   }
 

@@ -147,6 +147,11 @@ El tercer caso genera un evento real en la base, visible en **Eventos** del dash
 
 ## Detalles que ya nos mordieron
 
+- **El orden al configurar la cámara USB cambia el rendimiento 3x.** Hay que fijar
+  primero la RESOLUCIÓN y después el formato MJPG; al revés DirectShow ignora el
+  pedido y entrega YUY2 sin comprimir, que a 720p satura el bus USB y clava la
+  cámara en 10 fps. Y **nunca** setear `CAP_PROP_FPS` después de MJPG: renegocia el
+  formato y vuelve a YUY2. Medido: `res→MJPG` = 29,6 fps · `res→MJPG→FPS` = 10,0 fps.
 - **`ng serve` escucha en IPv6** (`[::1]:4200`), no en `0.0.0.0`. Si buscás su proceso con
   `netstat -p tcp` no aparece: ese filtro sólo lista IPv4. Por eso `pnpm start` usa
   `netstat -ano` sin filtro para liberar el puerto.

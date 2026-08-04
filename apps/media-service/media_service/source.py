@@ -67,6 +67,7 @@ class CameraSource:
         self.frames_captured = 0
         self.started_at = time.time()
         self._start_delay = 0.0
+        self.pixel_format = ""  # formato real que entrega la cámara (MJPG, YUY2…)
 
     # ── ciclo de vida ────────────────────────────────────────────────
     def start(self, delay: float = 0.0) -> None:
@@ -103,18 +104,34 @@ class CameraSource:
             cap.release()
             return None
 
-        # USB: pedir MJPG en la cámara ANTES de fijar la resolución.
-        # Sin comprimir (YUY2), una sola cámara a 720p ya satura un bus USB 2.0
-        # (~1,3 Gbps contra 480 Mbps), así que dos cámaras a la vez no arrancan.
-        # Con MJPG el ancho de banda cae ~10x y conviven sin problema.
+        # El ORDEN importa y no es el intuitivo: primero la resolución y DESPUÉS
+        # el formato. Al revés, DirectShow descarta el pedido de MJPG y entrega
+        # YUY2 (sin comprimir), que a 720p satura el bus USB y deja la cámara
+        # clavada en ~10 fps. Medido en esta máquina con la Logitech C925e:
+        #   resolución -> MJPG :  33 ms por frame  (30 fps)
+        #   MJPG -> resolución : 100 ms por frame  (10 fps)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+
         if isinstance(self.source, int):
             try:
                 cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
             except Exception:
                 pass
+            # NO se toca CAP_PROP_FPS: pedirlo DESPUÉS de MJPG hace que
+            # DirectShow renegocie el formato y vuelva a YUY2, de 30 fps a 10.
+            # Medido:  res->MJPG = 29,6 fps  |  res->MJPG->FPS = 10,0 fps.
+            # El ritmo de entrega lo controla el bucle de captura, no la cámara.
 
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        if isinstance(self.source, int):
+            fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+            self.pixel_format = fourcc.to_bytes(4, "little").decode(errors="ignore")
+            if self.pixel_format != "MJPG":
+                # Sin compresión el bus USB limita el ritmo: conviene saberlo.
+                log.warning(
+                    "[%s] la cámara entrega %s (no MJPG): el ritmo quedará limitado",
+                    self.camera_id, self.pixel_format,
+                )
         # Buffer mínimo: preferimos el frame más reciente antes que uno viejo
         # en cola (para análisis en vivo, la latencia importa más que no perder
         # frames).
@@ -203,6 +220,17 @@ class CameraSource:
             return self._buf[-1].ts - self._buf[0].ts
 
     def stats(self) -> dict:
+        # Ritmo REAL de los últimos segundos, no el promedio desde que arrancó:
+        # ese promedio arrastra para siempre el tiempo de conexión inicial y
+        # muestra un número más bajo del que la cámara está dando ahora.
+        with self._lock:
+            recientes = list(self._buf)[-40:]
+        fps_actual = 0.0
+        if len(recientes) >= 2:
+            lapso = recientes[-1].ts - recientes[0].ts
+            if lapso > 0:
+                fps_actual = (len(recientes) - 1) / lapso
+
         uptime = max(time.time() - self.started_at, 1e-6)
         return {
             "cameraId": self.camera_id,
@@ -210,7 +238,10 @@ class CameraSource:
             "connected": self.connected,
             "lastError": self.last_error,
             "framesCaptured": self.frames_captured,
-            "fps": round(self.frames_captured / uptime, 2),
+            "fps": round(fps_actual, 2),
+            "fpsPromedio": round(self.frames_captured / uptime, 2),
+            "fpsObjetivo": self.target_fps,
+            "formato": self.pixel_format,
             "bufferedFrames": len(self._buf),
             "bufferSeconds": round(self.buffer_span(), 1),
         }
