@@ -199,8 +199,14 @@ export class CamerasComponent implements OnInit, OnDestroy {
   }
 
   saveCamera(): void {
-    const name = this.form.name.trim();
-    const source = this.form.sourceKind === 'usb' ? this.form.usbIndex.trim() : this.form.rtspUrl.trim();
+    // `String(...)` y no `.trim()` directo: un <input type="number"> con ngModel
+    // entrega un NÚMERO, y llamar .trim() sobre él lanza una excepción que muere
+    // en el manejador del clic — el botón no hacía nada y sin ningún mensaje.
+    const txt = (v: unknown): string => String(v ?? '').trim();
+
+    const name = txt(this.form.name);
+    const source = this.form.sourceKind === 'usb' ? txt(this.form.usbIndex) : txt(this.form.rtspUrl);
+
     if (!name) {
       this.formError = 'Poné un nombre para la cámara.';
       return;
@@ -209,20 +215,37 @@ export class CamerasComponent implements OnInit, OnDestroy {
       this.formError = this.form.sourceKind === 'usb' ? 'Indicá el índice USB.' : 'Pegá la URL RTSP.';
       return;
     }
+    if (this.form.sourceKind === 'usb' && !/^\d+$/.test(source)) {
+      this.formError = 'El índice debe ser un número entero (0, 1, 2…).';
+      return;
+    }
+
+    const fps = Number(this.form.fps);
+    if (!Number.isFinite(fps) || fps < 1 || fps > 30) {
+      this.formError = 'Los cuadros por segundo deben estar entre 1 y 30.';
+      return;
+    }
 
     this.saving = true;
     this.formError = null;
     this.api
-      .createCamera({ name, location: this.form.location.trim() || undefined, source, fps: Number(this.form.fps) || 10 })
-      .subscribe((res) => {
-        this.saving = false;
-        if ('error' in res) {
-          this.formError = res.error;
-          return;
-        }
-        this.showForm = false;
-        this.flash(`Cámara "${res.name}" creada. La captura arranca en unos segundos.`, 'ok');
-        this.reload(true);
+      .createCamera({ name, location: txt(this.form.location) || undefined, source, fps })
+      .subscribe({
+        next: (res) => {
+          this.saving = false;
+          if ('error' in res) {
+            this.formError = res.error;
+            return;
+          }
+          this.showForm = false;
+          this.flash(`Cámara "${res.name}" creada. La captura arranca en unos segundos.`, 'ok');
+          this.reload(true);
+        },
+        // Ningún fallo puede quedar mudo: si algo revienta, se dice en el formulario.
+        error: (e) => {
+          this.saving = false;
+          this.formError = `No se pudo crear la cámara: ${e?.message ?? e}`;
+        },
       });
   }
 

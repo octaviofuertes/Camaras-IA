@@ -64,6 +64,13 @@ export class CamerasController {
 
     const auth = this.auth(req);
     return this.db.withTenant(auth.organizationId, async (client) => {
+      const enUso = await this.repo.cameraUsingSource(client, source);
+      if (enUso) {
+        throw new BadRequestException(
+          `Ese origen ya lo usa la cámara "${enUso}". Dos cámaras no pueden capturar el mismo dispositivo.`,
+        );
+      }
+
       const siteId = body['siteId'] ? String(body['siteId']) : await this.repo.defaultSiteId(client);
       if (!siteId) throw new BadRequestException('No hay ninguna sucursal donde crear la cámara');
       return this.repo.create(client, auth.organizationId, {

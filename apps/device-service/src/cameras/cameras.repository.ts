@@ -298,6 +298,25 @@ export class CamerasRepository {
     return (r.rowCount ?? 0) > 0;
   }
 
+  /**
+   * ¿Ya hay otra cámara usando este origen?
+   *
+   * Dos cámaras sobre el mismo dispositivo USB (o la misma URL RTSP) no pueden
+   * capturar a la vez: la segunda queda muda para siempre. Vale más rechazarlo
+   * al darla de alta que dejar una cámara que nunca funciona.
+   */
+  async cameraUsingSource(client: PoolClient, source: string, excludeId?: string): Promise<string | null> {
+    const stored = /^\d+$/.test(source.trim()) ? `usb://${source.trim()}` : source.trim();
+    const { rows } = await client.query<{ name: string }>(
+      `SELECT c.name FROM streams s
+       JOIN cameras c ON c.id = s.camera_id
+       WHERE s.rtsp_url = $1 AND ($2::uuid IS NULL OR c.id <> $2::uuid)
+       LIMIT 1`,
+      [stored, excludeId ?? null],
+    );
+    return rows[0]?.name ?? null;
+  }
+
   /** Sucursal por defecto de la organización (para el alta rápida desde la UI). */
   async defaultSiteId(client: PoolClient): Promise<string | null> {
     const { rows } = await client.query<{ id: string }>('SELECT id FROM sites ORDER BY created_at LIMIT 1');
