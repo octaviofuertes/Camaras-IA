@@ -28,7 +28,7 @@ import numpy as np
 
 RAIZ_PROYECTO = Path(__file__).parent.parent
 sys.path.insert(0, str(RAIZ_PROYECTO / "modules" / "fall-detection"))
-from features import FEATURES_PER_FRAME, WINDOW, build_sequence  # noqa: E402
+from features import FEATURES_PER_FRAME, WINDOW, build_sequence, pad_or_trim  # noqa: E402
 
 DATOS = Path(__file__).parent / "data" / "urfd"
 SALIDA = Path(__file__).parent / "data" / "sequences.npz"
@@ -115,15 +115,29 @@ def procesar_secuencia(modelo, carpeta: Path, etiquetas_sec: dict[int, int]):
     return frames, etqs
 
 
+# Paso entre ventanas. Con 2 se obtienen bastantes más ejemplos que con 5, y no
+# hay riesgo de inflar las métricas porque el reparto train/test es por
+# SECUENCIA: las ventanas parecidas caen siempre del mismo lado.
+PASO = 2
+
+
 def ventanas_de(frames, etqs, es_caida: bool):
     """Corta la secuencia en ventanas solapadas y decide la etiqueta de cada una."""
     X, y = [], []
-    if len(frames) < WINDOW // 2:
-        return X, y
+    if len(frames) < 8:
+        return X, y  # demasiado corta para tener siquiera contexto
 
     secuencia = build_sequence(frames)
-    # Paso de 5 frames: más ejemplos sin que queden casi idénticos entre sí.
-    for fin in range(WINDOW, len(secuencia) + 1, 5):
+
+    # Secuencias más cortas que la ventana: se rellenan en lugar de tirarlas.
+    # Sin esto se perdían 17 de las 30 caídas del dataset, porque muchas duran
+    # menos de 90 frames y al muestrear 1 de cada 3 quedaban por debajo de 30.
+    if len(secuencia) < WINDOW:
+        X.append(pad_or_trim(secuencia))
+        y.append(1 if (es_caida and etqs[-1] == 1) else 0)
+        return X, y
+
+    for fin in range(WINDOW, len(secuencia) + 1, PASO):
         ventana = secuencia[fin - WINDOW : fin]
         etq_final = etqs[fin - 1]
         # Positivo sólo si es una secuencia de caída Y la ventana termina en el

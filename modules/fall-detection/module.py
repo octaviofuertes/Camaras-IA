@@ -39,6 +39,7 @@ from percepta_contracts import (
 sys.path.insert(0, str(Path(__file__).parent))
 from detector import FallConfig, FallDetector, Keypoint, PoseFrame  # noqa: E402
 from features import WINDOW, frame_features, hip_y, pad_or_trim  # noqa: E402
+from classifier import FallClassifier  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +57,7 @@ class FallDetectionModule(PerceptaModule):
         self._ventanas: dict[int, list] = {}
         self._ultimo_hip: dict[int, float] = {}
         self._ultimo_ts: dict[int, float] = {}
+        self._clasificador: FallClassifier | None = None
 
     def load(self, ctx: ModuleContext) -> None:
         from ultralytics import YOLO  # import perezoso
@@ -75,6 +77,12 @@ class FallDetectionModule(PerceptaModule):
             if campo in ctx.config:
                 setattr(cfg, campo, type(getattr(cfg, campo))(ctx.config[campo]))
         self._detector = FallDetector(cfg)
+
+        # El clasificador entrenado es opcional: si todavía no se entrenó,
+        # el módulo funciona sólo con reglas.
+        self._clasificador = FallClassifier()
+        if not self._clasificador.disponible:
+            log.info("sin clasificador entrenado: decisión por reglas geométricas")
 
         log.info("cargando modelo de pose %s en %s", weights, ctx.device)
         self._model = YOLO(weights)
@@ -158,13 +166,24 @@ class FallDetectionModule(PerceptaModule):
                 if not interesante:
                     continue
 
+                # Cuando las reglas confirman, se le pregunta al modelo
+                # entrenado: aporta el juicio aprendido de caídas reales, que
+                # la geometría sola no puede dar.
+                confianza = res.confidence
+                origen = "reglas"
+                secuencia_np = None
+                if res.is_fall and ventana and self._clasificador:
+                    secuencia_np = pad_or_trim(np.stack(ventana))
+                    prob = self._clasificador.predecir(secuencia_np)
+                    confianza, origen = self._clasificador.combinar(res.confidence, prob)
+
                 detections.append(
                     Detection(
                         # 'fall' sólo en el frame en que se confirma; el resto es
                         # contexto para el operador, no una alerta.
                         class_label="fall" if res.is_fall else f"person_{res.state.value}",
                         class_id=0,
-                        confidence=res.confidence,
+                        confidence=confianza,
                         bbox=bbox,
                         track_id=track_id,
                         keypoints=[
@@ -182,14 +201,14 @@ class FallDetectionModule(PerceptaModule):
                             "velocity": f"{res.velocity:.2f}",
                             "reason": res.reason,
                             "poseQuality": "ok" if res.quality_ok else "insuficiente",
+                            "origenConfianza": origen,
                         },
                         # Sólo en la alerta confirmada: es la única que un
                         # operador va a etiquetar, y guardar la ventana de cada
                         # frame intermedio sería desperdicio.
                         sequence=(
-                            [[round(float(v), 4) for v in fila]
-                             for fila in pad_or_trim(np.stack(ventana))]
-                            if res.is_fall and ventana
+                            [[round(float(v), 4) for v in fila] for fila in secuencia_np]
+                            if secuencia_np is not None
                             else None
                         ),
                     )
@@ -220,6 +239,12 @@ class FallDetectionModule(PerceptaModule):
             "ok": self._model is not None,
             "model": "yolov8n-pose" if self._model is not None else None,
             "device": self._ctx.device if self._ctx else None,
+            "clasificador": (
+                {"activo": True, "umbral": self._clasificador.umbral,
+                 "test": self._clasificador.metadata.get("test", {})}
+                if self._clasificador and self._clasificador.disponible
+                else {"activo": False, "motivo": "todavía no se entrenó"}
+            ),
             "tracked": len(estados),
             "people": estados,
             "loadedAt": self._loaded_at or None,
