@@ -190,6 +190,18 @@ def detections() -> dict:
     return {p.a.camera_id: p.last_detections for p in _pipelines}
 
 
+@app.get("/modules/{module_key}/state")
+def module_state(module_key: str) -> dict:
+    """Estado interno de un módulo. Sirve para ver en vivo cómo razona."""
+    inst = _instances.get(module_key)
+    if inst is None:
+        return {"error": f"módulo {module_key} no cargado"}
+    try:
+        return inst.health()
+    except Exception as exc:  # noqa: BLE001
+        return {"error": repr(exc)}
+
+
 if __name__ == "__main__":
     import uvicorn
 

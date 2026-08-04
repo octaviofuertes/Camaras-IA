@@ -110,8 +110,14 @@ class CameraPipeline(threading.Thread):
             st.consecutive = 0
             return False, []
 
+        # Hay módulos que ya confirman por su cuenta a lo largo del tiempo: la
+        # detección de caídas, por ejemplo, exige segundos de permanencia en el
+        # suelo y recién ahí emite la alerta, en UN solo frame. Pedirles
+        # persistencia adicional haría que la alerta no se emitiera nunca.
+        self_confirmed = any(d.attributes.get("confirmed") == "true" for d in strong)
+
         # Persistencia: evita alertar por un parpadeo de un solo frame.
-        if st.consecutive < min_persist:
+        if not self_confirmed and st.consecutive < min_persist:
             return False, strong
 
         # Cooldown: no repetir la misma alerta cada pocos segundos.

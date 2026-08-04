@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "1.0.0",
+  "moduleKey": "fall-detection",
+  "name": "Detección de caídas",
+  "description": "Señala posibles caídas de personas mediante estimación de pose, confirmadas por permanencia en el suelo.",
+  "version": "1.0.0",
+  "pluginApiVersion": "1.0.0",
+  "category": "security",
+  "vendor": "percepta-core",
+  "model": {
+    "backend": "yolo",
+    "artifactRef": "yolov8n-pose.pt",
+    "classes": ["person"]
+  },
+  "input": {
+    "requiresZones": false,
+    "minFps": 5,
+    "maxFps": 15,
+    "colorSpace": "bgr"
+  },
+  "configSchemaRef": "./config.schema.json",
+  "configSchemaVersion": "1.0.0",
+  "eventTypes": [
+    { "type": "person.fall", "defaultSeverity": "critical", "eventClass": "alert" }
+  ],
+  "resources": {
+    "gpu": false,
+    "vramMb": 0,
+    "targetFps": 8
+  }
+}

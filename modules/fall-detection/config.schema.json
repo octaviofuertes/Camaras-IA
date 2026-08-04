@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Configuración de Detección de caídas",
+  "description": "Una caída se confirma cuando la persona desciende rápido, queda horizontal y PERMANECE en el suelo. Subir 'confirmSeconds' reduce falsas alarmas; bajarlo alerta antes.",
+  "type": "object",
+  "properties": {
+    "confirmSeconds": {
+      "type": "number",
+      "title": "Segundos en el suelo para confirmar",
+      "description": "Cuánto debe permanecer caída antes de alertar. Es el filtro principal contra falsas alarmas: agacharse o sentarse no supera este tiempo.",
+      "minimum": 0.5,
+      "maximum": 30,
+      "default": 3
+    },
+    "downAngleDeg": {
+      "type": "number",
+      "title": "Ángulo de torso horizontal (grados)",
+      "description": "A partir de cuántos grados respecto de la vertical se considera que está tendida. 90° es completamente horizontal.",
+      "minimum": 30,
+      "maximum": 90,
+      "default": 55
+    },
+    "fallVelocity": {
+      "type": "number",
+      "title": "Velocidad de descenso",
+      "description": "Velocidad de bajada que despierta la sospecha, medida en alturas de cuerpo por segundo (independiente de la distancia a la cámara).",
+      "minimum": 0.1,
+      "maximum": 3,
+      "default": 0.7
+    },
+    "minConfidence": {
+      "type": "number",
+      "title": "Confianza mínima",
+      "description": "Por debajo de este valor la alerta no se genera.",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 0.55
+    },
+    "recoverySeconds": {
+      "type": "number",
+      "title": "Ventana de recuperación",
+      "description": "Si tras un descenso brusco no queda tendida en este tiempo, se descarta.",
+      "minimum": 0.5,
+      "maximum": 10,
+      "default": 2
+    },
+    "stillnessVelocity": {
+      "type": "number",
+      "title": "Umbral de inmovilidad",
+      "description": "Movimiento por debajo del cual se considera que la persona está quieta en el suelo.",
+      "minimum": 0.01,
+      "maximum": 1,
+      "default": 0.15
+    },
+    "downRatio": {
+      "type": "number",
+      "title": "Relación alto/ancho tendida",
+      "description": "Respaldo cuando el esqueleto no se ve bien: por debajo de este valor el cuerpo está tendido.",
+      "minimum": 0.2,
+      "maximum": 2,
+      "default": 1
+    },
+    "keypointScore": {
+      "type": "number",
+      "title": "Confianza mínima por punto del esqueleto",
+      "minimum": 0.05,
+      "maximum": 0.9,
+      "default": 0.3
+    },
+    "minTorsoPoints": {
+      "type": "integer",
+      "title": "Puntos de torso visibles mínimos",
+      "description": "De 4 (dos hombros y dos caderas). Con menos, el módulo no afirma una caída.",
+      "minimum": 1,
+      "maximum": 4,
+      "default": 3
+    },
+    "imgsz": {
+      "type": "integer",
+      "title": "Resolución de inferencia",
+      "enum": [320, 480, 640, 960],
+      "default": 640
+    }
+  },
+  "additionalProperties": false
+}

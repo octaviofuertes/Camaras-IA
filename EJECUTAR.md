@@ -124,6 +124,27 @@ Después de cambiarlos, el `ai-worker` los toma al reiniciarse.
 
 ---
 
+## Probar la detección de caídas
+
+El módulo está asignado a la Logitech. Para verlo razonar en vivo:
+
+```bash
+node tools/probar-caidas.js
+```
+
+Muestra en qué estado ve a cada persona. Probá esta secuencia:
+
+| Qué hacés | Qué debería pasar |
+|---|---|
+| Parado frente a la cámara | `de pie` |
+| Te agachás y te levantás rápido | pasa por `CAYENDO` pero **no alerta** |
+| Te acostás y te quedás quieto 3 s | `EN EL SUELO` → **CAÍDA CONFIRMADA** |
+
+El tercer caso genera un evento real en la base, visible en **Eventos** del dashboard.
+
+> Ajustá la sensibilidad desde la configuración del módulo: `confirmSeconds` es el
+> parámetro clave. Más alto = menos falsas alarmas pero alerta más tarde.
+
 ## Detalles que ya nos mordieron
 
 - **`ng serve` escucha en IPv6** (`[::1]:4200`), no en `0.0.0.0`. Si buscás su proceso con
@@ -163,6 +184,6 @@ docker compose exec -T postgres psql "postgresql://percepta_app:percepta_app_dev
 
 ## Estado real
 
-**Funciona de verdad:** alta y baja de cámaras desde el dashboard · asignación de módulos por drag & drop que persiste en la base · captura simultánea de varias cámaras USB/RTSP con reconexión · detección YOLO de personas y vehículos · reglas de confianza/persistencia/cooldown · eventos persistidos con aislamiento multi-tenant · workflow de revisión humana con auditoría · video en vivo con cajas de detección.
+**Funciona de verdad:** detección de caídas por pose con confirmación temporal (11 pruebas automatizadas) · alta y baja de cámaras desde el dashboard · asignación de módulos por drag & drop que persiste en la base · captura simultánea de varias cámaras USB/RTSP con reconexión · detección YOLO de personas y vehículos · reglas de confianza/persistencia/cooldown · eventos persistidos con aislamiento multi-tenant · workflow de revisión humana con auditoría · video en vivo con cajas de detección.
 
 **Todavía no:** no hay pantalla de login (la sesión se inicia sola con el usuario de desarrollo), los clips se guardan en disco pero no suben a MinIO, no hay login (se usan tokens de desarrollo), y `helmet-detection` sigue siendo un stub — **detectar EPP necesita un modelo entrenado para eso**, que YOLO base no trae.
