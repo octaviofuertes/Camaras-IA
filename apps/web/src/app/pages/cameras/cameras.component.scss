@@ -160,9 +160,10 @@
 .dropzone:hover { border-color: var(--accent); color: var(--text-dim); }
 .dz-info { flex-shrink: 0; opacity: 0.7; }
 
-/* Resaltado cuando hay un módulo sobrevolando */
-.dropzone.cdk-drop-list-receiving,
-.dropzone.cdk-drop-list-dragging {
+/* Resaltado al sobrevolar: lo dispara la tarjeta entera, que es quien recibe
+   el drop. El recuadro punteado sigue siendo la señal visual de dónde soltar. */
+.cam.cdk-drop-list-receiving .dropzone,
+.cam.cdk-drop-list-dragging .dropzone {
   border-color: var(--accent-light);
   background: var(--accent-soft);
   color: var(--accent-light);
@@ -328,40 +329,9 @@ code { background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 4px; 
   padding: 14px 18px; border-top: 1px solid var(--border);
 }
 
-/* ─── Asignar módulo por lista (alternativa al arrastre) ─── */
-.add-row {
-  display: flex; align-items: center; gap: 9px;
-  margin-top: 10px; flex-wrap: wrap;
-}
-.add-btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  background: var(--panel); border: 1px dashed var(--border-strong);
-  color: var(--text-dim); border-radius: var(--radius-sm);
-  padding: 7px 11px; font-size: 12px; cursor: pointer; font-family: inherit;
-}
-.add-btn:hover { border-color: var(--accent); color: var(--accent-light); background: var(--accent-soft); }
-.dz-hint { font-size: 11px; color: var(--text-mute); }
 
-.picker {
-  margin-top: 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--panel);
-  overflow: hidden;
-}
-.picker-item {
-  display: flex; align-items: center; gap: 9px; width: 100%;
-  background: transparent; border: none; border-bottom: 1px solid var(--border);
-  color: var(--text); padding: 9px 11px; font-size: 12.5px;
-  cursor: pointer; text-align: left; font-family: inherit;
-}
-.picker-item:last-child { border-bottom: none; }
-.picker-item:hover { background: var(--accent-soft); }
-.picker-empty { padding: 11px; font-size: 11.5px; color: var(--text-mute); }
-
-/* La tarjeta entera resalta cuando hay un módulo encima */
+/* La tarjeta entera acepta el drop y lo hace notar */
 .cam.cdk-drop-list-receiving,
 .cam.cdk-drop-list-dragging {
   border-color: var(--accent-light);
-  background: var(--accent-soft);
 }

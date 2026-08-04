@@ -123,30 +123,14 @@
               </span>
             </div>
 
-            <!-- Alternativa al arrastre: elegir de una lista. Más rápido y no
-                 depende de la puntería. -->
-            <div class="add-row">
-              <button class="add-btn" (click)="togglePicker(cam)">
-                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
-                Agregar módulo
-              </button>
-              <span class="dz-hint">o arrastrá uno del catálogo</span>
-            </div>
-
-            <div class="picker" *ngIf="pickerFor === cam.id">
-              <button
-                class="picker-item"
-                *ngFor="let m of assignableFor(cam)"
-                (click)="assignFromPicker(cam, m)"
-              >
-                <px-module-icon [icon]="iconOf(m).icon" [color]="iconOf(m).color" [size]="22" />
-                <span>{{ m.name }}</span>
-              </button>
-              <div class="picker-empty" *ngIf="!assignableFor(cam).length">
-                Esta cámara ya tiene todos los módulos del catálogo.
-              </div>
+            <!-- Sólo visual: quien recibe el drop es la tarjeta entera (ver el
+                 cdkDropList del <article>), así soltar unos píxeles afuera de
+                 este recuadro igual funciona. -->
+            <div class="dropzone">
+              <span class="dz-text">Arrastrá módulos aquí</span>
+              <svg class="dz-info" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8v.01" />
+              </svg>
             </div>
           </div>
         </article>

@@ -138,25 +138,6 @@ export class CamerasComponent implements OnInit, OnDestroy {
     return ICON_BY_KEY[m.moduleKey] ?? ICON_BY_CATEGORY[m.category] ?? { icon: 'zone', color: '#3b82f6' };
   }
 
-  // ── asignación por lista (alternativa al arrastre) ─────────────────
-  /** Cámara cuyo selector de módulos está abierto, si hay alguno. */
-  pickerFor: string | null = null;
-
-  togglePicker(cam: CameraView): void {
-    this.pickerFor = this.pickerFor === cam.id ? null : cam.id;
-  }
-
-  /** Módulos del catálogo que esta cámara todavía no tiene. */
-  assignableFor(cam: CameraView): ApiModule[] {
-    const puestos = new Set(cam.assignments.map((a) => a.aiModuleId));
-    return this.modules.filter((m) => !puestos.has(m.id));
-  }
-
-  assignFromPicker(cam: CameraView, m: ApiModule): void {
-    this.pickerFor = null;
-    this.assign(cam, m);
-  }
-
   // ── asignación (drag & drop) ───────────────────────────────────────
   /**
    * Soltar un módulo sobre una cámara PERSISTE la asignación: crea la fila en
