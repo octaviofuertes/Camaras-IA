@@ -156,6 +156,11 @@ class CameraPipeline(threading.Thread):
             },
             "metadata": {"detector": mod_cfg["moduleKey"], "objects": len(dets)},
         }
+
+        # Si el módulo aportó la ventana temporal que sostiene la alerta, viaja
+        # con el evento: es la materia prima del reentrenamiento.
+        if getattr(top, "sequence", None):
+            payload["trainingSequence"] = top.sequence
         try:
             r = requests.post(
                 f"{self.event_url}/api/v1/events",

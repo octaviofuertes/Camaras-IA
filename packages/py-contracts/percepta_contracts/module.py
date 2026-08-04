@@ -37,6 +37,10 @@ class Detection:
     keypoints: list[tuple[str, float, float, float]] = field(default_factory=list)
     in_zones: list[str] = field(default_factory=list)
     attributes: dict[str, str] = field(default_factory=dict)
+    # Contexto temporal que produjo la detección (ventana × features). Lo usan
+    # los módulos que deciden mirando varios frames, como el de caídas: es lo
+    # que después se etiqueta con el veredicto humano y sirve para reentrenar.
+    sequence: list[list[float]] | None = None
 
 
 @dataclass(frozen=True)

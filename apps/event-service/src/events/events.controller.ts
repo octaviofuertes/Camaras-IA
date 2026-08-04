@@ -33,6 +33,13 @@ interface Paged<T> {
 export class EventsController {
   constructor(private readonly events: EventsService) {}
 
+  /** Cuántas muestras de entrenamiento se acumularon con el feedback humano. */
+  @Get('training/stats')
+  @RequirePermissions('events:read')
+  async trainingStats(@Req() req: Request): Promise<Record<string, number>> {
+    return this.events.trainingStats(req.auth as AuthContext);
+  }
+
   @Get()
   @RequirePermissions('events:read')
   async list(@Req() req: Request, @Query() q: Record<string, string>): Promise<Paged<EventDto>> {
@@ -93,9 +100,22 @@ export class EventsController {
       trackId: body['trackId'] !== undefined ? Number(body['trackId']) : undefined,
       detection: (body['detection'] as Record<string, unknown>) ?? undefined,
       metadata: (body['metadata'] as Record<string, unknown>) ?? undefined,
+      trainingSequence: Array.isArray(body['trainingSequence'])
+        ? (body['trainingSequence'] as number[][])
+        : undefined,
     });
     // event === null => la deduplicación lo descartó. No es error.
     return { created: !!event, event };
+  }
+
+  /** Evidencias (clips) de un evento confirmado. */
+  @Get(':id/evidences')
+  @RequirePermissions('evidences:read')
+  async evidences(
+    @Req() req: Request,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<{ items: Record<string, unknown>[] }> {
+    return { items: await this.events.listEvidences(req.auth as AuthContext, id) };
   }
 
   @Get(':id')
@@ -130,7 +150,7 @@ export class EventsController {
   async resolve(
     @Req() req: Request,
     @Param('id', new ParseUUIDPipe()) id: string,
-    @Body() body: { resolution?: string; note?: string },
+    @Body() body: { resolution?: string; note?: string; title?: string },
   ): Promise<EventDto> {
     const resolution = body?.resolution;
     if (!resolution || !RESOLUTIONS.includes(resolution as Resolution)) {
@@ -142,6 +162,7 @@ export class EventsController {
       resolution as Resolution,
       body?.note,
       req.headers['x-request-id'] as string | undefined,
+      typeof body?.title === 'string' ? body.title.trim() || undefined : undefined,
     );
   }
 }

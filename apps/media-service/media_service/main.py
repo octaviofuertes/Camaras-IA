@@ -14,6 +14,7 @@ señalización ni STUN/TURN, y funciona igual con USB que con RTSP. WebRTC
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -24,9 +25,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 from fastapi import FastAPI, HTTPException, Response
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
-from .clips import build_clip
+from .clips import PRE_ROLL_S, POST_ROLL_S, build_clip
 from .registry import CameraRegistry
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -126,18 +127,52 @@ def stream(camera_id: str) -> StreamingResponse:
 
 @app.post("/cameras/{camera_id}/clip")
 def make_clip(camera_id: str, body: dict) -> dict:
-    """Arma el clip de un evento (10 s antes / evento / 10 s después)."""
+    """Arma el clip de un evento (10 s antes / evento / 10 s después).
+
+    Con `wait: true` responde recién cuando el archivo está listo, e informa su
+    tamaño y hash. Es lo que necesita event-service para registrar la evidencia
+    con datos verificables en vez de una promesa.
+    """
     src = _get(camera_id)
     event_id = body.get("eventId") or f"ev-{int(time.time())}"
     center = float(body.get("centerTs") or time.time())
+    esperar = bool(body.get("wait"))
     dest = EVIDENCE_DIR / camera_id / f"{event_id}.mp4"
 
-    # El post-roll obliga a esperar: se hace fuera del request.
-    def work() -> None:
-        build_clip(src, center, dest)
+    if not esperar:
+        threading.Thread(target=lambda: build_clip(src, center, dest), daemon=True).start()
+        return {"accepted": True, "cameraId": camera_id, "eventId": event_id, "path": str(dest)}
 
-    threading.Thread(target=work, daemon=True).start()
-    return {"accepted": True, "cameraId": camera_id, "eventId": event_id, "path": str(dest)}
+    ruta = build_clip(src, center, dest)
+    if ruta is None or not ruta.is_file():
+        raise HTTPException(status_code=503, detail="no se pudo armar el clip (¿buffer vacío?)")
+
+    datos = ruta.read_bytes()
+    return {
+        "accepted": True,
+        "cameraId": camera_id,
+        "eventId": event_id,
+        "path": str(ruta),
+        "bytes": len(datos),
+        "sha256": hashlib.sha256(datos).hexdigest(),
+        "durationMs": int((PRE_ROLL_S + POST_ROLL_S) * 1000),
+    }
+
+
+@app.get("/evidence/{camera_id}/{nombre}")
+def get_evidence(camera_id: str, nombre: str) -> FileResponse:
+    """Descarga de un clip guardado.
+
+    El nombre se sanea contra path traversal: sólo se sirve lo que está dentro
+    del directorio de evidencias de esa cámara.
+    """
+    if "/" in nombre or "\\" in nombre or ".." in nombre:
+        raise HTTPException(status_code=400, detail="nombre inválido")
+    ruta = (EVIDENCE_DIR / camera_id / nombre).resolve()
+    base = EVIDENCE_DIR.resolve()
+    if not str(ruta).startswith(str(base)) or not ruta.is_file():
+        raise HTTPException(status_code=404, detail="evidencia no encontrada")
+    return FileResponse(ruta, media_type="video/mp4", filename=nombre)
 
 
 if __name__ == "__main__":

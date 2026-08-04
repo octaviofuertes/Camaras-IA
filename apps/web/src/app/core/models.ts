@@ -33,6 +33,7 @@ export interface Camera {
 export interface EventItem {
   id: string;
   occurredAt: string;
+  cameraId?: string;
   eventType: string;
   title: string;
   moduleKey: string;
@@ -42,6 +43,8 @@ export interface EventItem {
   status: EventStatus;
   confidence: number;
   reviewedBy?: string;
+  /** Nombre que le puso el operador al confirmarla. */
+  reviewTitle?: string;
 }
 
 /** Etiquetas en español de las categorías (la DB guarda el enum en inglés). */

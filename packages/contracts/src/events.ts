@@ -54,6 +54,8 @@ export interface EventDto {
   reviewedBy?: string;
   reviewedAt?: string;
   reviewNote?: string;
+  /** Nombre que le puso el operador al confirmarla. */
+  reviewTitle?: string;
   createdAt: string;
 }
 
@@ -64,4 +66,6 @@ export interface AcknowledgeEventDto {
 export interface ResolveEventDto {
   resolution: Extract<EventStatus, 'confirmed' | 'dismissed' | 'false_positive'>;
   note?: string;
+  /** Al confirmar una caída real, el nombre con el que se guarda la evidencia. */
+  title?: string;
 }

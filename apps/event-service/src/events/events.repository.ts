@@ -43,6 +43,7 @@ interface EventRow {
   reviewed_by: string | null;
   reviewed_at: Date | null;
   review_note: string | null;
+  review_title: string | null;
   created_at: Date;
 }
 
@@ -70,6 +71,7 @@ function toDto(r: EventRow): EventDto {
     reviewedBy: r.reviewed_by ?? undefined,
     reviewedAt: r.reviewed_at?.toISOString(),
     reviewNote: r.review_note ?? undefined,
+    reviewTitle: r.review_title ?? undefined,
     createdAt: r.created_at.toISOString(),
   };
 }
@@ -77,7 +79,7 @@ function toDto(r: EventRow): EventDto {
 const COLUMNS = `id, occurred_at, occurred_at::text AS occurred_at_raw,
   organization_id, site_id, camera_id, ai_module_id,
   module_key, module_version, event_type, event_class, severity, confidence, status,
-  zone_ids, track_id, detection, metadata, reviewed_by, reviewed_at, review_note, created_at`;
+  zone_ids, track_id, detection, metadata, reviewed_by, reviewed_at, review_note, review_title, created_at`;
 
 /** Evento + la clave de tiempo sin pérdida de precisión (uso interno). */
 export interface EventWithKey {
@@ -163,12 +165,14 @@ export class EventsRepository {
       toStatus: EventStatus;
       reviewedBy: string;
       reviewNote?: string;
+      reviewTitle?: string;
     },
   ): Promise<EventDto | null> {
     const { rows } = await client.query<EventRow>(
       `UPDATE events
          SET status = $1, reviewed_by = $2, reviewed_at = now(),
-             review_note = COALESCE($3, review_note)
+             review_note = COALESCE($3, review_note),
+             review_title = COALESCE($7, review_title)
        WHERE id = $4 AND occurred_at = $5 AND status = $6
        RETURNING ${COLUMNS}`,
       [
@@ -178,6 +182,7 @@ export class EventsRepository {
         params.id,
         params.occurredAt,
         params.fromStatus,
+        params.reviewTitle ?? null,
       ],
     );
     return rows[0] ? toDto(rows[0]) : null;
@@ -229,6 +234,122 @@ export class EventsRepository {
       ],
     );
     return rows[0] ? toDto(rows[0]) : null;
+  }
+
+  /**
+   * Guarda la secuencia de esqueletos que produjo una alerta.
+   *
+   * Queda sin etiqueta hasta que un operador la revise: su veredicto es lo que
+   * convierte esta fila en un ejemplo de entrenamiento.
+   */
+  async saveTrainingSample(
+    client: PoolClient,
+    s: {
+      organizationId: string;
+      cameraId: string;
+      eventId: string;
+      eventOccurredAt: string;
+      sequence: number[][];
+      predicted?: number;
+      ruleConfidence?: number;
+    },
+  ): Promise<void> {
+    if (!s.sequence?.length) return;
+    await client.query(
+      `INSERT INTO fall_training_samples
+         (organization_id, camera_id, event_id, event_occurred_at, sequence,
+          window_frames, n_features, predicted, rule_confidence)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9)`,
+      [
+        s.organizationId, s.cameraId, s.eventId, s.eventOccurredAt,
+        JSON.stringify(s.sequence), s.sequence.length, s.sequence[0]?.length ?? 0,
+        s.predicted ?? null, s.ruleConfidence ?? null,
+      ],
+    );
+  }
+
+  /** El veredicto humano se convierte en la etiqueta de la muestra. */
+  async labelTrainingSample(
+    client: PoolClient,
+    eventId: string,
+    label: 0 | 1,
+    userId: string,
+  ): Promise<number> {
+    const r = await client.query(
+      `UPDATE fall_training_samples
+          SET label = $1, label_source = 'human', labeled_by = $2, labeled_at = now()
+        WHERE event_id = $3 AND label IS NULL`,
+      [label, userId, eventId],
+    );
+    return r.rowCount ?? 0;
+  }
+
+  /** Evidencia (imagen o clip) asociada a un evento. */
+  async saveEvidence(
+    client: PoolClient,
+    e: {
+      organizationId: string;
+      eventId: string;
+      eventOccurredAt: string;
+      kind: 'image' | 'clip';
+      storageKey: string;
+      contentType: string;
+      bytes: number;
+      sha256: string;
+      durationMs?: number;
+      title?: string;
+      createdBy?: string;
+    },
+  ): Promise<string> {
+    const { rows } = await client.query<{ id: string }>(
+      `INSERT INTO evidences
+         (organization_id, event_id, event_occurred_at, kind, storage_key, content_type,
+          bytes, duration_ms, pre_roll_ms, post_roll_ms, sha256, status, title, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,10000,10000,$9,'ready',$10,$11)
+       RETURNING id`,
+      [
+        e.organizationId, e.eventId, e.eventOccurredAt, e.kind, e.storageKey,
+        e.contentType, e.bytes, e.durationMs ?? null, e.sha256, e.title ?? null, e.createdBy ?? null,
+      ],
+    );
+    return rows[0].id;
+  }
+
+  async listEvidences(client: PoolClient, eventId: string): Promise<Record<string, unknown>[]> {
+    const { rows } = await client.query(
+      `SELECT id, kind, storage_key, content_type, bytes, duration_ms, title, status, created_at
+         FROM evidences WHERE event_id = $1 ORDER BY created_at`,
+      [eventId],
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      kind: r.kind,
+      storageKey: r.storage_key,
+      contentType: r.content_type,
+      bytes: Number(r.bytes),
+      durationMs: r.duration_ms,
+      title: r.title,
+      status: r.status,
+      createdAt: r.created_at?.toISOString?.() ?? r.created_at,
+    }));
+  }
+
+  /** Estado del aprendizaje: cuántas muestras hay y cuántas ya se revisaron. */
+  async trainingStats(client: PoolClient): Promise<Record<string, number>> {
+    const { rows } = await client.query<{ total: string; caidas: string; falsas: string; pendientes: string }>(
+      `SELECT count(*)                                    AS total,
+              count(*) FILTER (WHERE label = 1)           AS caidas,
+              count(*) FILTER (WHERE label = 0)           AS falsas,
+              count(*) FILTER (WHERE label IS NULL)       AS pendientes
+         FROM fall_training_samples`,
+    );
+    const r = rows[0];
+    return {
+      total: Number(r?.total ?? 0),
+      confirmadas: Number(r?.caidas ?? 0),
+      falsosPositivos: Number(r?.falsas ?? 0),
+      pendientes: Number(r?.pendientes ?? 0),
+    };
   }
 
   /** Rastro de auditoría append-only, en la MISMA transacción que la transición. */

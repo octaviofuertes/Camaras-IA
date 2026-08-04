@@ -23,6 +23,39 @@
     </span>
   </div>
 
+  <!-- Notificación de caída sin revisar -->
+  <div class="fall-alert" *ngIf="fallAlert as fa">
+    <div class="fa-icon">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="6" cy="6" r="2" /><path d="m4 12 5-2 6 5h5" /><path d="m9 10-3 6" />
+      </svg>
+    </div>
+    <div class="fa-body">
+      <div class="fa-title">Posible caída detectada</div>
+      <div class="fa-meta">{{ fa.siteName }} · {{ fa.cameraName }} · {{ fa.occurredAt }} ·
+        confianza {{ confidencePct(fa.confidence) }}%</div>
+    </div>
+    <button class="btn sm" (click)="irAlEvento(fa)">Revisar</button>
+    <button class="fa-x" (click)="descartarAlerta()" title="Ocultar aviso">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M18 6 6 18M6 6l12 12" />
+      </svg>
+    </button>
+  </div>
+
+  <!-- Cuánto aprendió el sistema del feedback de los operadores -->
+  <div class="learning" *ngIf="stats && stats.total > 0">
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M12 3v3M12 18v3M3 12h3M18 12h3" /><circle cx="12" cy="12" r="4" />
+    </svg>
+    <span>
+      <strong>{{ stats.total }}</strong> muestras acumuladas para reentrenar:
+      <strong>{{ stats.confirmadas }}</strong> caídas confirmadas,
+      <strong>{{ stats.falsosPositivos }}</strong> falsos positivos
+      <span class="mute" *ngIf="stats.pendientes"> · {{ stats.pendientes }} sin revisar</span>
+    </span>
+  </div>
+
   <section class="split">
     <div class="panel">
       <div class="panel-head">
@@ -103,8 +136,12 @@
                   Reconocer
                 </button>
                 <ng-container *ngIf="e.status === 'acknowledged'">
-                  <button class="btn sm ok" [disabled]="demoMode" (click)="resolve(e, 'confirmed')">
-                    Confirmar
+                  <button
+                    class="btn sm ok"
+                    [disabled]="demoMode"
+                    (click)="esCaida(e) ? abrirConfirmacion(e) : resolve(e, 'confirmed')"
+                  >
+                    {{ esCaida(e) ? 'Fue una caída real' : 'Confirmar' }}
                   </button>
                   <button class="btn sm" [disabled]="demoMode" (click)="resolve(e, 'false_positive')">
                     Falso positivo
@@ -151,10 +188,79 @@
           <div *ngIf="e.reviewedBy"><dt>Revisado por</dt><dd class="mono">{{ e.reviewedBy }}</dd></div>
         </dl>
 
-        <div class="clip-note mute">
-          El clip incluye 10 s previos al evento, el momento y 10 s posteriores.
+        <div *ngIf="e.reviewTitle" class="ev-titulo">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 4h16v16H4z" /><path d="M4 9h16" />
+          </svg>
+          {{ e.reviewTitle }}
+        </div>
+
+        <!-- Clip guardado como evidencia -->
+        <div class="evidencias" *ngIf="e.status === 'confirmed'">
+          <div class="ev-head">Evidencia guardada</div>
+
+          <div class="mute" *ngIf="cargandoEvidencias"><span class="spinner"></span> preparando el clip…</div>
+
+          <div class="mute" *ngIf="!cargandoEvidencias && !evidencias.length">
+            El clip se está armando. Incluye 10 s previos al evento y 10 s posteriores;
+            aparece acá en unos segundos.
+          </div>
+
+          <div class="evidencia" *ngFor="let ev of evidencias">
+            <video [src]="urlEvidencia(ev)" controls preload="metadata"></video>
+            <div class="ev-info">
+              <span class="ev-nombre">{{ ev.title || 'Clip' }}</span>
+              <span class="mute">{{ tamano(ev.bytes) }}</span>
+            </div>
+            <a class="btn sm" [href]="urlEvidencia(ev)" download>Descargar</a>
+          </div>
+        </div>
+
+        <div class="clip-note mute" *ngIf="e.status !== 'confirmed'">
+          Si confirmás que fue una caída real, se guarda el clip como evidencia:
+          10 s previos, el momento y 10 s posteriores.
         </div>
       </div>
     </div>
   </section>
+</div>
+
+<!-- Confirmar caída real y ponerle nombre a la evidencia -->
+<div class="modal-backdrop" *ngIf="confirmando" (click)="cerrarConfirmacion()">
+  <div class="modal panel" (click)="$event.stopPropagation()">
+    <div class="panel-head">
+      <h2 class="panel-title">Confirmar caída real</h2>
+      <button class="icon-x" (click)="cerrarConfirmacion()">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 6 6 18M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+
+    <div class="modal-body">
+      <p class="modal-intro">
+        Se guardará el clip como evidencia y tu confirmación se usará para
+        <strong>mejorar la detección</strong>: esta secuencia pasa a ser un ejemplo de
+        entrenamiento.
+      </p>
+
+      <label class="field">
+        <span>Nombre de la evidencia</span>
+        <input type="text" [(ngModel)]="tituloEvidencia" placeholder="Ej: Caída pasillo B - turno noche" />
+        <small>Con este nombre vas a encontrar el clip después.</small>
+      </label>
+
+      <label class="field">
+        <span>Observaciones <em>(opcional)</em></span>
+        <input type="text" [(ngModel)]="notaRevision" placeholder="Ej: la persona se levantó sola" />
+      </label>
+    </div>
+
+    <div class="modal-foot">
+      <button class="btn" (click)="cerrarConfirmacion()">Cancelar</button>
+      <button class="btn btn-primary" (click)="confirmarCaida()" [disabled]="!tituloEvidencia.trim()">
+        Confirmar y guardar evidencia
+      </button>
+    </div>
+  </div>
 </div>

@@ -24,6 +24,26 @@ interface ApiEvent {
   confidence: number;
   reviewedBy?: string;
   reviewNote?: string;
+  reviewTitle?: string;
+}
+
+export interface EvidenceItem {
+  id: string;
+  kind: 'image' | 'clip';
+  storageKey: string;
+  contentType: string;
+  bytes: number;
+  durationMs: number | null;
+  title: string | null;
+  status: string;
+  createdAt: string;
+}
+
+export interface TrainingStats {
+  total: number;
+  confirmadas: number;
+  falsosPositivos: number;
+  pendientes: number;
 }
 
 export interface EventsResult {
@@ -71,10 +91,39 @@ export class EventsService {
       .pipe(map(() => true), catchError(() => of(false)));
   }
 
-  resolve(id: string, resolution: 'confirmed' | 'dismissed' | 'false_positive', note?: string): Observable<boolean> {
+  /**
+   * Resuelve la alerta. Al confirmarla como caída real, `title` es el nombre
+   * con el que se guarda el clip de evidencia.
+   */
+  resolve(
+    id: string,
+    resolution: 'confirmed' | 'dismissed' | 'false_positive',
+    note?: string,
+    title?: string,
+  ): Observable<boolean> {
     return this.http
-      .post(`${this.base}/events/${id}/resolve`, { resolution, note })
+      .post(`${this.base}/events/${id}/resolve`, { resolution, note, title })
       .pipe(map(() => true), catchError(() => of(false)));
+  }
+
+  /** Evidencias (clips) guardadas para un evento confirmado. */
+  evidences(id: string): Observable<EvidenceItem[]> {
+    return this.http
+      .get<{ items: EvidenceItem[] }>(`${this.base}/events/${id}/evidences`)
+      .pipe(map((r) => r.items ?? []), catchError(() => of([])));
+  }
+
+  /** Cuántas muestras acumuló el sistema gracias al feedback de los operadores. */
+  trainingStats(): Observable<TrainingStats | null> {
+    return this.http
+      .get<TrainingStats>(`${this.base}/events/training/stats`)
+      .pipe(catchError(() => of(null)));
+  }
+
+  /** URL de descarga del clip. El archivo lo sirve media-service. */
+  evidenceUrl(cameraId: string, storageKey: string): string {
+    const nombre = storageKey.split(/[\/]/).pop() ?? '';
+    return `/media/evidence/${cameraId}/${nombre}`;
   }
 
   private toItem(e: ApiEvent): EventItem {
@@ -84,12 +133,14 @@ export class EventsService {
       eventType: e.eventType,
       title: TITLES[e.eventType] ?? e.eventType,
       moduleKey: e.moduleKey,
+      cameraId: e.cameraId,
       cameraName: `Cámara ${e.cameraId.slice(-4)}`,
       siteName: 'Sucursal',
       severity: e.severity,
       status: e.status,
       confidence: e.confidence,
       reviewedBy: e.reviewedBy,
+      reviewTitle: e.reviewTitle,
     };
   }
 }

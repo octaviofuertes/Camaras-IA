@@ -45,3 +45,7 @@ tools/smoke/build/
 # Runtime local (cámaras, asignaciones y evidencias de esta máquina)
 /.data/
 *.tmp
+
+# Dataset descargado y modelos entrenados (pesados, se regeneran)
+training/data/
+training/models/

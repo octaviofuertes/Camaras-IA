@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { ConflictException, Injectable, Logger, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import type { EventDto, EventStatus } from '@percepta/contracts';
 import { DatabaseService } from '../db/database.service';
 import { EventsRepository, type ListFilters } from './events.repository';
@@ -22,10 +22,14 @@ export interface IngestInput {
   trackId?: number;
   detection?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  /** Ventana de features de pose que sostiene la alerta (para reentrenar). */
+  trainingSequence?: number[][];
 }
 
 @Injectable()
 export class EventsService {
+  private readonly logger = new Logger(EventsService.name);
+
   constructor(
     private readonly db: DatabaseService,
     private readonly repo: EventsRepository,
@@ -40,9 +44,29 @@ export class EventsService {
    * (no es un error: es la protección contra ráfagas de alertas repetidas).
    */
   async ingest(auth: AuthContext, e: IngestInput): Promise<EventDto | null> {
-    return this.db.withTenant(auth.organizationId, (c) =>
-      this.repo.insert(c, { ...e, organizationId: auth.organizationId }),
-    );
+    return this.db.withTenant(auth.organizationId, async (client) => {
+      const evento = await this.repo.insert(client, { ...e, organizationId: auth.organizationId });
+
+      // La ventana de esqueletos se guarda junto al evento, SIN etiqueta. La
+      // etiqueta llega cuando un operador lo revise: ahí se vuelve un ejemplo
+      // de entrenamiento. Si la deduplicación descartó el evento, no hay nada
+      // que etiquetar después, así que tampoco se guarda la muestra.
+      if (evento && e.trainingSequence?.length) {
+        try {
+          await this.repo.saveTrainingSample(client, {
+            organizationId: auth.organizationId,
+            cameraId: e.cameraId,
+            eventId: evento.id,
+            eventOccurredAt: evento.occurredAt,
+            sequence: e.trainingSequence,
+            ruleConfidence: e.confidence,
+          });
+        } catch (err) {
+          this.logger.warn(`no se pudo guardar la muestra del evento ${evento.id}: ${err}`);
+        }
+      }
+      return evento;
+    });
   }
 
   async findOne(auth: AuthContext, id: string, occurredAt?: string): Promise<EventDto> {
@@ -60,15 +84,95 @@ export class EventsService {
     return this.transition(auth, id, (evt, userId) => acknowledgeEvent(evt, userId, note), note, requestId);
   }
 
-  /** `acknowledged → confirmed | dismissed | false_positive`. */
+  /**
+   * `acknowledged → confirmed | dismissed | false_positive`.
+   *
+   * Además del cambio de estado, el veredicto tiene dos consecuencias:
+   *  - etiqueta la secuencia de esqueletos que generó la alerta, que pasa a ser
+   *    un ejemplo de entrenamiento;
+   *  - si se confirma como caída real, se guarda el clip como evidencia con el
+   *    nombre que le puso el operador.
+   */
   async resolve(
     auth: AuthContext,
     id: string,
     resolution: Resolution,
     note?: string,
     requestId?: string,
+    title?: string,
   ): Promise<EventDto> {
-    return this.transition(auth, id, (evt, userId) => resolveEvent(evt, resolution, userId, note), note, requestId);
+    const evento = await this.transition(
+      auth, id, (evt, userId) => resolveEvent(evt, resolution, userId, note), note, requestId, title,
+    );
+
+    // El feedback humano es la etiqueta: confirmado = caída, falso positivo = no.
+    if (resolution === 'confirmed' || resolution === 'false_positive') {
+      const label = resolution === 'confirmed' ? 1 : 0;
+      try {
+        await this.db.withTenant(auth.organizationId, (c) =>
+          this.repo.labelTrainingSample(c, id, label, auth.userId),
+        );
+      } catch (err) {
+        // Que falle el etiquetado no debe romper la revisión del operador.
+        this.logger.warn(`no se pudo etiquetar la muestra del evento ${id}: ${err}`);
+      }
+    }
+
+    // Sólo se conserva el video de lo que resultó ser real: guardar clips de
+    // falsos positivos sería almacenar (y filmar) gente por nada.
+    if (resolution === 'confirmed') {
+      void this.captureEvidence(auth, evento, title).catch((err) =>
+        this.logger.warn(`no se pudo guardar la evidencia del evento ${id}: ${err}`),
+      );
+    }
+
+    return evento;
+  }
+
+  /**
+   * Pide a media-service que arme el clip (10 s antes / evento / 10 s después)
+   * y registra la evidencia.
+   *
+   * Corre fuera del pedido HTTP: el clip necesita esperar el post-evento, y el
+   * operador no debe quedarse mirando una pantalla cargando por eso.
+   */
+  private async captureEvidence(auth: AuthContext, evento: EventDto, title?: string): Promise<void> {
+    const base = process.env.MEDIA_SERVICE_URL ?? 'http://127.0.0.1:3020';
+    const centerTs = new Date(evento.occurredAt).getTime() / 1000;
+
+    const res = await fetch(`${base}/cameras/${evento.cameraId}/clip`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ eventId: evento.id, centerTs, wait: true }),
+    });
+    if (!res.ok) throw new Error(`media-service respondió ${res.status}`);
+    const info = (await res.json()) as { path?: string; bytes?: number; sha256?: string; durationMs?: number };
+    if (!info?.path) throw new Error('media-service no devolvió la ruta del clip');
+
+    await this.db.withTenant(auth.organizationId, (c) =>
+      this.repo.saveEvidence(c, {
+        organizationId: auth.organizationId,
+        eventId: evento.id,
+        eventOccurredAt: evento.occurredAt,
+        kind: 'clip',
+        storageKey: info.path!,
+        contentType: 'video/mp4',
+        bytes: info.bytes ?? 0,
+        sha256: info.sha256 ?? '',
+        durationMs: info.durationMs,
+        title: title || `Caída ${new Date(evento.occurredAt).toLocaleString('es-AR')}`,
+        createdBy: auth.userId,
+      }),
+    );
+    this.logger.log(`evidencia guardada para el evento ${evento.id}`);
+  }
+
+  async listEvidences(auth: AuthContext, eventId: string): Promise<Record<string, unknown>[]> {
+    return this.db.withTenant(auth.organizationId, (c) => this.repo.listEvidences(c, eventId));
+  }
+
+  async trainingStats(auth: AuthContext): Promise<Record<string, number>> {
+    return this.db.withTenant(auth.organizationId, (c) => this.repo.trainingStats(c));
   }
 
   /**
@@ -82,6 +186,7 @@ export class EventsService {
     apply: (evt: ReviewableEvent, userId: string) => ReviewableEvent,
     note: string | undefined,
     requestId: string | undefined,
+    title?: string,
   ): Promise<EventDto> {
     return this.db.withTenant(auth.organizationId, async (client) => {
       const found = await this.repo.findByIdForUpdate(client, id);
@@ -119,6 +224,7 @@ export class EventsService {
         toStatus: next.status,
         reviewedBy: auth.userId,
         reviewNote: note,
+        reviewTitle: title,
       });
 
       if (!updated) {
@@ -132,7 +238,7 @@ export class EventsService {
         action: `event.${next.status}`,
         resourceId: current.id,
         requestId,
-        detail: { from: current.status, to: next.status, note: note ?? null },
+        detail: { from: current.status, to: next.status, note: note ?? null, title: title ?? null },
       });
 
       return updated;

@@ -38,6 +38,7 @@ from percepta_contracts import (
 # `detector.py` vive junto a este archivo; el worker carga el módulo por ruta.
 sys.path.insert(0, str(Path(__file__).parent))
 from detector import FallConfig, FallDetector, Keypoint, PoseFrame  # noqa: E402
+from features import WINDOW, frame_features, hip_y, pad_or_trim  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +51,11 @@ class FallDetectionModule(PerceptaModule):
         self._imgsz = 640
         self._loaded_at = 0.0
         self._last_purge = 0.0
+        # Ventana de features por persona: es lo que se adjunta a la alerta
+        # para poder reentrenar con el veredicto del operador.
+        self._ventanas: dict[int, list] = {}
+        self._ultimo_hip: dict[int, float] = {}
+        self._ultimo_ts: dict[int, float] = {}
 
     def load(self, ctx: ModuleContext) -> None:
         from ultralytics import YOLO  # import perezoso
@@ -132,6 +138,20 @@ class FallDetectionModule(PerceptaModule):
                     )
                 )
 
+                # Acumular la ventana de features de ESTA persona. Se hace
+                # siempre, aunque no haya alerta: cuando la caída se confirme,
+                # lo que importa es lo que pasó ANTES, y para entonces ya sería
+                # tarde para empezar a grabar.
+                kp_arr = np.array([[k.x, k.y, k.score] for k in keypoints], dtype=np.float32)
+                dt = ts - self._ultimo_ts.get(track_id, ts - 0.1)
+                vec = frame_features(kp_arr, bbox, self._ultimo_hip.get(track_id), max(dt, 1e-3))
+                ventana = self._ventanas.setdefault(track_id, [])
+                ventana.append(vec)
+                if len(ventana) > WINDOW * 2:
+                    del ventana[: len(ventana) - WINDOW * 2]
+                self._ultimo_hip[track_id] = hip_y(kp_arr) or self._ultimo_hip.get(track_id, 0.0)
+                self._ultimo_ts[track_id] = ts
+
                 # Se reporta a la persona cuando hay algo que mirar: la caída
                 # confirmada, o el estado previo con evidencia suficiente.
                 interesante = res.is_fall or res.state.value in ("falling", "down", "alerted")
@@ -163,6 +183,15 @@ class FallDetectionModule(PerceptaModule):
                             "reason": res.reason,
                             "poseQuality": "ok" if res.quality_ok else "insuficiente",
                         },
+                        # Sólo en la alerta confirmada: es la única que un
+                        # operador va a etiquetar, y guardar la ventana de cada
+                        # frame intermedio sería desperdicio.
+                        sequence=(
+                            [[round(float(v), 4) for v in fila]
+                             for fila in pad_or_trim(np.stack(ventana))]
+                            if res.is_fall and ventana
+                            else None
+                        ),
                     )
                 )
 
