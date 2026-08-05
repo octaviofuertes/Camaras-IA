@@ -197,6 +197,39 @@ def test_sentarse_largo_no_ciega_al_detector():
     assert any(r.is_fall for r in res2), "tras estar sentado, una caída posterior DEBE detectarse"
 
 
+def test_confianza_no_se_hunde_si_el_detector_ve_mal_la_caida():
+    """La confianza no puede depender de lo bien que se vea el frame del impacto.
+
+    A una persona cayéndose el detector de personas la ve peor —postura rara,
+    movimiento borroso—, justo cuando la evidencia geométrica es más clara. Con
+    el tope puesto en el puntaje del frame, una caída contundente se reportaba
+    con confianza apenas por encima del umbral de la regla, a un pelo de que la
+    descartara. El tope tiene que ser el mejor puntaje reciente del track.
+    """
+    d = FallDetector()
+    pasos = (
+        de_pie(0, 2.0)
+        + transicion(2.0, 0.3, 0.5, 0.85, 3, 85, DE_PIE, TENDIDO)
+        + tendido(2.3, 2.0)
+    )
+    alertas = []
+    for ts, cy, alt, ang in pasos:
+        # De pie se la ve nítida; durante y después de la caída, mucho peor.
+        score = 0.95 if ts < 2.0 else 0.35
+        r = d.update(
+            PoseFrame(track_id=1, ts=ts, keypoints=make_pose(cy, alt, ang),
+                      bbox=bbox_de(alt, ang), det_score=score)
+        )
+        if r.is_fall:
+            alertas.append(r)
+
+    assert alertas, "la caída debe detectarse igual"
+    assert alertas[0].confidence > 0.6, (
+        f"la confianza se hundió a {alertas[0].confidence} por lo mal que se vio "
+        f"el frame del impacto, no por falta de evidencia"
+    )
+
+
 def test_persona_diminuta_no_alerta():
     """Detección muy chica: es ruido del detector, no una persona que se cayó.
 

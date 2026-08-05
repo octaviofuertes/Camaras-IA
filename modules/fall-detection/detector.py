@@ -144,6 +144,10 @@ class TrackState:
     # Historia reciente (ts, altura, centro_y) para medir el descenso.
     history: Deque[tuple[float, float, float]] = field(default_factory=lambda: deque(maxlen=60))
 
+    # Mejor puntaje con el que se detectó a ESTA persona últimamente. Ver
+    # `_confidence` para por qué no alcanza con el del frame actual.
+    det_scores: Deque[float] = field(default_factory=lambda: deque(maxlen=60))
+
     peak_velocity: float = 0.0
     collapse_since: float | None = None   # desde cuándo está colapsado
     down_since: float | None = None       # desde cuándo está abajo (severidad)
@@ -286,6 +290,7 @@ class FallDetector:
         quality_ok = n_torso >= cfg.minTorsoPoints and referencia >= cfg.minPersonHeight
 
         st.history.append((pf.ts, altura, centro_y))
+        st.det_scores.append(pf.det_score)
         velocidad = self._descenso_reciente(st, pf.ts)
 
         if not quality_ok:
@@ -500,7 +505,21 @@ class FallDetector:
         # Quedarse en el suelo refuerza, pero no puede ser lo único.
         if down_seconds > 0:
             score = min(1.0, score + 0.1 * _clamp(down_seconds / max(cfg.prolongedSeconds, 1e-6)))
-        return round(min(score, det_score), 4)
+
+        # No se puede estar más seguro de la caída que de que haya una persona.
+        # Pero el tope NO es el puntaje de este frame: a una persona cayéndose
+        # se la detecta peor precisamente porque está cayéndose (postura rara,
+        # movimiento borroso), así que topear con el puntaje instantáneo
+        # castigaba la confianza justo en las caídas más claras. Se observó
+        # evidencia contundente —altura al 14 % de la suya, descenso 2.97—
+        # reportada con confianza 0.52, a dos centésimas de que la regla la
+        # descartara.
+        #
+        # El tope correcto es el mejor puntaje reciente de ESTE track: si a esta
+        # persona se la venía detectando con claridad, que se la vea mal durante
+        # el segundo de la caída no vuelve dudosa su existencia.
+        techo = max(st.det_scores) if st.det_scores else det_score
+        return round(min(score, techo), 4)
 
 
 def _marcar_abajo(st: TrackState, ts: float) -> None:
