@@ -147,8 +147,16 @@ class CameraPipeline(threading.Thread):
     def _emit(self, mod_cfg: dict, dets: list, now: float) -> bool:
         top = max(dets, key=lambda d: d.confidence)
         # La clave de deduplicación agrupa por cámara+módulo+tipo y ventana de
-        # tiempo: dos alertas del mismo motivo en el mismo minuto son una sola.
-        bucket = int(now // 60)
+        # tiempo, para que un reintento de la misma alerta no cree dos eventos.
+        #
+        # La ventana es la MISMA que el enfriamiento, y eso importa: estaba fija
+        # en un minuto mientras el enfriamiento configurado era de 20 s, así que
+        # una segunda caída legítima 25 s después de la primera pasaba el
+        # enfriamiento, chocaba con la clave del mismo minuto y se descartaba en
+        # silencio. Dos mecanismos de supresión con ventanas distintas hacen
+        # justo lo que no se quiere: perder una caída real sin dejar rastro.
+        ventana = max(float(mod_cfg.get("config", {}).get("cooldownSeconds", 60)), 1.0)
+        bucket = int(now // ventana)
         raw = f"{self.a.camera_id}|{mod_cfg['moduleKey']}|{mod_cfg['eventType']}|{bucket}"
         dedup = hashlib.sha1(raw.encode()).hexdigest()
 
