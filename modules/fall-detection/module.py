@@ -68,10 +68,13 @@ class FallDetectionModule(PerceptaModule):
         self._ctx = ctx
         weights = str(ctx.config.get("weights", "yolov8n-pose.pt"))
         self._imgsz = int(ctx.config.get("imgsz", 640))
-        # 0.25 dejaba entrar detecciones sobre objetos del fondo, que aparecían
-        # como personas fantasma con historia propia. 0.45 las corta sin perder
-        # a la persona real, que en interiores se detecta muy por encima.
-        self._person_conf = float(ctx.config.get("personConfidence", 0.45))
+        # Deliberadamente bajo: quien filtra las detecciones flojas es el
+        # tracker, que las usa en su segunda asociación para no soltar a una
+        # persona mientras se cae (es cuando peor se la detecta). Las personas
+        # fantasma se cortan con `new_track_thresh` en bytetrack.yaml y con el
+        # tamaño mínimo del detector, no bajando el recall acá.
+        self._person_conf = float(ctx.config.get("personConfidence", 0.15))
+        self._tracker_cfg = str(Path(__file__).parent / "bytetrack.yaml")
 
         # La configuración de la cámara alimenta directamente al detector: cada
         # cámara puede tener su propia sensibilidad sin tocar código.
@@ -81,6 +84,7 @@ class FallDetectionModule(PerceptaModule):
             "fallVelocity", "collapseRatio", "baselineFrames",
             "impactConfirmSeconds", "fallWindowSeconds", "prolongedSeconds",
             "minConfidence", "trackTimeoutSeconds", "minPersonHeight",
+            "baselineWindowFrames",
         ):
             if campo in ctx.config:
                 setattr(cfg, campo, type(getattr(cfg, campo))(ctx.config[campo]))
@@ -116,7 +120,7 @@ class FallDetectionModule(PerceptaModule):
             classes=[0],            # sólo personas
             conf=self._person_conf,
             persist=True,           # conserva los tracks entre llamadas
-            tracker="bytetrack.yaml",
+            tracker=self._tracker_cfg,
             verbose=False,
             device="cpu",
         )

@@ -89,9 +89,16 @@ class FallConfig:
     # La persona pasa a ocupar menos de esta fracción de su altura habitual.
     # 0.65 tolera agacharse un poco sin marcar caída.
     collapseRatio: float = 0.65
-    # Frames de pie necesarios para fijar la altura de referencia. Hasta
-    # entonces no se puede afirmar un colapso: no hay con qué comparar.
-    baselineFrames: int = 5
+    # Frames necesarios para fijar la altura de referencia. Con 5 alcanzaba para
+    # anclarla a media zancada o a media agachada: en cámara real se vieron
+    # alturas del 246 % de una referencia aprendida con la persona doblada. Dos
+    # segundos de observación dan una referencia estable, y hasta entonces
+    # simplemente no se juzga el colapso — mejor callar que inventar.
+    baselineFrames: int = 12
+    # Ventana sobre la que se estima la altura de pie. Larga a propósito: la
+    # persona cambia de postura todo el tiempo y hace falta ver bastante para
+    # saber cuál es su altura real.
+    baselineWindowFrames: int = 120
 
     # ── señal 2: descenso rápido ────────────────────────────────────
     # En alturas de cuerpo por segundo. Agacharse ronda 0.2-0.4; una caída
@@ -131,7 +138,7 @@ class TrackState:
     last_ts: float = 0.0
 
     # Altura de referencia de ESTA persona estando de pie.
-    baseline_heights: Deque[float] = field(default_factory=lambda: deque(maxlen=30))
+    baseline_heights: Deque[float] = field(default_factory=lambda: deque(maxlen=120))
     baseline: float | None = None
 
     # Historia reciente (ts, altura, centro_y) para medir el descenso.
@@ -141,6 +148,10 @@ class TrackState:
     collapse_since: float | None = None   # desde cuándo está colapsado
     down_since: float | None = None       # desde cuándo está abajo (severidad)
     alerted_at: float | None = None
+    # Ya se concluyó que esta postura baja no fue una caída (se sentó, se
+    # agachó). Se mantiene hasta que la persona vuelva a incorporarse, para no
+    # entrar a confirmar impacto una y otra vez sobre la misma postura quieta.
+    postura_baja_aceptada: bool = False
 
 
 @dataclass
@@ -252,7 +263,11 @@ class FallDetector:
 
     def update(self, pf: PoseFrame) -> FallResult:
         cfg = self.cfg
-        st = self.tracks.setdefault(pf.track_id, TrackState(last_ts=pf.ts))
+        st = self.tracks.get(pf.track_id)
+        if st is None:
+            st = TrackState(last_ts=pf.ts)
+            st.baseline_heights = deque(maxlen=cfg.baselineWindowFrames)
+            self.tracks[pf.track_id] = st
 
         angle = torso_angle_deg(pf.keypoints, cfg.keypointScore)
         n_torso = visible_torso_points(pf.keypoints, cfg.keypointScore)
@@ -288,13 +303,24 @@ class FallDetector:
                 collapse_ratio=(altura / st.baseline) if st.baseline else None,
             )
 
-        # ── altura de referencia: sólo se aprende estando de pie ────────
-        if st.state == State.UPRIGHT and quality_ok:
+        # ── altura de referencia ────────────────────────────────────────
+        # Se estima como el percentil 90 de las alturas observadas, no como la
+        # mediana. El razonamiento: nadie es MÁS alto que estando de pie, así
+        # que la envolvente superior de lo observado ES su altura de pie. La
+        # mediana, en cambio, se contamina con cada vez que la persona se
+        # agacha, y arrastra la referencia hacia abajo — que fue exactamente lo
+        # que hacía que después estar de pie se leyera como 246 %.
+        #
+        # Se congela mientras hay una caída ya alertada: ahí la referencia tiene
+        # que seguir siendo la de ANTES de caer, o al llenarse la ventana de
+        # alturas de alguien tirado en el piso el detector concluiría que se
+        # levantó sin que se haya movido.
+        if quality_ok and st.state != State.ALERTED:
             st.baseline_heights.append(altura)
             if len(st.baseline_heights) >= cfg.baselineFrames:
                 ordenadas = sorted(st.baseline_heights)
-                # Mediana: resiste un frame raro sin arrastrar la referencia.
-                st.baseline = ordenadas[len(ordenadas) // 2]
+                idx = min(int(len(ordenadas) * 0.9), len(ordenadas) - 1)
+                st.baseline = ordenadas[idx]
 
         colapso = None
         if st.baseline and st.baseline > 1e-6:
@@ -319,6 +345,12 @@ class FallDetector:
         if descenso_brusco:
             st.peak_velocity = max(st.peak_velocity, velocidad)
 
+        # Se vuelve a vigilar la postura baja recién cuando la persona se
+        # incorporó. Un descenso brusco la reabre de inmediato: eso ya no es la
+        # misma postura quieta, es una caída desde ella.
+        if not cuerpo_abajo or descenso_brusco:
+            st.postura_baja_aceptada = False
+
         is_fall = False
         reason = ""
 
@@ -328,7 +360,7 @@ class FallDetector:
                 st.state = State.FALLING
                 st.collapse_since = None
                 reason = f"descenso rápido ({velocidad:.2f})"
-            elif cuerpo_abajo and st.baseline is not None:
+            elif cuerpo_abajo and st.baseline is not None and not st.postura_baja_aceptada:
                 # Llegó abajo sin que se viera el descenso (puede haber pasado
                 # entre dos frames): igual se vigila.
                 st.state = State.FALLING
@@ -370,14 +402,15 @@ class FallDetector:
                 elif transcurrido > cfg.fallWindowSeconds * 2:
                     # Está abajo hace rato pero nunca hubo descenso brusco: se
                     # sentó o se agachó. Sin esta salida quedaba atrapado acá
-                    # para siempre, sin alertar y sin volver a aprender su
-                    # altura de referencia — o sea, ciego a la caída siguiente.
+                    # para siempre, sin alertar y ciego a la caída siguiente.
+                    # La altura de referencia NO se borra: la envolvente ya
+                    # tiene la altura de pie de esta persona y tirarla obligaría
+                    # a reaprenderla desde una postura agachada.
                     st.state = State.UPRIGHT
                     st.peak_velocity = 0.0
                     st.collapse_since = None
                     st.down_since = None
-                    st.baseline_heights.clear()
-                    st.baseline = None
+                    st.postura_baja_aceptada = True
                     reason = "postura baja sostenida sin caída"
                 else:
                     reason = f"confirmando impacto ({transcurrido:.1f}s)"
@@ -405,12 +438,13 @@ class FallDetector:
                 reason = "sigue en el suelo"
 
         elif st.state == State.RECOVERED:
-            # Se rearma para poder detectar una caída posterior.
+            # Se rearma para poder detectar una caída posterior. La referencia
+            # de altura se conserva: es la misma persona y sigue midiendo lo
+            # mismo de pie.
             st.state = State.UPRIGHT
             st.peak_velocity = 0.0
             st.collapse_since = None
             st.down_since = None
-            st.baseline_heights.clear()
             reason = "recuperado"
 
         down_seconds = (pf.ts - st.down_since) if st.down_since else 0.0

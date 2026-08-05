@@ -36,8 +36,16 @@ if (!secret) {
 // pipeline (ai-worker / rules-engine) para dar de alta eventos. Ningún humano
 // tiene events:ingest.
 let perms;
+let ttl = process.env.JWT_ACCESS_TTL ? Number(process.env.JWT_ACCESS_TTL) : 900;
 if (role === 'service') {
   perms = ['events:ingest', 'events:read', 'cameras:read', 'camera-module-configs:read', 'modules:read'];
+  // Un servicio no puede volver a autenticarse solo: el ai-worker lee el token
+  // del entorno una vez y no lo renueva. Con el TTL de 15 minutos de un humano,
+  // a los 15 minutos de arrancar TODA alta de evento pasaba a fallar con 401 y
+  // el sistema dejaba de registrar caídas sin que nada lo dijera. En producción
+  // esto lo resuelve client-credentials con refresh; en desarrollo, un token que
+  // dura la sesión de trabajo.
+  ttl = 12 * 60 * 60;
 } else {
   const granted = SYSTEM_ROLE_PERMISSIONS[role];
   if (!granted) {
@@ -51,7 +59,7 @@ if (role === 'service') {
 
 const token = jwt.sign({ sub: userId, org, perms }, secret, {
   algorithm: 'HS256',
-  expiresIn: process.env.JWT_ACCESS_TTL ? Number(process.env.JWT_ACCESS_TTL) : 900,
+  expiresIn: ttl,
 });
 
 process.stdout.write(token);

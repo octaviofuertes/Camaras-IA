@@ -1,0 +1,36 @@
+# Seguimiento afinado para detección de caídas.
+#
+# El detector aprende la altura de pie de CADA persona, así que perder su
+# identidad no es un detalle cosmético: cada ID nuevo empieza a aprender desde
+# cero, y si le toca hacerlo con la persona doblada la referencia queda mal.
+# En cámara real se vieron 5 IDs distintos en pocos segundos y alturas del
+# 246 % de la referencia como consecuencia directa de eso.
+#
+# Una persona cayéndose es justamente cuando el detector de personas peor la ve
+# (postura rara, movimiento borroso, cuerpo parcialmente tapado). Con los
+# valores por omisión, ahí se cortaba el track — perdiendo la identidad en el
+# único momento que importa.
+
+tracker_type: bytetrack
+
+# Primera asociación: sólo detecciones claras.
+track_high_thresh: 0.45
+
+# Segunda asociación: acá está la clave. ByteTrack usa las detecciones DÉBILES
+# para no soltar tracks que ya existen. Bajarlo mantiene a la persona seguida
+# durante la caída, cuando su detección se degrada, sin crear tracks nuevos.
+track_low_thresh: 0.08
+
+# Crear un track nuevo sí exige mucha confianza: es lo que evita las personas
+# fantasma sobre objetos del fondo.
+new_track_thresh: 0.6
+
+# 60 frames a 6 fps = 10 s de tolerancia. Sobrevive a que la persona quede
+# tapada por un mueble al caer y reaparezca, conservando su altura aprendida.
+track_buffer: 60
+
+# Al caer, la caja cambia de forma muy rápido y el solapamiento entre frames
+# baja. Un umbral más permisivo evita el corte de identidad justo ahí.
+match_thresh: 0.75
+
+fuse_score: True

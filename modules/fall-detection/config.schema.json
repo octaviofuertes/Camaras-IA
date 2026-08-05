@@ -54,10 +54,18 @@
     "baselineFrames": {
       "type": "integer",
       "title": "Frames para aprender su altura",
-      "description": "Cuántos frames de pie hacen falta antes de poder juzgar un colapso.",
-      "minimum": 2,
-      "maximum": 60,
-      "default": 5
+      "description": "Cuántos frames hacen falta antes de poder juzgar un colapso. Con pocos, la referencia queda anclada a media zancada.",
+      "minimum": 4,
+      "maximum": 120,
+      "default": 12
+    },
+    "baselineWindowFrames": {
+      "type": "integer",
+      "title": "Ventana para estimar la altura de pie",
+      "description": "Cuántos frames se recuerdan. La altura de pie se toma como la envolvente superior de lo observado: nadie es más alto que estando parado.",
+      "minimum": 30,
+      "maximum": 600,
+      "default": 120
     },
     "minConfidence": {
       "type": "number",
@@ -91,10 +99,10 @@
     "personConfidence": {
       "type": "number",
       "title": "Confianza mínima para considerar que hay una persona",
-      "description": "Umbral del detector. Bajarlo encuentra personas más lejanas pero inventa personas sobre objetos del fondo.",
-      "minimum": 0.1,
+      "description": "Umbral del detector antes del seguimiento. Bajo a propósito: las detecciones flojas sirven para no perder de vista a alguien mientras se cae. Los falsos positivos se filtran por tamaño mínimo, no acá.",
+      "minimum": 0.05,
       "maximum": 0.9,
-      "default": 0.45
+      "default": 0.15
     },
     "imgsz": {
       "type": "integer",

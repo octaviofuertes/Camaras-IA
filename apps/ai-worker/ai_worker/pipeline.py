@@ -104,6 +104,23 @@ class CameraPipeline(threading.Thread):
 
         strong = [d for d in dets if d.confidence >= min_conf and d.class_label in wanted]
 
+        # Un módulo que ya confirmó la caída y queda afuera por confianza es un
+        # descarte que hay que poder ver: si no, el operador sólo observa que la
+        # caída "no se detectó" y no hay forma de saber que sí se detectó y la
+        # regla la filtró. No se anula su umbral —esa decisión es suya— pero se
+        # deja registro.
+        for d in dets:
+            if (
+                d.class_label in wanted
+                and d.confidence < min_conf
+                and d.attributes.get("confirmed") == "true"
+            ):
+                log.warning(
+                    "[%s] caída confirmada por el módulo DESCARTADA por minConfidence: "
+                    "confianza %.2f < %.2f (%s)",
+                    self.a.camera_id, d.confidence, min_conf, d.attributes.get("reason", ""),
+                )
+
         if len(strong) >= min_persons:
             st.consecutive += 1
         else:
@@ -178,8 +195,19 @@ class CameraPipeline(threading.Thread):
                         top.confidence, len(dets),
                     )
                 return created
-            self.last_error = f"event-service {r.status_code}: {r.text[:120]}"
-            log.warning("[%s] alta rechazada: %s", self.a.camera_id, self.last_error)
+            if r.status_code in (401, 403):
+                # Este caso merece grito propio: el detector sigue funcionando y
+                # los logs se ven normales, pero NINGUNA alerta llega al panel.
+                # Es el fallo más engañoso de todo el pipeline.
+                self.last_error = (
+                    f"event-service {r.status_code}: el SERVICE_TOKEN no sirve para dar de alta "
+                    f"eventos (¿vencido, o emitido con un rol sin events:ingest?). "
+                    f"Las caídas se están detectando pero NO se registran. Detalle: {r.text[:120]}"
+                )
+                log.error("[%s] %s", self.a.camera_id, self.last_error)
+            else:
+                self.last_error = f"event-service {r.status_code}: {r.text[:120]}"
+                log.warning("[%s] alta rechazada: %s", self.a.camera_id, self.last_error)
         except requests.RequestException as exc:
             self.last_error = f"event-service: {exc}"
         return False
