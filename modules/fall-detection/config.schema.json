@@ -1,64 +1,70 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Configuración de Detección de caídas",
-  "description": "Una caída se confirma cuando la persona desciende rápido, queda horizontal y PERMANECE en el suelo. Subir 'confirmSeconds' reduce falsas alarmas; bajarlo alerta antes.",
+  "description": "Una caída se detecta por el IMPACTO: descenso brusco + cuerpo abajo. No hace falta que la persona quede tirada; si se levanta enseguida igual se reporta.",
   "type": "object",
   "properties": {
-    "confirmSeconds": {
+    "collapseRatio": {
       "type": "number",
-      "title": "Segundos en el suelo para confirmar",
-      "description": "Cuánto debe permanecer caída antes de alertar. Es el filtro principal contra falsas alarmas: agacharse o sentarse no supera este tiempo.",
-      "minimum": 0.5,
-      "maximum": 30,
-      "default": 3
-    },
-    "downAngleDeg": {
-      "type": "number",
-      "title": "Ángulo de torso horizontal (grados)",
-      "description": "A partir de cuántos grados respecto de la vertical se considera que está tendida. 90° es completamente horizontal.",
-      "minimum": 30,
-      "maximum": 90,
-      "default": 55
+      "title": "Colapso de altura",
+      "description": "Fracción de su altura habitual por debajo de la cual se considera que el cuerpo está abajo. Más bajo = más exigente. 0.65 tolera agacharse.",
+      "minimum": 0.2,
+      "maximum": 0.95,
+      "default": 0.65
     },
     "fallVelocity": {
       "type": "number",
       "title": "Velocidad de descenso",
-      "description": "Velocidad de bajada que despierta la sospecha, medida en alturas de cuerpo por segundo (independiente de la distancia a la cámara).",
+      "description": "Alturas de cuerpo por segundo que separan una caída de agacharse. Bajarlo detecta caídas más suaves pero suma falsas alarmas.",
       "minimum": 0.1,
       "maximum": 3,
-      "default": 0.7
-    },
-    "minConfidence": {
-      "type": "number",
-      "title": "Confianza mínima",
-      "description": "Por debajo de este valor la alerta no se genera.",
-      "minimum": 0,
-      "maximum": 1,
       "default": 0.55
     },
-    "recoverySeconds": {
+    "impactConfirmSeconds": {
       "type": "number",
-      "title": "Ventana de recuperación",
-      "description": "Si tras un descenso brusco no queda tendida en este tiempo, se descarta.",
-      "minimum": 0.5,
-      "maximum": 10,
-      "default": 2
+      "title": "Confirmación del impacto (s)",
+      "description": "Cuánto debe sostenerse la postura baja para descartar un frame ruidoso. NO es permanencia en el suelo.",
+      "minimum": 0.1,
+      "maximum": 3,
+      "default": 0.5
     },
-    "stillnessVelocity": {
+    "prolongedSeconds": {
       "type": "number",
-      "title": "Umbral de inmovilidad",
-      "description": "Movimiento por debajo del cual se considera que la persona está quieta en el suelo.",
-      "minimum": 0.01,
-      "maximum": 1,
-      "default": 0.15
+      "title": "Permanencia para severidad crítica (s)",
+      "description": "Si sigue en el suelo más de esto, la caída se marca como crítica (posible imposibilidad de levantarse).",
+      "minimum": 1,
+      "maximum": 60,
+      "default": 6
+    },
+    "downAngleDeg": {
+      "type": "number",
+      "title": "Ángulo de torso horizontal (grados)",
+      "description": "Señal de apoyo. No alcanza por sí sola: si la persona cae hacia la cámara, su torso sigue viéndose vertical.",
+      "minimum": 20,
+      "maximum": 90,
+      "default": 50
     },
     "downRatio": {
       "type": "number",
       "title": "Relación alto/ancho tendida",
-      "description": "Respaldo cuando el esqueleto no se ve bien: por debajo de este valor el cuerpo está tendido.",
       "minimum": 0.2,
-      "maximum": 2,
-      "default": 1
+      "maximum": 3,
+      "default": 1.1
+    },
+    "baselineFrames": {
+      "type": "integer",
+      "title": "Frames para aprender su altura",
+      "description": "Cuántos frames de pie hacen falta antes de poder juzgar un colapso.",
+      "minimum": 2,
+      "maximum": 60,
+      "default": 5
+    },
+    "minConfidence": {
+      "type": "number",
+      "title": "Confianza mínima",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 0.5
     },
     "keypointScore": {
       "type": "number",
@@ -70,15 +76,35 @@
     "minTorsoPoints": {
       "type": "integer",
       "title": "Puntos de torso visibles mínimos",
-      "description": "De 4 (dos hombros y dos caderas). Con menos, el módulo no afirma una caída.",
       "minimum": 1,
       "maximum": 4,
-      "default": 3
+      "default": 2
+    },
+    "minPersonHeight": {
+      "type": "number",
+      "title": "Tamaño mínimo de la persona",
+      "description": "Fracción del alto de la imagen que debe ocupar la persona de pie. Más chica que esto, la pose es demasiado imprecisa para juzgar una caída. Subilo si la cámara detecta personas fantasma en el fondo.",
+      "minimum": 0.02,
+      "maximum": 0.6,
+      "default": 0.12
+    },
+    "personConfidence": {
+      "type": "number",
+      "title": "Confianza mínima para considerar que hay una persona",
+      "description": "Umbral del detector. Bajarlo encuentra personas más lejanas pero inventa personas sobre objetos del fondo.",
+      "minimum": 0.1,
+      "maximum": 0.9,
+      "default": 0.45
     },
     "imgsz": {
       "type": "integer",
       "title": "Resolución de inferencia",
-      "enum": [320, 480, 640, 960],
+      "enum": [
+        320,
+        480,
+        640,
+        960
+      ],
       "default": 640
     }
   },

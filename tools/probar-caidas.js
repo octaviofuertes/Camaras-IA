@@ -18,9 +18,10 @@ const http = require('node:http');
 const AI = { host: '127.0.0.1', port: 3010 };
 const ETIQUETAS = {
   upright: 'de pie',
-  falling: 'CAYENDO',
-  down: 'EN EL SUELO',
-  alerted: '*** CAIDA CONFIRMADA ***',
+  falling: 'DESCENDIENDO',
+  impact: 'IMPACTO (confirmando)',
+  alerted: '*** CAIDA DETECTADA ***',
+  recovered: 'se levanto',
 };
 
 function get(path) {
@@ -68,8 +69,12 @@ async function tick() {
       .map((id) => {
         const p = gente[id];
         const etiqueta = ETIQUETAS[p.state] || p.state;
-        const seg = p.downSeconds > 0 ? ` (${p.downSeconds}s)` : '';
-        return `persona ${id}: ${etiqueta}${seg}`;
+        // Las tres señales que deciden. Si una caída no se detecta, acá se ve
+        // cuál no llegó al umbral.
+        const base = p.alturaBase == null ? 'aprendiendo altura' : `altura ${Math.round((p.colapso ?? 1) * 100)}%`;
+        const vel = `desc ${p.velocidad ?? 0}`;
+        const seg = p.segundosAbajo > 0 ? ` ${p.segundosAbajo}s abajo` : '';
+        return `p${id}: ${etiqueta} [${base}, ${vel}]${seg}`;
       })
       .join('  |  ');
   }

@@ -182,7 +182,10 @@ process.on('SIGTERM', shutdown);
     MEDIA_SERVICE_URL: 'http://127.0.0.1:3020',
     EVENT_SERVICE_URL: 'http://127.0.0.1:3004',
     DEVICE_SERVICE_URL: 'http://127.0.0.1:3003',
-    PIPELINE_FPS: process.env.PIPELINE_FPS || '2',
+    // Una caída dura entre medio segundo y uno: a 2 fps entran 1-2 frames y no
+    // hay con qué medir la velocidad de descenso. 6 fps da ~5 frames de caída,
+    // que es el mínimo para distinguirla de agacharse.
+    PIPELINE_FPS: process.env.PIPELINE_FPS || '6',
     PORT: '3010',
   });
 

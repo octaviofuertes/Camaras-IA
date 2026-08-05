@@ -58,6 +58,9 @@ class FallDetectionModule(PerceptaModule):
         self._ultimo_hip: dict[int, float] = {}
         self._ultimo_ts: dict[int, float] = {}
         self._clasificador: FallClassifier | None = None
+        # Último resultado por persona: alimenta el diagnóstico en vivo, que es
+        # lo que permite ver QUÉ señal falló cuando una caída no se detecta.
+        self._ultimo: dict[int, dict] = {}
 
     def load(self, ctx: ModuleContext) -> None:
         from ultralytics import YOLO  # import perezoso
@@ -65,14 +68,19 @@ class FallDetectionModule(PerceptaModule):
         self._ctx = ctx
         weights = str(ctx.config.get("weights", "yolov8n-pose.pt"))
         self._imgsz = int(ctx.config.get("imgsz", 640))
+        # 0.25 dejaba entrar detecciones sobre objetos del fondo, que aparecían
+        # como personas fantasma con historia propia. 0.45 las corta sin perder
+        # a la persona real, que en interiores se detecta muy por encima.
+        self._person_conf = float(ctx.config.get("personConfidence", 0.45))
 
         # La configuración de la cámara alimenta directamente al detector: cada
         # cámara puede tener su propia sensibilidad sin tocar código.
         cfg = FallConfig()
         for campo in (
             "keypointScore", "minTorsoPoints", "downAngleDeg", "downRatio",
-            "fallVelocity", "confirmSeconds", "recoverySeconds",
-            "stillnessVelocity", "minConfidence", "trackTimeoutSeconds",
+            "fallVelocity", "collapseRatio", "baselineFrames",
+            "impactConfirmSeconds", "fallWindowSeconds", "prolongedSeconds",
+            "minConfidence", "trackTimeoutSeconds", "minPersonHeight",
         ):
             if campo in ctx.config:
                 setattr(cfg, campo, type(getattr(cfg, campo))(ctx.config[campo]))
@@ -106,7 +114,7 @@ class FallDetectionModule(PerceptaModule):
             frame.image,
             imgsz=self._imgsz,
             classes=[0],            # sólo personas
-            conf=0.25,
+            conf=self._person_conf,
             persist=True,           # conserva los tracks entre llamadas
             tracker="bytetrack.yaml",
             verbose=False,
@@ -160,9 +168,20 @@ class FallDetectionModule(PerceptaModule):
                 self._ultimo_hip[track_id] = hip_y(kp_arr) or self._ultimo_hip.get(track_id, 0.0)
                 self._ultimo_ts[track_id] = ts
 
+                self._ultimo[track_id] = {
+                    "estado": res.state.value,
+                    "colapso": round(res.collapse_ratio, 2) if res.collapse_ratio is not None else None,
+                    "velocidad": round(res.velocity, 2),
+                    "anguloTorso": round(res.torso_angle, 0) if res.torso_angle is not None else None,
+                    "altoAncho": round(res.aspect_ratio, 2) if res.aspect_ratio is not None else None,
+                    "segundosAbajo": round(res.down_seconds, 1),
+                    "motivo": res.reason,
+                    "poseOk": res.quality_ok,
+                }
+
                 # Se reporta a la persona cuando hay algo que mirar: la caída
                 # confirmada, o el estado previo con evidencia suficiente.
-                interesante = res.is_fall or res.state.value in ("falling", "down", "alerted")
+                interesante = res.is_fall or res.state.value in ("falling", "impact", "alerted")
                 if not interesante:
                     continue
 
@@ -200,6 +219,10 @@ class FallDetectionModule(PerceptaModule):
                             "downSeconds": f"{res.down_seconds:.1f}",
                             "velocity": f"{res.velocity:.2f}",
                             "reason": res.reason,
+                            "severidad": res.severity,
+                            "colapsoAltura": (
+                                f"{res.collapse_ratio:.2f}" if res.collapse_ratio is not None else ""
+                            ),
                             "poseQuality": "ok" if res.quality_ok else "insuficiente",
                             "origenConfianza": origen,
                         },
@@ -229,6 +252,12 @@ class FallDetectionModule(PerceptaModule):
                 str(tid): {
                     "state": st.state.value,
                     "downSeconds": round(max(0.0, time.time() - st.down_since), 1) if st.down_since else 0.0,
+                    # Altura de referencia aprendida para esta persona: si es
+                    # None, todavía no hay con qué comparar y no puede haber
+                    # detección de colapso.
+                    "alturaBase": round(st.baseline, 3) if st.baseline else None,
+                    "picoVelocidad": round(st.peak_velocity, 2),
+                    **(self._ultimo.get(tid) or {}),
                 }
                 for tid, st in self._detector.tracks.items()
             }

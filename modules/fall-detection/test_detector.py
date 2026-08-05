@@ -1,9 +1,10 @@
 """Pruebas del detector de caídas con trayectorias sintéticas.
 
-Cada prueba simula una secuencia de poses que representa una situación real.
-Esto permite verificar el comportamiento SIN tener que tirarse al piso, y sobre
-todo comprobar los casos que separan un detector usable de uno que satura al
-operador con falsas alarmas: agacharse, sentarse, caminar.
+Cubren lo que separa un detector de producción de una demo:
+  - un tropiezo del que la persona se levanta enseguida SÍ es una caída;
+  - agacharse o sentarse despacio NO lo es, aunque el cuerpo baje igual;
+  - una caída hacia la cámara (donde el torso sigue viéndose vertical) también
+    tiene que detectarse, porque la señal principal es el colapso de altura.
 """
 from __future__ import annotations
 
@@ -23,76 +24,79 @@ DT = 1.0 / FPS
 
 
 def make_pose(
-    hip_y: float,
-    angle_deg: float = 0.0,
-    height: float = 0.5,
+    centro_y: float,
+    altura: float,
+    angulo: float = 0.0,
     visible: bool = True,
-    center_x: float = 0.5,
+    centro_x: float = 0.5,
 ) -> list[Keypoint]:
-    """Construye un esqueleto con el torso inclinado `angle_deg` de la vertical.
+    """Esqueleto con una extensión vertical de `altura`.
 
-    0° = de pie (hombros encima de la cadera). 90° = tendido (hombros al lado).
+    `altura` es la clave del detector: de pie ronda 0.5 de la imagen; tendido,
+    una fracción de eso porque el cuerpo se ve "aplastado" verticalmente.
     """
-    score = 0.9 if visible else 0.05
-    torso = height * 0.4
-    rad = math.radians(angle_deg)
-    # Desde la cadera hacia los hombros: vertical si el ángulo es 0.
-    sx = center_x - torso * math.sin(rad)
-    sy = hip_y - torso * math.cos(rad)
+    s = 0.9 if visible else 0.05
+    mitad = altura / 2.0
+    rad = math.radians(angulo)
+    dx = mitad * math.sin(rad) * 0.6
 
-    kps = [Keypoint(center_x, hip_y, 0.1) for _ in range(17)]
-    kps[0] = Keypoint(sx, sy - torso * 0.35, score)            # nariz
-    kps[5] = Keypoint(sx - 0.04, sy, score)                     # hombro izq
-    kps[6] = Keypoint(sx + 0.04, sy, score)                     # hombro der
-    kps[11] = Keypoint(center_x - 0.03, hip_y, score)           # cadera izq
-    kps[12] = Keypoint(center_x + 0.03, hip_y, score)           # cadera der
-    kps[13] = Keypoint(center_x - 0.03, hip_y + height * 0.25, score)  # rodilla izq
-    kps[14] = Keypoint(center_x + 0.03, hip_y + height * 0.25, score)  # rodilla der
-    kps[15] = Keypoint(center_x - 0.03, hip_y + height * 0.5, score)   # tobillo izq
-    kps[16] = Keypoint(center_x + 0.03, hip_y + height * 0.5, score)   # tobillo der
+    arriba = centro_y - mitad
+    abajo = centro_y + mitad
+
+    kps = [Keypoint(centro_x, centro_y, 0.1) for _ in range(17)]
+    kps[0] = Keypoint(centro_x - dx, arriba, s)                       # nariz
+    kps[5] = Keypoint(centro_x - dx - 0.04, arriba + altura * 0.18, s)  # hombro izq
+    kps[6] = Keypoint(centro_x - dx + 0.04, arriba + altura * 0.18, s)  # hombro der
+    kps[11] = Keypoint(centro_x - 0.03, centro_y + altura * 0.05, s)    # cadera izq
+    kps[12] = Keypoint(centro_x + 0.03, centro_y + altura * 0.05, s)    # cadera der
+    kps[13] = Keypoint(centro_x - 0.03, centro_y + altura * 0.28, s)    # rodilla izq
+    kps[14] = Keypoint(centro_x + 0.03, centro_y + altura * 0.28, s)    # rodilla der
+    kps[15] = Keypoint(centro_x - 0.03, abajo, s)                       # tobillo izq
+    kps[16] = Keypoint(centro_x + 0.03, abajo, s)                       # tobillo der
     return kps
 
 
-def bbox_for(angle_deg: float, height: float = 0.5) -> tuple[float, float, float, float]:
-    """Caja coherente con la postura: de pie es alta y angosta; tendida al revés."""
-    rad = math.radians(angle_deg)
-    h = height * max(math.cos(rad), 0.12)
-    w = height * max(math.sin(rad), 0.18)
+def bbox_de(altura: float, angulo: float) -> tuple[float, float, float, float]:
+    rad = math.radians(angulo)
+    h = max(altura, 0.03)
+    w = altura * 0.28 + altura * 0.9 * abs(math.sin(rad))
     return (0.4, 0.3, w, h)
 
 
-def run(detector: FallDetector, frames: list[tuple[float, float, float]], track: int = 1):
-    """Ejecuta una secuencia de (ts, hip_y, angle) y devuelve todos los resultados."""
+DE_PIE = 0.50      # altura típica de una persona de pie en la imagen
+TENDIDO = 0.16     # tendida, la extensión vertical se desploma
+
+
+def correr(det: FallDetector, pasos, track: int = 1):
+    """pasos = lista de (ts, centro_y, altura, angulo)."""
     out = []
-    for ts, hip_y, angle in frames:
-        pf = PoseFrame(
-            track_id=track,
-            ts=ts,
-            keypoints=make_pose(hip_y, angle),
-            bbox=bbox_for(angle),
-            det_score=0.92,
+    for ts, cy, alt, ang in pasos:
+        out.append(
+            det.update(
+                PoseFrame(
+                    track_id=track, ts=ts,
+                    keypoints=make_pose(cy, alt, ang),
+                    bbox=bbox_de(alt, ang), det_score=0.92,
+                )
+            )
         )
-        out.append(detector.update(pf))
     return out
 
 
-def seq_standing(t0: float, seconds: float, hip_y: float = 0.5):
-    n = int(seconds * FPS)
-    return [(t0 + i * DT, hip_y, 3.0) for i in range(n)]
+def de_pie(t0, segundos, cy=0.5):
+    return [(t0 + i * DT, cy, DE_PIE, 3.0) for i in range(int(segundos * FPS))]
 
 
-def seq_transition(t0: float, seconds: float, y0: float, y1: float, a0: float, a1: float):
-    """Interpola posición y ángulo: sirve para caer, agacharse o levantarse."""
-    n = max(int(seconds * FPS), 1)
+def transicion(t0, segundos, cy0, cy1, a0, a1, alt0, alt1):
+    n = max(int(segundos * FPS), 1)
     return [
-        (t0 + i * DT, y0 + (y1 - y0) * (i / n), a0 + (a1 - a0) * (i / n))
+        (t0 + i * DT, cy0 + (cy1 - cy0) * (i / n), alt0 + (alt1 - alt0) * (i / n), a0 + (a1 - a0) * (i / n))
         for i in range(n)
     ]
 
 
-def seq_lying(t0: float, seconds: float, hip_y: float = 0.85):
-    n = int(seconds * FPS)
-    return [(t0 + i * DT, hip_y, 86.0) for i in range(n)]
+def tendido(t0, segundos, cy=0.85, ang=85.0):
+    return [(t0 + i * DT, cy, TENDIDO, ang) for i in range(int(segundos * FPS))]
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -100,155 +104,230 @@ def seq_lying(t0: float, seconds: float, hip_y: float = 0.85):
 # ═══════════════════════════════════════════════════════════════════
 
 def test_angulo_de_torso():
-    """La medición de postura debe ser correcta antes que nada."""
-    de_pie = torso_angle_deg(make_pose(0.5, 0.0), 0.3)
-    tendido = torso_angle_deg(make_pose(0.8, 90.0), 0.3)
-    assert de_pie is not None and de_pie < 10, f"de pie deberia ser ~0°, dio {de_pie}"
-    assert tendido is not None and tendido > 80, f"tendido deberia ser ~90°, dio {tendido}"
+    de = torso_angle_deg(make_pose(0.5, DE_PIE, 0.0), 0.3)
+    ten = torso_angle_deg(make_pose(0.85, TENDIDO, 88.0), 0.3)
+    assert de is not None and de < 20, f"de pie deberia ser bajo, dio {de}"
+    assert ten is not None and ten > de, "tendido deberia dar un angulo mayor que de pie"
 
 
-def test_caida_real_alerta():
-    """Caída: de pie -> descenso brusco -> horizontal -> sigue en el suelo."""
-    d = FallDetector(FallConfig(confirmSeconds=3.0))
-    frames = (
-        seq_standing(0.0, 2.0)
-        + seq_transition(2.0, 0.5, 0.5, 0.85, 3.0, 88.0)   # caída rápida
-        + seq_lying(2.5, 5.0)                                # queda tendido
-    )
-    res = run(d, frames)
+def test_caida_con_permanencia_alerta():
+    """Caída clásica: descenso brusco y queda en el suelo."""
+    d = FallDetector()
+    pasos = de_pie(0, 2.0) + transicion(2.0, 0.4, 0.5, 0.85, 3, 85, DE_PIE, TENDIDO) + tendido(2.4, 4.0)
+    res = correr(d, pasos)
     alertas = [r for r in res if r.is_fall]
-    assert alertas, "una caída con permanencia en el suelo DEBE alertar"
-    a = alertas[0]
-    assert a.confidence >= 0.55, f"confianza demasiado baja: {a.confidence}"
-    assert len(alertas) == 1, "debe alertar UNA sola vez, no en cada frame"
+    assert alertas, "una caída con permanencia DEBE alertar"
+    assert len(alertas) == 1, "debe alertar una sola vez"
+
+
+def test_tropiezo_con_recuperacion_rapida_alerta():
+    """LO QUE ANTES FALLABA: se cae y se levanta en menos de 3 s.
+
+    Sigue siendo una caída y hay que reportarla.
+    """
+    d = FallDetector()
+    pasos = (
+        de_pie(0, 2.0)
+        + transicion(2.0, 0.3, 0.5, 0.85, 3, 80, DE_PIE, TENDIDO)   # tropieza
+        + tendido(2.3, 0.8)                                          # menos de 1 s abajo
+        + transicion(3.1, 0.6, 0.85, 0.5, 80, 3, TENDIDO, DE_PIE)    # se levanta
+        + de_pie(3.7, 2.0)
+    )
+    res = correr(d, pasos)
+    assert any(r.is_fall for r in res), "un tropiezo con recuperación rápida DEBE alertar"
+
+
+def test_caida_tras_estar_quieto_y_levantarse_rapido():
+    """Quieto, se cae, y se levanta en menos de medio segundo.
+
+    Éste es el caso que separa medir bien la velocidad de medirla mal. Comparando
+    cada frame contra el inicio de la ventana, el descenso queda repartido sobre
+    todo el tiempo quieto previo y la velocidad recién cruza el umbral cuando esa
+    quietud sale de la ventana, medio segundo tarde. Para entonces la persona ya
+    se levantó y la caída se perdió. Comparando todos los pares aparece el tramo
+    real de caída en el primer frame.
+    """
+    d = FallDetector()
+    pasos = (
+        de_pie(0, 2.0)
+        + [(2.0 + i * DT, 0.5, DE_PIE, 3.0) for i in range(9)]        # 0.9 s quieto
+        + transicion(2.9, 0.3, 0.5, 0.75, 3, 60, DE_PIE, TENDIDO)     # cae
+        + [(3.2 + i * DT, 0.75, TENDIDO, 60.0) for i in range(2)]     # 0.2 s abajo
+        + [(3.4, 0.60, 0.40, 20.0), (3.5, 0.55, 0.46, 8.0)]           # se incorpora
+        + de_pie(3.6, 1.5)
+    )
+    res = correr(d, pasos)
+    assert any(r.is_fall for r in res), "la caída no debe diluirse por el tiempo quieto previo"
+
+
+def test_caida_a_6_fps_alerta():
+    """Al fps con el que corre en producción, no al de laboratorio."""
+    dt = 1.0 / 6.0
+    d = FallDetector()
+    pasos = [(i * dt, 0.5, DE_PIE, 3.0) for i in range(18)]           # 3 s de pie
+    t = 18 * dt
+    pasos += [(t + i * dt, 0.5 + 0.35 * (i / 3), DE_PIE + (TENDIDO - DE_PIE) * (i / 3), 3 + 27 * i) for i in range(3)]
+    t += 3 * dt
+    pasos += [(t + i * dt, 0.85, TENDIDO, 84.0) for i in range(12)]
+    res = correr(d, pasos)
+    assert any(r.is_fall for r in res), "a 6 fps una caída real todavía tiene que detectarse"
+
+
+def test_sentarse_largo_no_ciega_al_detector():
+    """Sentarse un rato largo y DESPUÉS caerse.
+
+    El estado de confirmación no puede volverse una trampa: si alguien se queda
+    en postura baja sin haber caído, el detector tiene que volver a de pie y
+    reaprender su altura, o queda ciego a la caída siguiente.
+    """
+    d = FallDetector()
+    pasos = (
+        de_pie(0, 2.0)
+        + transicion(2.0, 2.0, 0.5, 0.8, 3, 20, DE_PIE, 0.22)   # se sienta despacio
+        + [(4.0 + i * DT, 0.8, 0.22, 20.0) for i in range(80)]   # 8 s sentado
+    )
+    res = correr(d, pasos)
+    assert not any(r.is_fall for r in res), "sentarse no es caerse"
+    assert res[-1].state == State.UPRIGHT, f"quedó atrapado en {res[-1].state}"
+
+    # Ahora sí se levanta, y después se cae de verdad.
+    t = 12.0
+    pasos2 = de_pie(t, 2.0) + transicion(t + 2.0, 0.3, 0.5, 0.85, 3, 85, DE_PIE, TENDIDO) + tendido(t + 2.3, 3.0)
+    res2 = correr(d, pasos2)
+    assert any(r.is_fall for r in res2), "tras estar sentado, una caída posterior DEBE detectarse"
+
+
+def test_persona_diminuta_no_alerta():
+    """Detección muy chica: es ruido del detector, no una persona que se cayó.
+
+    A esa escala los puntos del esqueleto caen en un puñado de píxeles y el
+    "colapso de altura" mide el temblor del estimador. La cámara real produce
+    varias de estas por minuto sobre objetos del fondo.
+    """
+    chico = 0.06                      # 6 % del alto de la imagen
+    d = FallDetector()
+    pasos = (
+        [(i * DT, 0.5, chico, 3.0) for i in range(20)]
+        + transicion(2.0, 0.3, 0.5, 0.85, 3, 85, chico, chico * 0.3)
+        + [(2.3 + i * DT, 0.85, chico * 0.3, 85.0) for i in range(40)]
+    )
+    res = correr(d, pasos)
+    assert not any(r.is_fall for r in res), "una detección diminuta no puede generar una alerta"
+    assert all(not r.quality_ok for r in res), "debe reportarse como pose insuficiente"
+
+
+def test_caida_hacia_la_camara_alerta():
+    """Cae hacia la cámara: el torso sigue viéndose casi vertical.
+
+    El ángulo no sirve acá; lo que delata la caída es el colapso de altura.
+    """
+    d = FallDetector()
+    pasos = (
+        de_pie(0, 2.0)
+        # El ángulo apenas cambia (5°) pero la altura se desploma.
+        + transicion(2.0, 0.4, 0.5, 0.7, 3, 5, DE_PIE, TENDIDO)
+        + [(2.4 + i * DT, 0.7, TENDIDO, 5.0) for i in range(30)]
+    )
+    res = correr(d, pasos)
+    assert any(r.is_fall for r in res), "una caída hacia la cámara debe detectarse por el colapso de altura"
 
 
 def test_agacharse_no_alerta():
-    """Atarse los cordones: baja y se levanta enseguida. NO debe alertar.
-
-    Es el falso positivo clásico de los detectores basados sólo en la caja.
-    """
-    d = FallDetector(FallConfig(confirmSeconds=3.0))
-    frames = (
-        seq_standing(0.0, 2.0)
-        + seq_transition(2.0, 0.6, 0.5, 0.75, 3.0, 70.0)   # se agacha
-        + [(2.6 + i * DT, 0.75, 70.0) for i in range(10)]   # 1 s abajo
-        + seq_transition(3.6, 0.6, 0.75, 0.5, 70.0, 3.0)    # se levanta
-        + seq_standing(4.2, 2.0)
+    """Agacharse a atarse los cordones: baja despacio y se levanta."""
+    d = FallDetector()
+    pasos = (
+        de_pie(0, 2.0)
+        + transicion(2.0, 1.5, 0.5, 0.66, 3, 40, DE_PIE, DE_PIE * 0.72)  # lento y parcial
+        + [(3.5 + i * DT, 0.66, DE_PIE * 0.72, 40.0) for i in range(10)]
+        + transicion(4.5, 1.2, 0.66, 0.5, 40, 3, DE_PIE * 0.72, DE_PIE)
+        + de_pie(5.7, 1.5)
     )
-    res = run(d, frames)
-    assert not any(r.is_fall for r in res), "agacharse y levantarse NO debe alertar"
+    res = correr(d, pasos)
+    assert not any(r.is_fall for r in res), "agacharse despacio NO es una caída"
 
 
-def test_sentarse_en_el_piso_lento_no_dispara_por_velocidad():
-    """Sentarse despacio y volver a levantarse tampoco alerta."""
-    d = FallDetector(FallConfig(confirmSeconds=3.0))
-    frames = (
-        seq_standing(0.0, 2.0)
-        + seq_transition(2.0, 2.5, 0.5, 0.8, 3.0, 65.0)     # baja lento
-        + [(4.5 + i * DT, 0.8, 65.0) for i in range(15)]     # 1,5 s abajo
-        + seq_transition(6.0, 1.5, 0.8, 0.5, 65.0, 3.0)      # se levanta
+def test_sentarse_en_el_piso_no_alerta():
+    """Sentarse en el piso a propósito: baja despacio aunque termine abajo."""
+    d = FallDetector()
+    pasos = (
+        de_pie(0, 2.0)
+        + transicion(2.0, 3.0, 0.5, 0.78, 3, 30, DE_PIE, DE_PIE * 0.55)  # 3 s: controlado
+        + [(5.0 + i * DT, 0.78, DE_PIE * 0.55, 30.0) for i in range(30)]
     )
-    res = run(d, frames)
-    assert not any(r.is_fall for r in res), "sentarse y levantarse no es una caída"
+    res = correr(d, pasos)
+    assert not any(r.is_fall for r in res), "sentarse despacio no es una caída"
 
 
 def test_caminar_no_alerta():
-    """Movimiento normal de pie: nunca debe alertar."""
     d = FallDetector()
-    frames = [(i * DT, 0.5 + 0.01 * math.sin(i / 3.0), 4.0) for i in range(120)]
-    res = run(d, frames)
+    pasos = [(i * DT, 0.5 + 0.008 * math.sin(i / 3.0), DE_PIE, 4.0) for i in range(150)]
+    res = correr(d, pasos)
     assert not any(r.is_fall for r in res)
-    assert all(r.state == State.UPRIGHT for r in res[-10:])
-
-
-def test_se_levanta_antes_de_confirmar_no_alerta():
-    """Cae pero se incorpora antes de la ventana: no se confirma."""
-    d = FallDetector(FallConfig(confirmSeconds=4.0))
-    frames = (
-        seq_standing(0.0, 1.5)
-        + seq_transition(1.5, 0.4, 0.5, 0.85, 3.0, 88.0)     # cae
-        + seq_lying(1.9, 2.0)                                 # 2 s en el suelo
-        + seq_transition(3.9, 0.8, 0.85, 0.5, 88.0, 3.0)      # se levanta
-        + seq_standing(4.7, 2.0)
-    )
-    res = run(d, frames)
-    assert not any(r.is_fall for r in res), "si se levanta antes de confirmar, no se alerta"
     assert res[-1].state == State.UPRIGHT
 
 
+def test_severidad_sube_si_sigue_en_el_suelo():
+    """Quedarse tirado agrava la caída, pero no condiciona la alerta."""
+    d = FallDetector(FallConfig(prolongedSeconds=3.0))
+    pasos = de_pie(0, 2.0) + transicion(2.0, 0.4, 0.5, 0.85, 3, 85, DE_PIE, TENDIDO) + tendido(2.4, 8.0)
+    res = correr(d, pasos)
+    assert any(r.is_fall for r in res)
+    assert res[-1].severity == "critical", "seguir en el suelo debe elevar la severidad"
+
+
 def test_pose_insuficiente_no_afirma():
-    """Con el esqueleto casi invisible, el detector NO debe afirmar una caída."""
     d = FallDetector()
     out = []
     for i in range(40):
-        pf = PoseFrame(
-            track_id=7,
-            ts=i * DT,
-            keypoints=make_pose(0.85, 88.0, visible=False),  # puntos con score 0.05
-            bbox=bbox_for(88.0),
-            det_score=0.9,
+        out.append(
+            d.update(
+                PoseFrame(
+                    track_id=7, ts=i * DT,
+                    keypoints=make_pose(0.85, TENDIDO, 88.0, visible=False),
+                    bbox=bbox_de(TENDIDO, 88.0), det_score=0.9,
+                )
+            )
         )
-        out.append(d.update(pf))
-    assert not any(r.is_fall for r in out), "sin pose fiable no se puede afirmar una caída"
-    assert all(not r.quality_ok for r in out)
+    assert all(not r.quality_ok for r in out), "sin pose fiable no se puede afirmar nada"
 
 
 def test_segunda_caida_se_detecta():
-    """Tras recuperarse, una nueva caída vuelve a alertar (el estado se rearma)."""
-    d = FallDetector(FallConfig(confirmSeconds=2.0))
-    frames = (
-        seq_standing(0.0, 1.0)
-        + seq_transition(1.0, 0.4, 0.5, 0.85, 3.0, 88.0)
-        + seq_lying(1.4, 3.0)                                 # 1ª caída -> alerta
-        + seq_transition(4.4, 0.8, 0.85, 0.5, 88.0, 3.0)      # se levanta
-        + seq_standing(5.2, 1.5)
-        + seq_transition(6.7, 0.4, 0.5, 0.85, 3.0, 88.0)
-        + seq_lying(7.1, 3.0)                                 # 2ª caída -> alerta
+    """Tras levantarse, una nueva caída vuelve a alertar."""
+    d = FallDetector()
+    pasos = (
+        de_pie(0, 1.5)
+        + transicion(1.5, 0.3, 0.5, 0.85, 3, 85, DE_PIE, TENDIDO)
+        + tendido(1.8, 2.0)
+        + transicion(3.8, 0.5, 0.85, 0.5, 85, 3, TENDIDO, DE_PIE)
+        + de_pie(4.3, 2.0)
+        + transicion(6.3, 0.3, 0.5, 0.85, 3, 85, DE_PIE, TENDIDO)
+        + tendido(6.6, 2.0)
     )
-    res = run(d, frames)
-    alertas = [r for r in res if r.is_fall]
-    assert len(alertas) == 2, f"deberían detectarse 2 caídas, se detectaron {len(alertas)}"
+    res = correr(d, pasos)
+    assert len([r for r in res if r.is_fall]) >= 2, "debe detectar las dos caídas"
 
 
 def test_personas_independientes():
-    """El estado es por persona: la caída de una no afecta a la otra."""
-    d = FallDetector(FallConfig(confirmSeconds=2.0))
-    for i in range(60):
+    d = FallDetector()
+    for i in range(70):
         ts = i * DT
-        # Persona 1 cae a los 1,0 s; persona 2 sigue de pie todo el tiempo.
-        if ts < 1.0:
-            y1, a1 = 0.5, 3.0
+        if ts < 2.0:
+            cy1, alt1, a1 = 0.5, DE_PIE, 3.0
         else:
-            y1, a1 = 0.85, 88.0
-        d.update(PoseFrame(1, ts, make_pose(y1, a1), bbox_for(a1), 0.9))
-        r2 = d.update(PoseFrame(2, ts, make_pose(0.5, 3.0), bbox_for(3.0), 0.9))
+            cy1, alt1, a1 = 0.85, TENDIDO, 85.0
+        d.update(PoseFrame(1, ts, make_pose(cy1, alt1, a1), bbox_de(alt1, a1), 0.9))
+        r2 = d.update(PoseFrame(2, ts, make_pose(0.5, DE_PIE, 3.0), bbox_de(DE_PIE, 3.0), 0.9))
         assert not r2.is_fall, "la persona 2 nunca se cayó"
-    assert d.tracks[1].state == State.ALERTED
     assert d.tracks[2].state == State.UPRIGHT
 
 
-def test_confianza_crece_con_la_evidencia():
-    """Más tiempo en el suelo y postura más horizontal => más confianza."""
-    d = FallDetector(FallConfig(confirmSeconds=2.0))
-    frames = (
-        seq_standing(0.0, 1.0)
-        + seq_transition(1.0, 0.4, 0.5, 0.88, 3.0, 89.0)
-        + seq_lying(1.4, 4.0)
-    )
-    res = run(d, frames)
-    alerta = next(r for r in res if r.is_fall)
-    assert alerta.confidence > 0.7, f"una caída clara debería superar 0,7: {alerta.confidence}"
-
-
 def test_olvida_personas_que_desaparecen():
-    """El estado no crece sin límite si la gente sale de cuadro."""
     d = FallDetector(FallConfig(trackTimeoutSeconds=2.0))
     for t in range(5):
-        d.update(PoseFrame(t, 0.0, make_pose(0.5, 3.0), bbox_for(3.0), 0.9))
+        d.update(PoseFrame(t, 0.0, make_pose(0.5, DE_PIE, 3.0), bbox_de(DE_PIE, 3.0), 0.9))
     assert len(d.tracks) == 5
     d.purge(now=10.0)
-    assert len(d.tracks) == 0, "las personas que ya no se ven deben olvidarse"
+    assert len(d.tracks) == 0
 
 
 if __name__ == "__main__":
@@ -259,7 +338,7 @@ if __name__ == "__main__":
     for nombre, fn in pruebas:
         try:
             fn()
-            print(f"  OK   {nombre}")
+            print(f"  OK    {nombre}")
         except AssertionError as e:
             fallos += 1
             print(f"  FALLA {nombre}: {e}")

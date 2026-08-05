@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
+import time
 from pathlib import Path
 
 import requests
@@ -32,6 +34,8 @@ SERVICE_TOKEN = os.environ.get("SERVICE_TOKEN", "")
 DEVICE = os.environ.get("AI_WORKER_DEVICE", "cpu")
 ASSIGNMENTS_FILE = Path(os.environ.get("ASSIGNMENTS_FILE", "./assignments.json"))
 PIPELINE_FPS = float(os.environ.get("PIPELINE_FPS", "3"))
+# Cada cuánto se revisa si cambiaron las asignaciones en el dashboard.
+SYNC_SECONDS = float(os.environ.get("ASSIGNMENT_SYNC_SECONDS", "15"))
 
 _discovery = discover(MODULES_PATH)
 _instances: dict[str, PerceptaModule] = {}
@@ -115,8 +119,8 @@ def _load_assignments() -> list[CameraAssignment]:
     ]
 
 
-@app.on_event("startup")
-def _startup() -> None:
+def _arrancar_pipelines() -> None:
+    """(Re)construye los pipelines según las asignaciones vigentes."""
     assignments = _load_assignments()
     needed = {m["moduleKey"] for a in assignments for m in a.modules}
 
@@ -156,6 +160,43 @@ def _startup() -> None:
         )
         p.start()
         _pipelines.append(p)
+
+
+def _firma(assignments) -> str:
+    """Huella de la configuración: cambia si se agregó o quitó una asignación."""
+    return "|".join(
+        sorted(f"{a.camera_id}:{','.join(sorted(m['moduleKey'] for m in a.modules))}" for a in assignments)
+    )
+
+
+def _vigilar_asignaciones() -> None:
+    """Reconstruye los pipelines cuando cambian las asignaciones.
+
+    Sin esto, asignar un módulo desde el dashboard no tenía efecto hasta
+    reiniciar el worker a mano — inaceptable en producción.
+    """
+    actual = _firma(_load_assignments())
+    while True:
+        time.sleep(SYNC_SECONDS)
+        try:
+            nuevas = _load_assignments()
+            firma = _firma(nuevas)
+            if firma == actual:
+                continue
+            log.info("cambiaron las asignaciones: reconstruyendo pipelines")
+            actual = firma
+            for p in _pipelines:
+                p.stop()
+            _pipelines.clear()
+            _arrancar_pipelines()
+        except Exception:
+            log.exception("fallo al sincronizar asignaciones")
+
+
+@app.on_event("startup")
+def _startup() -> None:
+    _arrancar_pipelines()
+    threading.Thread(target=_vigilar_asignaciones, name="sync-asignaciones", daemon=True).start()
 
 
 @app.on_event("shutdown")
