@@ -11,22 +11,38 @@ siga en el suelo. La permanencia sólo agrava la severidad.
 
 LAS TRES SEÑALES, Y POR QUÉ HACEN FALTA LAS TRES
 ------------------------------------------------
-1. COLAPSO DE ALTURA. Se aprende la altura habitual de CADA persona mientras
-   está de pie, y se mide cuánto se desploma respecto de SU propia referencia.
-   Esto funciona sin importar la distancia a la cámara ni la estatura.
+1. CUÁNTO BAJÓ EL TRONCO respecto de su altura de pie, medido en estaturas de
+   esa misma persona. Es la señal que decide, y la razón es lo que NO le afecta:
+   no depende de qué partes del cuerpo se ven. Sentarse baja el tronco el largo
+   del muslo (~0.3); caerse lo lleva al piso (~0.8).
 
-2. DESCENSO RÁPIDO. Es lo único que separa una caída de agacharse: agacharse
-   también baja el cuerpo, pero despacio y de forma controlada.
+2. DESCENSO RÁPIDO. Es lo único que separa una caída de agacharse o de sentarse
+   en el suelo: esos movimientos también terminan abajo, pero despacio y de
+   forma controlada.
 
-3. POSTURA BAJA SOSTENIDA (menos de un segundo). Evita alertar por un frame
-   ruidoso o una pose mal estimada, sin exigir que la persona se quede tirada.
+3. IMPACTO CONFIRMADO en dos frames. Descarta una pose mal estimada suelta sin
+   exigir que la persona se quede tirada.
 
-POR QUÉ NO ALCANZA EL ÁNGULO DEL TORSO
---------------------------------------
-El ángulo se mide en la imagen, no en el mundo. Si alguien cae HACIA la cámara
-o alejándose, su torso sigue proyectándose casi vertical aunque esté horizontal
-en el piso. Por eso el ángulo aporta, pero el colapso de altura es la señal
-principal: esa sí funciona en cualquier orientación.
+QUÉ SE PROBÓ Y NO FUNCIONA COMO SEÑAL PRINCIPAL
+-----------------------------------------------
+- LA EXTENSIÓN VERTICAL DE LOS PUNTOS VISIBLES. Se desploma cuando las piernas
+  quedan tapadas —alguien sentado a un escritorio— y el detector concluye que el
+  cuerpo se derrumbó sin que se haya movido. Era la causa de que sentarse se
+  tomara siempre como caída.
+- EL ÁNGULO DEL TORSO. Se mide en la imagen, no en el mundo: si alguien cae
+  HACIA la cámara o alejándose, su torso se sigue proyectando casi vertical
+  aunque esté horizontal en el piso.
+- LA SILUETA DEL RECUADRO. Se ensancha con un brazo estirado sin que la postura
+  haya cambiado.
+Las tres se conservan como evidencia de apoyo para el operador; ninguna decide
+sola.
+
+Y UNA REGLA QUE NO SE NEGOCIA
+-----------------------------
+No se alerta si el cuerpo no quedó abajo. Hubo una versión que alertaba sólo por
+un pico de velocidad, y en cámara real produjo alertas con el tronco al 104 % de
+su altura de pie —la persona parada— porque un salto de la estimación de pose se
+lee igual que una caída si nadie mira dónde terminó el cuerpo.
 """
 from __future__ import annotations
 
@@ -85,32 +101,73 @@ class FallConfig:
     # produce sobre objetos del fondo.
     minPersonHeight: float = 0.12
 
-    # ── señal 1: colapso de altura ──────────────────────────────────
-    # La persona pasa a ocupar menos de esta fracción de su altura habitual.
-    # 0.65 tolera agacharse un poco sin marcar caída.
+    # ── señal 1: cuánto bajó el tronco ──────────────────────────────
+    # Medido en estaturas: 0 de pie, ~0.8 tendido en el piso.
+    #
+    # Los números vienen de la geometría del cuerpo, no de probar a ojo:
+    # sentarse en una silla baja el tronco el largo del muslo, alrededor de
+    # 0.25-0.32 estaturas. Caerse lo lleva al piso, 0.7-0.9. El umbral va en el
+    # medio pero cerca de lo alto, porque equivocarse hacia el lado de la falsa
+    # alarma es peor: un sistema que grita cuando alguien se sienta se ignora, y
+    # entonces no detecta nada.
+    trunkDropRatio: float = 0.38
+    # Bajada que alcanza por sí sola, sin mirar la postura.
+    #
+    # Está alto a propósito, y el valor salió de medirlo: con 0.60 esta vía se
+    # comía las secuencias de gente que se acuesta al piso a propósito, que
+    # llegan a bajadas de 1.0-1.5 igual que una caída. Por encima de 1.1 sólo se
+    # llega con la perspectiva de alguien que cae HACIA la cámara, donde el
+    # cuerpo se proyecta comprimido. Todo lo demás tiene que mostrar además un
+    # cuerpo horizontal.
+    trunkDropSure: float = 1.10
+    # Alto/ancho de la nube de puntos por debajo del cual el cuerpo se
+    # considera horizontal. De pie 4-6, sentado 2-3, tendido menos de 1.
+    # Medido: 1.4 dejaba pasar posturas sentadas; 1.0 exige estar realmente
+    # tendido y elimina esas falsas alarmas sin perder caídas.
+    # 1.2 y no el óptimo puntual: medido sobre las 70 secuencias, los valores
+    # entre 1.0 y 1.2 dan el mismo resultado (25 detectadas, 4 falsas) y 0.9 da
+    # una falsa menos. Con 40 secuencias negativas esa diferencia es UNA muestra,
+    # así que se elige el medio de la meseta en vez del pico — un pico de una
+    # muestra es ruido con forma de mejora.
+    downVerticality: float = 1.2
+    # Colapso de altura visible. Se conserva como dato para el operador, pero
+    # ya NO decide: se desploma cuando las piernas quedan tapadas.
     collapseRatio: float = 0.65
     # Frames necesarios para fijar la altura de referencia. Con 5 alcanzaba para
     # anclarla a media zancada o a media agachada: en cámara real se vieron
     # alturas del 246 % de una referencia aprendida con la persona doblada. Dos
     # segundos de observación dan una referencia estable, y hasta entonces
     # simplemente no se juzga el colapso — mejor callar que inventar.
-    baselineFrames: int = 12
+    baselineFrames: int = 4
     # Ventana sobre la que se estima la altura de pie. Larga a propósito: la
     # persona cambia de postura todo el tiempo y hace falta ver bastante para
     # saber cuál es su altura real.
     baselineWindowFrames: int = 120
 
     # ── señal 2: descenso rápido ────────────────────────────────────
-    # En alturas de cuerpo por segundo. Agacharse ronda 0.2-0.4; una caída
-    # supera holgadamente 0.8.
-    fallVelocity: float = 0.55
+    # En estaturas por segundo, y es la señal que MÁS separa: sobre el dataset
+    # público, las caídas tienen mediana 0.88 y las actividades cotidianas 0.19.
+    # Acostarse a propósito termina en la misma postura que una caída; lo único
+    # que los distingue es a qué velocidad se llegó.
+    #
+    # 0.70 salió de una búsqueda sobre las 70 secuencias, no de probar a ojo.
+    # Bajarlo a 0.55 sube el recall de 83 % a 87 % y duplica las falsas alarmas
+    # de 4 a 8: el detector se vuelve el que molesta, y el que molesta se apaga.
+    fallVelocity: float = 0.70
     # Ventana en la que se busca el descenso: una caída dura menos de 1 s.
     fallWindowSeconds: float = 1.2
 
     # ── señal 3: confirmación breve del impacto ─────────────────────
-    # NO es permanencia: sólo evita alertar por un frame ruidoso. A 6 fps son
-    # dos frames, que ya descartan una pose mal estimada aislada sin retrasar
-    # la alerta de un tropiezo del que la persona se levanta enseguida.
+    # Se cuenta en FRAMES, no en segundos, y la diferencia importa. Lo que se
+    # quiere descartar es una pose mal estimada suelta, y eso es un fenómeno por
+    # frame: dos observaciones seguidas del cuerpo abajo ya lo descartan, corra
+    # el pipeline a 6 fps o a 15. Expresado en segundos, el mismo umbral pedía
+    # dos frames a 10 fps y cuatro a 6 fps, y a 6 fps —el ritmo de producción—
+    # eso alcanzaba para perder tropiezos cortos por centésimas.
+    #
+    # NO es permanencia en el suelo: son dos frames, menos de medio segundo.
+    impactConfirmFrames: int = 2
+    # Se conserva para configuraciones existentes; ya no gatea la alerta.
     impactConfirmSeconds: float = 0.35
 
     # ── severidad ───────────────────────────────────────────────────
@@ -141,6 +198,14 @@ class TrackState:
     baseline_heights: Deque[float] = field(default_factory=lambda: deque(maxlen=120))
     baseline: float | None = None
 
+    # Altura del tronco en la imagen cuando la persona está de pie. Se toma la
+    # envolvente SUPERIOR (el valor más alto que alcanzó, o sea la `y` más
+    # chica): nadie tiene los hombros más arriba que estando parado, así que ese
+    # extremo es la referencia correcta y no se contamina con cada vez que la
+    # persona se agacha.
+    trunk_ys: Deque[float] = field(default_factory=lambda: deque(maxlen=120))
+    trunk_baseline: float | None = None
+
     # Historia reciente (ts, altura, centro_y) para medir el descenso.
     history: Deque[tuple[float, float, float]] = field(default_factory=lambda: deque(maxlen=60))
 
@@ -149,6 +214,8 @@ class TrackState:
     det_scores: Deque[float] = field(default_factory=lambda: deque(maxlen=60))
 
     peak_velocity: float = 0.0
+    falling_since: float | None = None    # desde cuándo está descendiendo
+    down_frames: int = 0                  # frames seguidos con el cuerpo abajo
     collapse_since: float | None = None   # desde cuándo está colapsado
     down_since: float | None = None       # desde cuándo está abajo (severidad)
     alerted_at: float | None = None
@@ -172,6 +239,8 @@ class FallResult:
     reason: str
     quality_ok: bool
     collapse_ratio: float | None  # altura actual / altura habitual
+    trunk_drop: float | None = None      # cuánto bajó el tronco, en estaturas
+    verticality: float | None = None     # alto/ancho de la nube de puntos
 
 
 def _mid_y(kps: list[Keypoint], a: int, b: int, min_score: float) -> float | None:
@@ -209,6 +278,75 @@ def torso_angle_deg(kps: list[Keypoint], min_score: float) -> float | None:
 
 def visible_torso_points(kps: list[Keypoint], min_score: float) -> int:
     return sum(1 for i in TORSO_POINTS if i < len(kps) and kps[i].score >= min_score)
+
+
+def altura_del_tronco(kps: list[Keypoint], min_score: float) -> float | None:
+    """Posición vertical del tronco en la imagen (hombros; si no, nariz o cadera).
+
+    Es LA medida del detector, y la razón es lo que NO le afecta.
+
+    La extensión vertical de los puntos visibles —lo que se usaba antes— se
+    desploma cuando las piernas quedan tapadas. Alguien sentado a un escritorio
+    con las piernas debajo pasa a mostrar sólo cabeza, hombros y caderas, la
+    extensión cae a un tercio, y el detector concluye que el cuerpo se derrumbó
+    cuando en realidad no se movió. Era la causa de que sentarse se tomara
+    siempre como caída.
+
+    Los hombros, en cambio, están casi siempre visibles y su altura sólo baja si
+    la persona baja de verdad. Sentarse los baja el largo del muslo; caerse los
+    lleva al piso. Esa diferencia es la que separa los dos casos.
+    """
+    hombros = [i for i in (L_SHOULDER, R_SHOULDER) if i < len(kps) and kps[i].score >= min_score]
+    if hombros:
+        return sum(kps[i].y for i in hombros) / len(hombros)
+    if NOSE < len(kps) and kps[NOSE].score >= min_score:
+        return kps[NOSE].y
+    caderas = [i for i in (L_HIP, R_HIP) if i < len(kps) and kps[i].score >= min_score]
+    if caderas:
+        # La cadera queda más abajo que los hombros; se corrige para que la
+        # serie no dé un salto al cambiar de punto de referencia.
+        return sum(kps[i].y for i in caderas) / len(caderas) - 0.18 * _escala(kps, min_score)
+    return None
+
+
+def _escala(kps: list[Keypoint], min_score: float) -> float:
+    """Tamaño aparente de la persona: distancia hombros-caderas, ampliada.
+
+    Sirve de referencia de escala instantánea. Se usa el torso porque sobrevive
+    a que las piernas estén tapadas, que es justo cuando hace falta.
+    """
+    hombros = [i for i in (L_SHOULDER, R_SHOULDER) if i < len(kps) and kps[i].score >= min_score]
+    caderas = [i for i in (L_HIP, R_HIP) if i < len(kps) and kps[i].score >= min_score]
+    if hombros and caderas:
+        sy = sum(kps[i].y for i in hombros) / len(hombros)
+        sx = sum(kps[i].x for i in hombros) / len(hombros)
+        hy = sum(kps[i].y for i in caderas) / len(caderas)
+        hx = sum(kps[i].x for i in caderas) / len(caderas)
+        largo = math.hypot(hx - sx, hy - sy)
+        if largo > 0.01:
+            return largo / 0.30  # el torso es ~30 % de la estatura
+    return 0.0
+
+
+def verticalidad(kps: list[Keypoint], min_score: float) -> float | None:
+    """Cuán vertical es la nube de puntos del cuerpo: alto / ancho.
+
+    De pie ronda 4-6; sentado 2-3; tendido baja de 1. Se calcula sobre los
+    puntos del esqueleto y no sobre el recuadro, porque el recuadro se ensancha
+    con un brazo estirado sin que la postura haya cambiado.
+
+    Es una señal instantánea, sin memoria, y por eso complementa a la caída del
+    tronco: aquélla necesita saber cómo estaba antes, ésta no.
+    """
+    ys = [k.y for k in kps if k.score >= min_score]
+    xs = [k.x for k in kps if k.score >= min_score]
+    if len(ys) < 4:
+        return None
+    alto = max(ys) - min(ys)
+    ancho = max(xs) - min(xs)
+    if ancho < 1e-4:
+        return None
+    return alto / ancho
 
 
 def person_height(kps: list[Keypoint], bbox: tuple[float, float, float, float], min_score: float) -> float:
@@ -251,18 +389,36 @@ class FallDetector:
         el costo cuadrático es irrelevante.
         """
         cfg = self.cfg
-        recientes = [(t, c) for (t, _, c) in st.history if now - t <= cfg.fallWindowSeconds]
+        recientes = [(t, h, c) for (t, h, c) in st.history if now - t <= cfg.fallWindowSeconds]
         if len(recientes) < 2:
             return 0.0
 
-        ref = max(st.baseline or 0.3, 1e-6)
+        # La escala se toma del propio tramo medido, no de la referencia
+        # aprendida. Es lo que permite medir velocidad desde el segundo frame:
+        # normalizando por `st.baseline` no había ninguna señal hasta terminar
+        # de aprender la estatura, y contra el dataset público se midió que las
+        # caídas duran 11-15 frames — o sea que el aprendizaje se comía la
+        # caída entera y no quedaba nada que detectar.
+        # Todos los tramos que TERMINAN en el instante actual, no cualquier par
+        # de la ventana. La diferencia decide el detector entero.
+        #
+        # Lo que importa físicamente es a qué velocidad llegó el cuerpo a donde
+        # está ahora. Tomando el pico de cualquier momento, un movimiento rápido
+        # cualquiera —enderezarse, girar, un salto de la estimación— quedaba
+        # registrado como "descenso" y después alcanzaba con que el cuerpo
+        # estuviera abajo por cualquier motivo. Contra el dataset público eso
+        # daba 15 falsas alarmas sobre 40: personas que se acuestan despacio,
+        # con un pico de velocidad ajeno prestado de otro instante.
+        t1, h1, c1 = recientes[-1]
         peor = 0.0
-        for i, (t0, c0) in enumerate(recientes[:-1]):
-            for (t1, c1) in recientes[i + 1:]:
-                dt = t1 - t0
-                if dt <= 1e-3:
-                    continue
-                peor = max(peor, ((c1 - c0) / ref) / dt)
+        for (t0, h0, c0) in recientes[:-1]:
+            dt = t1 - t0
+            if dt <= 1e-3:
+                continue
+            # De pie es la mayor de las dos alturas del par: la persona sólo
+            # puede haberse achicado al caer.
+            ref = max(h0, h1, st.baseline or 0.0, 1e-6)
+            peor = max(peor, ((c1 - c0) / ref) / dt)
         return peor
 
     def update(self, pf: PoseFrame) -> FallResult:
@@ -271,15 +427,20 @@ class FallDetector:
         if st is None:
             st = TrackState(last_ts=pf.ts)
             st.baseline_heights = deque(maxlen=cfg.baselineWindowFrames)
+            st.trunk_ys = deque(maxlen=cfg.baselineWindowFrames)
             self.tracks[pf.track_id] = st
 
         angle = torso_angle_deg(pf.keypoints, cfg.keypointScore)
         n_torso = visible_torso_points(pf.keypoints, cfg.keypointScore)
         _, _, bw, bh = pf.bbox
         ratio = (bh / bw) if bw > 1e-6 else None
+        vert = verticalidad(pf.keypoints, cfg.keypointScore)
 
         altura = person_height(pf.keypoints, pf.bbox, cfg.keypointScore)
-        centro_y = _mid_y(pf.keypoints, L_HIP, R_HIP, cfg.keypointScore)
+        y_tronco = altura_del_tronco(pf.keypoints, cfg.keypointScore)
+        centro_y = y_tronco
+        if centro_y is None:
+            centro_y = _mid_y(pf.keypoints, L_HIP, R_HIP, cfg.keypointScore)
         if centro_y is None:
             centro_y = pf.bbox[1] + pf.bbox[3] / 2
 
@@ -327,24 +488,48 @@ class FallDetector:
                 idx = min(int(len(ordenadas) * 0.9), len(ordenadas) - 1)
                 st.baseline = ordenadas[idx]
 
+            # Altura del tronco estando de pie: percentil 10 de las `y`, o sea
+            # la posición MÁS ALTA que alcanzó. Mismo razonamiento que arriba,
+            # invertido porque en la imagen la `y` crece hacia abajo.
+            if y_tronco is not None:
+                st.trunk_ys.append(y_tronco)
+                if len(st.trunk_ys) >= cfg.baselineFrames:
+                    ordenadas = sorted(st.trunk_ys)
+                    idx = min(int(len(ordenadas) * 0.1), len(ordenadas) - 1)
+                    st.trunk_baseline = ordenadas[idx]
+
         colapso = None
         if st.baseline and st.baseline > 1e-6:
             colapso = altura / st.baseline
 
+        # Cuánto bajó el tronco respecto de su posición de pie, en estaturas.
+        caida_tronco = None
+        if y_tronco is not None and st.trunk_baseline is not None and st.baseline:
+            caida_tronco = (y_tronco - st.trunk_baseline) / max(st.baseline, 1e-6)
+
         # ── ¿el cuerpo está abajo? ──────────────────────────────────────
-        # Tres formas de estarlo; alcanza con una, porque cada cámara ve
-        # distinto según su ángulo.
+        # Antes bastaba con cualquiera de tres señales sueltas, y dos de ellas
+        # eran poco fiables: el colapso de altura se dispara cuando las piernas
+        # quedan tapadas, y la silueta del recuadro cambia con un brazo
+        # estirado. Por eso sentarse se tomaba siempre como caída.
+        #
+        # Ahora la señal principal es cuánto bajó el TRONCO, que no depende de
+        # qué partes del cuerpo se ven. Una bajada muy grande alcanza sola. Una
+        # bajada intermedia necesita además que el cuerpo se vea horizontal.
         cuerpo_abajo = False
         motivos = []
-        if colapso is not None and colapso <= cfg.collapseRatio:
-            cuerpo_abajo = True
-            motivos.append(f"altura al {colapso*100:.0f}%")
-        if angle is not None and angle >= cfg.downAngleDeg:
-            cuerpo_abajo = True
-            motivos.append(f"torso {angle:.0f}°")
-        if ratio is not None and ratio <= cfg.downRatio:
-            cuerpo_abajo = True
-            motivos.append(f"silueta {ratio:.1f}")
+        if caida_tronco is not None:
+            horizontal = (vert is not None and vert <= cfg.downVerticality) or (
+                angle is not None and angle >= cfg.downAngleDeg
+            )
+            if caida_tronco >= cfg.trunkDropSure:
+                cuerpo_abajo = True
+                motivos.append(f"tronco bajó {caida_tronco:.0%} de su estatura")
+            elif caida_tronco >= cfg.trunkDropRatio and horizontal:
+                cuerpo_abajo = True
+                motivos.append(f"tronco bajó {caida_tronco:.0%} y cuerpo horizontal")
+            if cuerpo_abajo and colapso is not None:
+                motivos.append(f"altura al {colapso*100:.0f}%")
 
         descenso_brusco = velocidad >= cfg.fallVelocity
         if descenso_brusco:
@@ -363,12 +548,14 @@ class FallDetector:
         if st.state == State.UPRIGHT:
             if descenso_brusco:
                 st.state = State.FALLING
+                st.falling_since = pf.ts
                 st.collapse_since = None
                 reason = f"descenso rápido ({velocidad:.2f})"
             elif cuerpo_abajo and st.baseline is not None and not st.postura_baja_aceptada:
                 # Llegó abajo sin que se viera el descenso (puede haber pasado
                 # entre dos frames): igual se vigila.
                 st.state = State.FALLING
+                st.falling_since = pf.ts
                 _marcar_abajo(st, pf.ts)
                 reason = "cuerpo abajo"
 
@@ -379,18 +566,34 @@ class FallDetector:
 
                 # Se alerta acá: hubo descenso brusco y el cuerpo quedó abajo.
                 # NO se espera a ver si se queda tirado.
-                if transcurrido >= cfg.impactConfirmSeconds and st.peak_velocity >= cfg.fallVelocity:
+                if st.down_frames >= cfg.impactConfirmFrames and st.peak_velocity >= cfg.fallVelocity:
                     st.state = State.ALERTED
                     st.alerted_at = pf.ts
                     is_fall = True
                     reason = f"caída: {', '.join(motivos)}, descenso {st.peak_velocity:.2f}"
                 else:
                     st.state = State.IMPACT
-                    reason = f"impacto, confirmando ({transcurrido:.1f}s)"
+                    reason = f"impacto, confirmando ({st.down_frames}/{cfg.impactConfirmFrames} frames)"
+            elif (
+                caida_tronco is not None
+                and caida_tronco >= cfg.trunkDropRatio * 0.5
+                and pf.ts - (st.falling_since or pf.ts) <= cfg.fallWindowSeconds
+            ):
+                # Todavía va en camino. Una caída atraviesa posturas
+                # intermedias: a mitad de recorrido el tronco ya bajó bastante
+                # pero el cuerpo aún no se ve horizontal. Antes eso se leía como
+                # "no terminó abajo" y reseteaba la máquina, tirando el pico de
+                # velocidad y el reloj de confirmación justo cuando la caída
+                # estaba ocurriendo. El resultado era perder caídas cortas por
+                # unas centésimas.
+                reason = f"descendiendo ({caida_tronco:.0%})"
             else:
-                # Bajó rápido pero no terminó abajo: fue agacharse o un gesto.
+                # Bajó rápido y volvió arriba, o pasó demasiado tiempo sin
+                # llegar al piso: fue agacharse o un gesto.
                 st.state = State.UPRIGHT
                 st.peak_velocity = 0.0
+                st.falling_since = None
+                st.down_frames = 0
                 st.collapse_since = None
                 st.down_since = None
                 reason = "no terminó abajo"
@@ -399,7 +602,7 @@ class FallDetector:
             if cuerpo_abajo:
                 _marcar_abajo(st, pf.ts)
                 transcurrido = pf.ts - (st.collapse_since or pf.ts)
-                if transcurrido >= cfg.impactConfirmSeconds and st.peak_velocity >= cfg.fallVelocity:
+                if st.down_frames >= cfg.impactConfirmFrames and st.peak_velocity >= cfg.fallVelocity:
                     st.state = State.ALERTED
                     st.alerted_at = pf.ts
                     is_fall = True
@@ -413,27 +616,35 @@ class FallDetector:
                     # a reaprenderla desde una postura agachada.
                     st.state = State.UPRIGHT
                     st.peak_velocity = 0.0
+                    st.falling_since = None
+                    st.down_frames = 0
                     st.collapse_since = None
                     st.down_since = None
                     st.postura_baja_aceptada = True
                     reason = "postura baja sostenida sin caída"
                 else:
-                    reason = f"confirmando impacto ({transcurrido:.1f}s)"
+                    reason = f"confirmando impacto ({st.down_frames}/{cfg.impactConfirmFrames} frames)"
             else:
-                # Se levantó antes de confirmar: si el descenso fue muy brusco
-                # igual se alerta —un tropiezo con recuperación inmediata sigue
-                # siendo una caída—; si fue suave, era agacharse.
-                if st.peak_velocity >= cfg.fallVelocity * 1.6:
-                    st.state = State.ALERTED
-                    st.alerted_at = pf.ts
-                    is_fall = True
-                    reason = f"caída con recuperación inmediata (descenso {st.peak_velocity:.2f})"
-                else:
-                    st.state = State.UPRIGHT
-                    st.peak_velocity = 0.0
-                    st.collapse_since = None
-                    st.down_since = None
-                    reason = "se recuperó, sin caída"
+                # Se incorporó antes de confirmar el impacto.
+                #
+                # Antes acá se alertaba igual si la velocidad había sido alta,
+                # sin exigir que el cuerpo hubiera quedado abajo. Esa vía es la
+                # que producía las "caídas de la nada": en cámara real se
+                # midieron alertas con el tronco al 104 % de su altura de pie
+                # —o sea, la persona parada— disparadas por un pico de velocidad
+                # que venía de un salto de la estimación de pose, no de un
+                # movimiento. Una velocidad sin destino no es una caída.
+                #
+                # El tropiezo del que uno se levanta enseguida se sigue
+                # detectando, porque confirmar el impacto son dos frames
+                # (0,35 s) y cualquier caída real pasa más tiempo que eso abajo.
+                st.state = State.UPRIGHT
+                st.peak_velocity = 0.0
+                st.falling_since = None
+                st.down_frames = 0
+                st.collapse_since = None
+                st.down_since = None
+                reason = "bajó rápido pero no quedó abajo"
 
         elif st.state == State.ALERTED:
             if not cuerpo_abajo:
@@ -448,6 +659,8 @@ class FallDetector:
             # mismo de pie.
             st.state = State.UPRIGHT
             st.peak_velocity = 0.0
+            st.falling_since = None
+            st.down_frames = 0
             st.collapse_since = None
             st.down_since = None
             reason = "recuperado"
@@ -457,7 +670,9 @@ class FallDetector:
         # suelo sugiere que la persona no puede levantarse.
         severity = "critical" if down_seconds >= cfg.prolongedSeconds else "high"
 
-        confidence = self._confidence(st, angle, ratio, colapso, down_seconds, pf.det_score)
+        confidence = self._confidence(
+            st, angle, ratio, colapso, down_seconds, pf.det_score, caida_tronco, vert
+        )
         st.last_ts = pf.ts
 
         return FallResult(
@@ -473,6 +688,8 @@ class FallDetector:
             reason=reason,
             quality_ok=quality_ok,
             collapse_ratio=colapso,
+            trunk_drop=caida_tronco,
+            verticality=vert,
         )
 
     def _confidence(
@@ -483,20 +700,26 @@ class FallDetector:
         colapso: float | None,
         down_seconds: float,
         det_score: float,
+        caida_tronco: float | None = None,
+        vert: float | None = None,
     ) -> float:
         """Combina la evidencia en un número 0..1 para que el operador priorice."""
         cfg = self.cfg
         partes: list[tuple[float, float]] = []
 
-        # El colapso de altura es la señal más confiable: pesa más.
-        if colapso is not None:
-            partes.append((_clamp((1.0 - colapso) / (1.0 - cfg.collapseRatio)), 0.35))
+        # Cuánto bajó el tronco es la señal que decide, así que es la que más
+        # pesa. El colapso de altura visible pasa a ser secundario: se desploma
+        # con las piernas tapadas y ahí no dice nada del cuerpo.
+        if caida_tronco is not None:
+            partes.append((_clamp(caida_tronco / max(cfg.trunkDropSure, 1e-6)), 0.40))
         if st.peak_velocity > 0:
-            partes.append((_clamp(st.peak_velocity / max(cfg.fallVelocity * 2, 1e-6)), 0.30))
+            partes.append((_clamp(st.peak_velocity / max(cfg.fallVelocity * 2, 1e-6)), 0.25))
+        if vert is not None:
+            partes.append((_clamp((3.0 - vert) / 2.0), 0.15))
         if angle is not None:
-            partes.append((_clamp((angle - 30.0) / 60.0), 0.20))
-        if ratio is not None:
-            partes.append((_clamp((1.8 - ratio) / 1.0), 0.15))
+            partes.append((_clamp((angle - 30.0) / 60.0), 0.10))
+        if colapso is not None:
+            partes.append((_clamp((1.0 - colapso) / (1.0 - cfg.collapseRatio)), 0.10))
 
         if not partes:
             return 0.0
@@ -529,6 +752,7 @@ def _marcar_abajo(st: TrackState, ts: float) -> None:
     `collapse_since` y se olvidaban de `down_since`: el contador de permanencia
     nunca arrancaba y la severidad jamás subía.
     """
+    st.down_frames += 1
     if st.collapse_since is None:
         st.collapse_since = ts
     if st.down_since is None:

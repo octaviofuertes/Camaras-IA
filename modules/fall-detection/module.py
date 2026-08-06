@@ -82,7 +82,8 @@ class FallDetectionModule(PerceptaModule):
         for campo in (
             "keypointScore", "minTorsoPoints", "downAngleDeg", "downRatio",
             "fallVelocity", "collapseRatio", "baselineFrames",
-            "impactConfirmSeconds", "fallWindowSeconds", "prolongedSeconds",
+            "impactConfirmSeconds", "impactConfirmFrames", "fallWindowSeconds", "prolongedSeconds",
+            "trunkDropRatio", "trunkDropSure", "downVerticality",
             "minConfidence", "trackTimeoutSeconds", "minPersonHeight",
             "baselineWindowFrames",
         ):
@@ -175,6 +176,9 @@ class FallDetectionModule(PerceptaModule):
                 self._ultimo[track_id] = {
                     "estado": res.state.value,
                     "colapso": round(res.collapse_ratio, 2) if res.collapse_ratio is not None else None,
+                    # La señal que ahora decide: cuánto bajó el tronco.
+                    "troncoBajo": round(res.trunk_drop, 2) if res.trunk_drop is not None else None,
+                    "verticalidad": round(res.verticality, 1) if res.verticality is not None else None,
                     "velocidad": round(res.velocity, 2),
                     "anguloTorso": round(res.torso_angle, 0) if res.torso_angle is not None else None,
                     "altoAncho": round(res.aspect_ratio, 2) if res.aspect_ratio is not None else None,
@@ -226,6 +230,12 @@ class FallDetectionModule(PerceptaModule):
                             "severidad": res.severity,
                             "colapsoAltura": (
                                 f"{res.collapse_ratio:.2f}" if res.collapse_ratio is not None else ""
+                            ),
+                            "troncoBajo": (
+                                f"{res.trunk_drop:.2f}" if res.trunk_drop is not None else ""
+                            ),
+                            "verticalidad": (
+                                f"{res.verticality:.1f}" if res.verticality is not None else ""
                             ),
                             "poseQuality": "ok" if res.quality_ok else "insuficiente",
                             "origenConfianza": origen,

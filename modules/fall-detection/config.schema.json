@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Configuración de Detección de caídas",
-  "description": "Una caída se detecta por el IMPACTO: descenso brusco + cuerpo abajo. No hace falta que la persona quede tirada; si se levanta enseguida igual se reporta.",
+  "description": "Una caída se detecta por el IMPACTO: el tronco baja rápido y el cuerpo queda abajo. No hace falta que la persona quede tirada; si se levanta enseguida igual se reporta. Sentarse NO es caerse: baja el tronco mucho menos y despacio.",
   "type": "object",
   "properties": {
     "collapseRatio": {
       "type": "number",
       "title": "Colapso de altura",
-      "description": "Fracción de su altura habitual por debajo de la cual se considera que el cuerpo está abajo. Más bajo = más exigente. 0.65 tolera agacharse.",
+      "description": "Sólo informativo. Se desploma cuando las piernas quedan tapadas, así que ya no decide: la señal que decide es cuánto bajó el tronco.",
       "minimum": 0.2,
       "maximum": 0.95,
       "default": 0.65
@@ -114,6 +114,38 @@
         960
       ],
       "default": 640
+    },
+    "trunkDropRatio": {
+      "type": "number",
+      "title": "Cuánto debe bajar el tronco (con cuerpo horizontal)",
+      "description": "Medido en estaturas de la persona. Sentarse en una silla baja el tronco 0.25-0.32; caerse, 0.7-0.9. Subirlo hace al detector más exigente.",
+      "minimum": 0.15,
+      "maximum": 0.9,
+      "default": 0.38
+    },
+    "trunkDropSure": {
+      "type": "number",
+      "title": "Bajada de tronco que alcanza sola",
+      "description": "Por encima de esto no hace falta ninguna otra señal de postura: sólo se llega ahí estando en el piso.",
+      "minimum": 0.3,
+      "maximum": 1.2,
+      "default": 0.6
+    },
+    "downVerticality": {
+      "type": "number",
+      "title": "Alto/ancho del cuerpo tendido",
+      "description": "Relación entre el alto y el ancho de la nube de puntos del esqueleto. De pie ronda 4-6, sentado 2-3, tendido menos de 1.",
+      "minimum": 0.3,
+      "maximum": 4,
+      "default": 1.4
+    },
+    "impactConfirmFrames": {
+      "type": "integer",
+      "title": "Frames para confirmar el impacto",
+      "description": "Observaciones seguidas con el cuerpo abajo antes de alertar. Descarta una pose mal estimada suelta. No es permanencia en el suelo.",
+      "minimum": 1,
+      "maximum": 10,
+      "default": 2
     }
   },
   "additionalProperties": false
