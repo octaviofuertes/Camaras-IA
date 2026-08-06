@@ -171,6 +171,12 @@ code {
   background: var(--panel-2); border: 1px solid var(--border);
   border-radius: var(--radius-sm); padding: 9px 11px;
 }
+/* El clip va arriba de todo en el detalle: es lo primero que el operador tiene
+   que ver, antes que cualquier dato del evento. */
+.clip-revision { margin-bottom: 14px; }
+.clip-revision .evidencia { margin-bottom: 0; }
+.clip-revision video { max-height: 260px; }
+
 .evidencias { border-top: 1px solid var(--border); padding-top: 13px; }
 .ev-head {
   font-size: 11px; text-transform: uppercase; letter-spacing: .5px;

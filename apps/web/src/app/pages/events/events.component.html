@@ -164,7 +164,31 @@
       <div class="empty" *ngIf="!selected">Seleccioná un evento para ver su evidencia.</div>
 
       <div class="detail-body" *ngIf="selected as e">
-        <px-camera-feed [scene]="'warehouse'" [timestamp]="e.occurredAt" />
+        <!-- Lo que pasó, grabado al sonar la alerta. Antes acá había una escena
+             simulada: mostrarle al operador un video de mentira mientras se le
+             pide que dictamine sobre una persona real es lo peor que podía
+             hacer esta pantalla. -->
+        <div class="clip-revision">
+          <div class="mute" *ngIf="cargandoEvidencias">
+            <span class="spinner"></span> buscando el clip…
+          </div>
+
+          <ng-container *ngIf="!cargandoEvidencias">
+            <div class="evidencia" *ngFor="let ev of evidencias">
+              <video [src]="urlEvidencia(ev)" controls preload="metadata"></video>
+              <div class="ev-info">
+                <span class="ev-nombre">{{ ev.title || (esProvisional(ev) ? 'Sin revisar' : 'Clip') }}</span>
+                <span class="mute">{{ tamano(ev.bytes) }} · 10 s antes y después</span>
+              </div>
+              <a class="btn sm" [href]="urlEvidencia(ev)" download>Descargar</a>
+            </div>
+
+            <div class="mute clip-note" *ngIf="!evidencias.length">
+              No hay clip de este evento. El video se graba al detectarse la alerta;
+              si la cámara no estaba entregando imagen en ese momento, no queda registro.
+            </div>
+          </ng-container>
+        </div>
 
         <div class="d-title">
           <px-module-icon
@@ -195,30 +219,13 @@
           {{ e.reviewTitle }}
         </div>
 
-        <!-- Clip guardado como evidencia -->
-        <div class="evidencias" *ngIf="e.status === 'confirmed'">
-          <div class="ev-head">Evidencia guardada</div>
-
-          <div class="mute" *ngIf="cargandoEvidencias"><span class="spinner"></span> preparando el clip…</div>
-
-          <div class="mute" *ngIf="!cargandoEvidencias && !evidencias.length">
-            El clip se está armando. Incluye 10 s previos al evento y 10 s posteriores;
-            aparece acá en unos segundos.
-          </div>
-
-          <div class="evidencia" *ngFor="let ev of evidencias">
-            <video [src]="urlEvidencia(ev)" controls preload="metadata"></video>
-            <div class="ev-info">
-              <span class="ev-nombre">{{ ev.title || 'Clip' }}</span>
-              <span class="mute">{{ tamano(ev.bytes) }}</span>
-            </div>
-            <a class="btn sm" [href]="urlEvidencia(ev)" download>Descargar</a>
-          </div>
+        <div class="clip-note mute" *ngIf="e.status !== 'confirmed' && evidencias.length">
+          Mirá el clip antes de decidir. Si confirmás que fue una caída real se conserva
+          como evidencia con el nombre que le pongas; si marcás falso positivo se borra.
         </div>
 
-        <div class="clip-note mute" *ngIf="e.status !== 'confirmed'">
-          Si confirmás que fue una caída real, se guarda el clip como evidencia:
-          10 s previos, el momento y 10 s posteriores.
+        <div class="clip-note mute" *ngIf="e.status === 'confirmed' && evidencias.length">
+          Evidencia conservada por tu confirmación.
         </div>
       </div>
     </div>

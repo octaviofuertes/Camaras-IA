@@ -1,4 +1,12 @@
-import { ConflictException, Injectable, Logger, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import type { EventDto, EventStatus } from '@percepta/contracts';
 import { DatabaseService } from '../db/database.service';
 import { EventsRepository, type ListFilters } from './events.repository';
@@ -27,13 +35,41 @@ export interface IngestInput {
 }
 
 @Injectable()
-export class EventsService {
+export class EventsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EventsService.name);
+  private purga?: NodeJS.Timeout;
 
   constructor(
     private readonly db: DatabaseService,
     private readonly repo: EventsRepository,
   ) {}
+
+  onModuleInit(): void {
+    // La retención tiene que correr sola. Un método de purga que hay que
+    // acordarse de invocar es, en la práctica, video de gente acumulándose sin
+    // límite: cada falsa alarma que nadie miró deja un clip para siempre.
+    const horas = Number(process.env.EVIDENCE_PURGE_HOURS ?? 6);
+    const dias = Number(process.env.EVIDENCE_RETENTION_DAYS ?? 7);
+    const cada = Math.max(horas, 1) * 60 * 60 * 1000;
+    this.purga = setInterval(() => {
+      void this.purgarTodo(dias).catch((err) => this.logger.warn(`purga de evidencia: ${err}`));
+    }, cada);
+    this.purga.unref?.();
+    // Una pasada al arrancar limpia lo que haya quedado de la sesión anterior.
+    void this.purgarTodo(dias).catch((err) => this.logger.warn(`purga inicial de evidencia: ${err}`));
+  }
+
+  onModuleDestroy(): void {
+    if (this.purga) clearInterval(this.purga);
+  }
+
+  private async purgarTodo(dias: number): Promise<void> {
+    const orgs = await this.db.withTenant(
+      process.env.PURGE_ORG_ID ?? '00000000-0000-4000-b000-000000000001',
+      (c) => this.repo.orgsConEvidenciaPurgable(c),
+    );
+    for (const org of orgs) await this.purgarEvidenciaSinRevisar(org, dias);
+  }
 
   async list(auth: AuthContext, filters: ListFilters): Promise<{ items: EventDto[]; total: number }> {
     return this.db.withTenant(auth.organizationId, (c) => this.repo.list(c, filters));
@@ -66,7 +102,37 @@ export class EventsService {
         }
       }
       return evento;
+    }).then((evento) => {
+      // El clip se graba AHORA, no al confirmarlo. Dos razones, y la segunda
+      // invalidaba la función entera:
+      //
+      //  1. Nadie puede decidir si algo fue una caída sin ver el video. Pedir
+      //     la confirmación primero y mostrar el clip después es el orden al
+      //     revés.
+      //  2. El buffer en memoria de la cámara dura 25 segundos. Al confirmar
+      //     una alerta —aunque sea un minuto más tarde— los frames ya no
+      //     existen: el clip NUNCA se armaba. Verificado contra el servicio:
+      //     503 "no se pudo armar el clip (¿buffer vacío?)".
+      //
+      // Queda como `pending`: es un clip provisional, sujeto a revisión. Si el
+      // operador dice que no fue una caída, se borra.
+      if (evento && this.mereceEvidencia(evento)) {
+        void this.capturarClipProvisional(auth, evento).catch((err) =>
+          this.logger.warn(`no se pudo grabar el clip provisional de ${evento.id}: ${err}`),
+        );
+      }
+      return evento;
     });
+  }
+
+  /**
+   * Qué alertas se graban en video mientras esperan revisión.
+   *
+   * Sólo las graves: un clip por cada detección de persona llenaría el disco y
+   * significaría filmar a todo el mundo todo el tiempo sin que nadie lo mire.
+   */
+  private mereceEvidencia(evento: EventDto): boolean {
+    return evento.severity === 'high' || evento.severity === 'critical';
   }
 
   async findOne(auth: AuthContext, id: string, occurredAt?: string): Promise<EventDto> {
@@ -118,15 +184,117 @@ export class EventsService {
       }
     }
 
-    // Sólo se conserva el video de lo que resultó ser real: guardar clips de
-    // falsos positivos sería almacenar (y filmar) gente por nada.
-    if (resolution === 'confirmed') {
-      void this.captureEvidence(auth, evento, title).catch((err) =>
-        this.logger.warn(`no se pudo guardar la evidencia del evento ${id}: ${err}`),
-      );
+    // El clip provisional ya existe desde que sonó la alerta. Acá sólo se
+    // decide su destino: se conserva con el nombre que eligió el operador, o se
+    // borra. Guardar video de gente que no protagonizó nada es exactamente lo
+    // que no queremos.
+    try {
+      if (resolution === 'confirmed') {
+        const promovidas = await this.db.withTenant(auth.organizationId, (c) =>
+          this.repo.confirmEvidence(c, id, title, auth.userId),
+        );
+        if (promovidas === 0) {
+          // No había clip provisional: el buffer estaba vacío al momento de la
+          // alerta, o el evento es anterior a esta función. Se intenta ahora,
+          // aunque para una alerta vieja lo más probable es que ya no haya
+          // frames — por eso existe la captura al detectar.
+          this.logger.warn(`el evento ${id} no tenía clip provisional; se intenta grabarlo ahora`);
+          void this.captureEvidence(auth, evento, title, 'ready').catch((err) =>
+            this.logger.warn(`tampoco se pudo grabar la evidencia de ${id}: ${err}`),
+          );
+        }
+      } else {
+        // Primero el archivo, después la fila. Al revés —que fue como estaba—,
+        // si el borrado del archivo falla la fila ya no existe y el video queda
+        // en disco sin nada que lo referencie: nadie lo ve y nadie lo va a
+        // poder eliminar nunca.
+        const pendientes = await this.db.withTenant(auth.organizationId, (c) =>
+          this.repo.pendingEvidence(c, id),
+        );
+        const borrados: string[] = [];
+        const trabados: string[] = [];
+        for (const p of pendientes) {
+          if (await this.borrarClip(p.storageKey)) borrados.push(p.id);
+          else trabados.push(p.id);
+        }
+        await this.db.withTenant(auth.organizationId, async (c) => {
+          await this.repo.deleteEvidence(c, borrados);
+          await this.repo.markEvidenceExpired(c, trabados);
+        });
+        if (borrados.length) {
+          this.logger.log(`descartado ${borrados.length} clip(s) de ${id}: no fue una caída`);
+        }
+        if (trabados.length) {
+          this.logger.warn(
+            `${trabados.length} clip(s) de ${id} no se pudieron borrar ahora (archivo en uso); ` +
+              `quedan marcados para la purga`,
+          );
+        }
+      }
+    } catch (err) {
+      // Que falle el manejo del clip no puede tumbar la revisión del operador.
+      this.logger.warn(`no se pudo resolver la evidencia del evento ${id}: ${err}`);
     }
 
     return evento;
+  }
+
+  /** Graba el clip apenas suena la alerta, para que haya QUÉ revisar. */
+  private async capturarClipProvisional(auth: AuthContext, evento: EventDto): Promise<void> {
+    await this.captureEvidence(auth, evento, undefined, 'pending');
+  }
+
+  /** Borra el archivo del clip. Devuelve si el archivo ya no está. */
+  private async borrarClip(storageKey: string): Promise<boolean> {
+    const base = process.env.MEDIA_SERVICE_URL ?? 'http://127.0.0.1:3020';
+    try {
+      const res = await fetch(`${base}/evidence`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storageKey }),
+      });
+      if (res.ok) return true;
+      // 409 = el archivo está siendo leído justo ahora. No es un error: hay que
+      // volver a intentarlo más tarde.
+      if (res.status !== 409) {
+        this.logger.warn(`media-service no pudo borrar ${storageKey}: ${res.status}`);
+      }
+      return false;
+    } catch (err) {
+      this.logger.warn(`no se pudo borrar el clip ${storageKey}: ${err}`);
+      return false;
+    }
+  }
+
+  /**
+   * Borra los clips provisionales que nadie revisó dentro del plazo.
+   *
+   * Sin esto, cada falsa alarma que el operador nunca miró deja un video de una
+   * persona guardado para siempre. La retención no es una optimización de
+   * disco: es la contracara de haber grabado sin que nadie lo pidiera.
+   */
+  async purgarEvidenciaSinRevisar(organizationId: string, dias = 7): Promise<number> {
+    const candidatas = await this.db.withTenant(organizationId, (c) =>
+      this.repo.evidenceToPurge(c, dias),
+    );
+    if (!candidatas.length) return 0;
+
+    const borrados: string[] = [];
+    for (const v of candidatas) {
+      if (await this.borrarClip(v.storageKey)) borrados.push(v.id);
+    }
+    // La fila se borra sólo si el archivo ya no está. Si sigue trabado se
+    // reintenta en la purga siguiente: mejor una fila de más que un video
+    // huérfano que nadie puede encontrar.
+    const eliminadas = await this.db.withTenant(organizationId, (c) =>
+      this.repo.deleteEvidence(c, borrados),
+    );
+    const trabados = candidatas.length - borrados.length;
+    this.logger.log(
+      `purgados ${eliminadas} clip(s) sin revisar` +
+        (trabados ? `; ${trabados} siguen en uso, se reintentan luego` : ''),
+    );
+    return eliminadas;
   }
 
   /**
@@ -136,7 +304,12 @@ export class EventsService {
    * Corre fuera del pedido HTTP: el clip necesita esperar el post-evento, y el
    * operador no debe quedarse mirando una pantalla cargando por eso.
    */
-  private async captureEvidence(auth: AuthContext, evento: EventDto, title?: string): Promise<void> {
+  private async captureEvidence(
+    auth: AuthContext,
+    evento: EventDto,
+    title?: string,
+    status: 'pending' | 'ready' = 'ready',
+  ): Promise<void> {
     const base = process.env.MEDIA_SERVICE_URL ?? 'http://127.0.0.1:3020';
     const centerTs = new Date(evento.occurredAt).getTime() / 1000;
 
@@ -149,22 +322,38 @@ export class EventsService {
     const info = (await res.json()) as { path?: string; bytes?: number; sha256?: string; durationMs?: number };
     if (!info?.path) throw new Error('media-service no devolvió la ruta del clip');
 
-    await this.db.withTenant(auth.organizationId, (c) =>
-      this.repo.saveEvidence(c, {
-        organizationId: auth.organizationId,
-        eventId: evento.id,
-        eventOccurredAt: evento.occurredAt,
-        kind: 'clip',
-        storageKey: info.path!,
-        contentType: 'video/mp4',
-        bytes: info.bytes ?? 0,
-        sha256: info.sha256 ?? '',
-        durationMs: info.durationMs,
-        title: title || `Caída ${new Date(evento.occurredAt).toLocaleString('es-AR')}`,
-        createdBy: auth.userId,
-      }),
+    try {
+      await this.db.withTenant(auth.organizationId, (c) =>
+        this.repo.saveEvidence(c, {
+          organizationId: auth.organizationId,
+          eventId: evento.id,
+          eventOccurredAt: evento.occurredAt,
+          kind: 'clip',
+          storageKey: info.path!,
+          contentType: 'video/mp4',
+          bytes: info.bytes ?? 0,
+          sha256: info.sha256 ?? '',
+          durationMs: info.durationMs,
+        // El clip provisional no lleva nombre: el nombre lo pone el operador al
+        // confirmarlo, y ponerle uno antes sugeriría un veredicto que nadie dio.
+          title: status === 'pending' ? undefined : title || `Caída ${new Date(evento.occurredAt).toLocaleString('es-AR')}`,
+          createdBy: status === 'pending' ? undefined : auth.userId,
+          status,
+        }),
+      );
+    } catch (err) {
+      // El clip ya está escrito en disco. Si no se pudo registrar, queda un
+      // video de una persona sin ninguna fila que lo respalde: invisible para
+      // la UI, para la retención y para el borrado por falso positivo. Se
+      // elimina acá o no lo elimina nadie.
+      await this.borrarClip(info.path!);
+      throw err;
+    }
+    this.logger.log(
+      status === 'pending'
+        ? `clip provisional grabado para ${evento.id} (a la espera de revisión)`
+        : `evidencia guardada para el evento ${evento.id}`,
     );
-    this.logger.log(`evidencia guardada para el evento ${evento.id}`);
   }
 
   async listEvidences(auth: AuthContext, eventId: string): Promise<Record<string, unknown>[]> {

@@ -45,6 +45,37 @@ def annotate(jpeg: bytes, boxes: list[dict], label_prefix: str = "") -> bytes:
     return buf.tobytes() if ok else jpeg
 
 
+def _abrir_escritor(dest, fps: float, w: int, h: int):
+    """Abre el escritor de video prefiriendo H.264.
+
+    El clip existe para que una persona lo MIRE en el navegador y decida si
+    hubo una caída. Se escribía con `mp4v` (MPEG-4 Parte 2), que ningún
+    navegador reproduce: el archivo se generaba bien, se descargaba bien, y el
+    reproductor tiraba "formato no soportado". Una evidencia que no se puede
+    ver no es evidencia.
+
+    H.264 es lo que entienden Chrome, Firefox y Safari. Si este equipo no tiene
+    el encoder se cae a `mp4v` antes que quedarse sin clip, pero lo dice fuerte:
+    el video va a existir y no se va a poder mirar desde la web.
+    """
+    for fourcc in ("avc1", "H264"):
+        writer = cv2.VideoWriter(str(dest), cv2.VideoWriter_fourcc(*fourcc), fps, (w, h))
+        if writer.isOpened():
+            return writer
+        writer.release()
+
+    log.warning(
+        "sin encoder H.264 disponible: el clip se escribe en mp4v y NO se va a "
+        "poder reproducir en el navegador (sí descargar). Instalá ffmpeg con "
+        "soporte libx264 o la librería openh264 para resolverlo."
+    )
+    writer = cv2.VideoWriter(str(dest), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+    if writer.isOpened():
+        return writer
+    log.error("no se pudo abrir ningún escritor de video en %s", dest)
+    return None
+
+
 def build_clip(
     src: CameraSource,
     center_ts: float,
@@ -76,9 +107,8 @@ def build_clip(
     h, w = first.shape[:2]
 
     dest.parent.mkdir(parents=True, exist_ok=True)
-    writer = cv2.VideoWriter(str(dest), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
-    if not writer.isOpened():
-        log.error("no se pudo abrir el escritor de video en %s", dest)
+    writer = _abrir_escritor(dest, fps, w, h)
+    if writer is None:
         return None
 
     written = 0

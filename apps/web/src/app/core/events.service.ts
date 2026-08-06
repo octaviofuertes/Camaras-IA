@@ -122,8 +122,12 @@ export class EventsService {
 
   /** URL de descarga del clip. El archivo lo sirve media-service. */
   evidenceUrl(cameraId: string, storageKey: string): string {
-    const nombre = storageKey.split(/[\/]/).pop() ?? '';
-    return `/media/evidence/${cameraId}/${nombre}`;
+    // Se corta por AMBOS separadores: media-service corre sobre Windows y sus
+    // claves vienen con `\`. Partiendo sólo por `/` el nombre salía entero
+    // —ruta incluida—, media-service lo rechazaba por contener `\` y el video
+    // no cargaba nunca. Un servidor Linux no habría mostrado el problema.
+    const nombre = storageKey.split(/[\\/]/).pop() ?? '';
+    return `/media/evidence/${cameraId}/${encodeURIComponent(nombre)}`;
   }
 
   private toItem(e: ApiEvent): EventItem {

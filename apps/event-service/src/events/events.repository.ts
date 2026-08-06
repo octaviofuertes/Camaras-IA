@@ -299,20 +299,129 @@ export class EventsRepository {
       durationMs?: number;
       title?: string;
       createdBy?: string;
+      /**
+       * `pending` = clip provisional, grabado al detectarse la alerta para que
+       * el operador PUEDA VERLO antes de decidir. `ready` = evidencia
+       * confirmada, se conserva.
+       */
+      status?: 'pending' | 'ready';
     },
   ): Promise<string> {
+    // `event_occurred_at` se toma de la fila del evento, no del parámetro.
+    //
+    // `events` tiene clave primaria compuesta (id, occurred_at) y la guarda con
+    // precisión de microsegundos, pero un timestamp que pasó por JavaScript
+    // viene truncado a milisegundos. Insertar ese valor rompía la clave foránea
+    // —"violates foreign key constraint evidences_event_fk"— y el clip, ya
+    // grabado en disco, se perdía sin quedar registrado en ningún lado.
+    //
+    // Leyéndolo de la propia fila el desajuste no puede existir. El rango de un
+    // segundo alrededor del valor aproximado está sólo para que el motor pueda
+    // podar chunks de la hypertable en vez de recorrerlos todos.
     const { rows } = await client.query<{ id: string }>(
       `INSERT INTO evidences
          (organization_id, event_id, event_occurred_at, kind, storage_key, content_type,
           bytes, duration_ms, pre_roll_ms, post_roll_ms, sha256, status, title, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,10000,10000,$9,'ready',$10,$11)
+       SELECT $1, ev.id, ev.occurred_at, $4, $5, $6, $7, $8, 10000, 10000, $9, $10, $11, $12
+         FROM events ev
+        WHERE ev.id = $2
+          AND ev.occurred_at BETWEEN $3::timestamptz - interval '1 second'
+                                 AND $3::timestamptz + interval '1 second'
+        LIMIT 1
        RETURNING id`,
       [
         e.organizationId, e.eventId, e.eventOccurredAt, e.kind, e.storageKey,
-        e.contentType, e.bytes, e.durationMs ?? null, e.sha256, e.title ?? null, e.createdBy ?? null,
+        e.contentType, e.bytes, e.durationMs ?? null, e.sha256, e.status ?? 'ready',
+        e.title ?? null, e.createdBy ?? null,
       ],
     );
+    if (!rows[0]) {
+      throw new Error(`no existe el evento ${e.eventId} cerca de ${e.eventOccurredAt}`);
+    }
     return rows[0].id;
+  }
+
+  /**
+   * Promueve el clip provisional a evidencia conservada y le pone el nombre que
+   * eligió el operador.
+   */
+  async confirmEvidence(
+    client: PoolClient,
+    eventId: string,
+    title: string | undefined,
+    userId: string,
+  ): Promise<number> {
+    const r = await client.query(
+      `UPDATE evidences
+          SET status = 'ready',
+              title = COALESCE($1, title),
+              created_by = COALESCE(created_by, $2)
+        WHERE event_id = $3 AND status = 'pending'`,
+      [title ?? null, userId, eventId],
+    );
+    return r.rowCount ?? 0;
+  }
+
+  /**
+   * Organizaciones que tienen clips a purgar.
+   *
+   * Se consulta con el contexto de tenant de cada una ya puesto, así que en la
+   * práctica devuelve 0 o 1 fila. Existe para que la purga no tenga que
+   * recorrer organizaciones que no tienen nada pendiente.
+   */
+  async orgsConEvidenciaPurgable(client: PoolClient): Promise<string[]> {
+    const { rows } = await client.query<{ organization_id: string }>(
+      `SELECT DISTINCT organization_id FROM evidences WHERE status IN ('pending','expired')`,
+    );
+    return rows.map((r) => r.organization_id);
+  }
+
+  /** Clips provisionales de un evento, para decidir qué hacer con ellos. */
+  async pendingEvidence(client: PoolClient, eventId: string): Promise<{ id: string; storageKey: string }[]> {
+    const { rows } = await client.query<{ id: string; storage_key: string }>(
+      `SELECT id, storage_key FROM evidences WHERE event_id = $1 AND status = 'pending'`,
+      [eventId],
+    );
+    return rows.map((r) => ({ id: r.id, storageKey: r.storage_key }));
+  }
+
+  async deleteEvidence(client: PoolClient, ids: string[]): Promise<number> {
+    if (!ids.length) return 0;
+    const r = await client.query(`DELETE FROM evidences WHERE id = ANY($1::uuid[])`, [ids]);
+    return r.rowCount ?? 0;
+  }
+
+  /**
+   * Marca clips cuyo archivo no se pudo borrar todavía (en Windows, un archivo
+   * que se está reproduciendo no se puede eliminar).
+   *
+   * NO se borra la fila: sin ella el archivo queda en disco sin que nada lo
+   * referencie —invisible para la UI, para el borrado y para la retención— y
+   * eso es un video de una persona que ya nadie va a poder encontrar para
+   * eliminar. `expired` lo oculta de la revisión pero lo deja anotado para que
+   * la purga lo reintente.
+   */
+  async markEvidenceExpired(client: PoolClient, ids: string[]): Promise<number> {
+    if (!ids.length) return 0;
+    const r = await client.query(
+      `UPDATE evidences SET status = 'expired' WHERE id = ANY($1::uuid[])`,
+      [ids],
+    );
+    return r.rowCount ?? 0;
+  }
+
+  /**
+   * Clips a eliminar: los provisionales que nadie revisó dentro del plazo, más
+   * los que quedaron marcados porque su archivo estaba en uso.
+   */
+  async evidenceToPurge(client: PoolClient, days: number): Promise<{ id: string; storageKey: string }[]> {
+    const { rows } = await client.query<{ id: string; storage_key: string }>(
+      `SELECT id, storage_key FROM evidences
+        WHERE status = 'expired'
+           OR (status = 'pending' AND created_at < now() - ($1 || ' days')::interval)`,
+      [String(days)],
+    );
+    return rows.map((r) => ({ id: r.id, storageKey: r.storage_key }));
   }
 
   async listEvidences(client: PoolClient, eventId: string): Promise<Record<string, unknown>[]> {

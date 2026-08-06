@@ -3,7 +3,6 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { PageHeaderComponent } from '../../shared/page-header.component';
 import { ModuleIconComponent } from '../../shared/module-icon.component';
-import { CameraFeedComponent } from '../../shared/camera-feed.component';
 import { EventsService, type EvidenceItem, type TrainingStats } from '../../core/events.service';
 import { AI_MODULES } from '../../core/catalog';
 import {
@@ -27,7 +26,7 @@ const STATUS_FILTERS: { key: FilterKey; label: string }[] = [
 @Component({
   selector: 'px-events',
   standalone: true,
-  imports: [CommonModule, FormsModule, PageHeaderComponent, ModuleIconComponent, CameraFeedComponent],
+  imports: [CommonModule, FormsModule, PageHeaderComponent, ModuleIconComponent],
   templateUrl: './events.component.html',
   styleUrls: ['./events.component.scss'],
 })
@@ -152,14 +151,29 @@ export class EventsComponent implements OnInit, OnDestroy {
   select(e: EventItem): void {
     this.selected = e;
     this.evidencias = [];
-    // Sólo los eventos confirmados tienen clip guardado.
-    if (e.status === 'confirmed') {
-      this.cargandoEvidencias = true;
-      this.api.evidences(e.id).subscribe((items) => {
+    // Se pide el clip SIEMPRE, no sólo si el evento ya está confirmado. El clip
+    // se graba al sonar la alerta justamente para poder mirarlo antes de
+    // decidir: no se le puede pedir a nadie que dictamine si hubo una caída sin
+    // dejarlo ver lo que pasó.
+    this.cargandoEvidencias = true;
+    this.api.evidences(e.id).subscribe({
+      next: (items) => {
+        // Sólo interesa mientras siga siendo el evento seleccionado: si el
+        // operador ya pasó a otro, esta respuesta llega tarde.
+        if (this.selected?.id !== e.id) return;
         this.evidencias = items;
         this.cargandoEvidencias = false;
-      });
-    }
+      },
+      error: () => {
+        if (this.selected?.id !== e.id) return;
+        this.cargandoEvidencias = false;
+      },
+    });
+  }
+
+  /** El clip todavía no fue confirmado: se conserva sólo si se confirma. */
+  esProvisional(ev: EvidenceItem): boolean {
+    return ev.status === 'pending';
   }
 
   urlEvidencia(ev: EvidenceItem): string {

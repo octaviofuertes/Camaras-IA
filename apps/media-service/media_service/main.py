@@ -24,8 +24,8 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, HTTPException, Response
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import StreamingResponse
 
 from .clips import PRE_ROLL_S, POST_ROLL_S, build_clip
 from .registry import CameraRegistry
@@ -159,9 +159,63 @@ def make_clip(camera_id: str, body: dict) -> dict:
     }
 
 
+@app.delete("/evidence")
+def delete_evidence(body: dict) -> dict:
+    """Borra un clip provisional que resultó no ser nada.
+
+    Se usa cuando el operador marca la alerta como falso positivo: el video se
+    grabó por las dudas, y si no hubo nada que documentar no hay motivo para
+    conservar imágenes de una persona.
+
+    La ruta se valida contra el directorio de evidencias: un `storageKey` que
+    apunte fuera de ahí no borra nada, venga de donde venga.
+    """
+    clave = str(body.get("storageKey") or "")
+    if not clave:
+        raise HTTPException(status_code=400, detail="falta storageKey")
+
+    base = EVIDENCE_DIR.resolve()
+    ruta = Path(clave)
+    if not ruta.is_absolute():
+        # Las claves se guardan relativas a la raíz del servicio.
+        ruta = (Path.cwd() / ruta).resolve()
+    else:
+        ruta = ruta.resolve()
+
+    if not str(ruta).startswith(str(base)):
+        raise HTTPException(status_code=400, detail="la clave no pertenece al directorio de evidencias")
+
+    if not ruta.is_file():
+        # Ya no está: el resultado deseado igual se cumple.
+        return {"deleted": True, "reason": "no existe"}
+
+    try:
+        ruta.unlink()
+    except PermissionError:
+        # En Windows no se puede borrar un archivo que alguien está leyendo, y
+        # el caso normal es justamente ése: el operador mira el clip y desde el
+        # mismo reproductor lo marca como falso positivo. Se responde 409 para
+        # que quien llama sepa que hay que reintentar, en vez de un 500 que
+        # parece un error del servidor y hace perder el rastro del archivo.
+        log.warning("clip en uso, no se pudo borrar todavía: %s", ruta.name)
+        raise HTTPException(status_code=409, detail="el archivo está en uso")
+
+    log.info("clip descartado: %s", ruta.name)
+    return {"deleted": True}
+
+
 @app.get("/evidence/{camera_id}/{nombre}")
-def get_evidence(camera_id: str, nombre: str) -> FileResponse:
-    """Descarga de un clip guardado.
+def get_evidence(camera_id: str, nombre: str, request: Request) -> Response:
+    """Descarga o reproducción de un clip guardado, con soporte de rangos.
+
+    NO usa FileResponse. Un `<video>` pide rangos y abandona conexiones cada vez
+    que el usuario mueve la barra de tiempo; con FileResponse esos descriptores
+    quedaban abiertos y en Windows un archivo abierto no se puede borrar. El
+    efecto: marcar una alerta como falso positivo no lograba eliminar el video,
+    justo lo contrario de lo que promete esa acción.
+
+    Acá el descriptor se cierra siempre, incluso si el cliente corta a la mitad:
+    el `finally` del generador corre igual cuando se lo cierra por GeneratorExit.
 
     El nombre se sanea contra path traversal: sólo se sirve lo que está dentro
     del directorio de evidencias de esa cámara.
@@ -172,7 +226,64 @@ def get_evidence(camera_id: str, nombre: str) -> FileResponse:
     base = EVIDENCE_DIR.resolve()
     if not str(ruta).startswith(str(base)) or not ruta.is_file():
         raise HTTPException(status_code=404, detail="evidencia no encontrada")
-    return FileResponse(ruta, media_type="video/mp4", filename=nombre)
+
+    total = ruta.stat().st_size
+    inicio, fin = 0, total - 1
+    estado = 200
+    rango = request.headers.get("range") or request.headers.get("Range")
+    if rango and rango.startswith("bytes="):
+        crudo = rango[6:].split(",")[0].strip()
+        desde, _, hasta = crudo.partition("-")
+        try:
+            if desde:
+                inicio = int(desde)
+                fin = int(hasta) if hasta else total - 1
+            elif hasta:  # sufijo: los últimos N bytes
+                inicio = max(total - int(hasta), 0)
+        except ValueError:
+            raise HTTPException(status_code=416, detail="rango inválido")
+        if inicio >= total or fin < inicio:
+            raise HTTPException(status_code=416, detail="rango fuera del archivo")
+        fin = min(fin, total - 1)
+        estado = 206
+
+    largo = fin - inicio + 1
+
+    def leer():
+        # El archivo se abre y se cierra en CADA trozo, en vez de mantenerlo
+        # abierto durante toda la respuesta.
+        #
+        # Parece derrochador y es deliberado. Un generador de streaming queda
+        # suspendido en el `yield`, y cuando el reproductor abandona la
+        # conexión —cosa que hace cada vez que se mueve la barra de tiempo—
+        # nadie lo reanuda ni lo cierra: un `try/finally` alrededor del bucle
+        # nunca llega a ejecutarse. Medido: el archivo seguía tomado 6 segundos
+        # después de cortar, y en Windows eso significa que marcar la alerta
+        # como falso positivo no puede borrar el video.
+        #
+        # Cerrando entre trozos, el descriptor sólo vive durante la lectura en
+        # sí. Son unos pocos microsegundos cada 512 KB, y descargar evidencia no
+        # es un camino caliente.
+        pos, restante = inicio, largo
+        while restante > 0:
+            with ruta.open("rb") as f:
+                f.seek(pos)
+                trozo = f.read(min(512 * 1024, restante))
+            if not trozo:
+                break
+            pos += len(trozo)
+            restante -= len(trozo)
+            yield trozo
+
+    cabeceras = {
+        "Content-Length": str(largo),
+        "Accept-Ranges": "bytes",
+        "Content-Disposition": f'inline; filename="{nombre}"',
+    }
+    if estado == 206:
+        cabeceras["Content-Range"] = f"bytes {inicio}-{fin}/{total}"
+
+    return StreamingResponse(leer(), status_code=estado, media_type="video/mp4", headers=cabeceras)
 
 
 if __name__ == "__main__":
