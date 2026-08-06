@@ -34,6 +34,8 @@ export interface EvidenceItem {
   contentType: string;
   bytes: number;
   durationMs: number | null;
+  preRollMs: number | null;
+  postRollMs: number | null;
   title: string | null;
   status: string;
   createdAt: string;

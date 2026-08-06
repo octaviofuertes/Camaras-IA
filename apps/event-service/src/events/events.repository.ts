@@ -297,6 +297,9 @@ export class EventsRepository {
       bytes: number;
       sha256: string;
       durationMs?: number;
+      /** Lo que media-service grabó de verdad, no un valor supuesto. */
+      preRollMs?: number;
+      postRollMs?: number;
       title?: string;
       createdBy?: string;
       /**
@@ -322,7 +325,7 @@ export class EventsRepository {
       `INSERT INTO evidences
          (organization_id, event_id, event_occurred_at, kind, storage_key, content_type,
           bytes, duration_ms, pre_roll_ms, post_roll_ms, sha256, status, title, created_by)
-       SELECT $1, ev.id, ev.occurred_at, $4, $5, $6, $7, $8, 10000, 10000, $9, $10, $11, $12
+       SELECT $1, ev.id, ev.occurred_at, $4, $5, $6, $7, $8, $13, $14, $9, $10, $11, $12
          FROM events ev
         WHERE ev.id = $2
           AND ev.occurred_at BETWEEN $3::timestamptz - interval '1 second'
@@ -333,6 +336,10 @@ export class EventsRepository {
         e.organizationId, e.eventId, e.eventOccurredAt, e.kind, e.storageKey,
         e.contentType, e.bytes, e.durationMs ?? null, e.sha256, e.status ?? 'ready',
         e.title ?? null, e.createdBy ?? null,
+        // Cuánto se grabó antes y después. Estaba fijo en 10 s cada uno, así
+        // que al cambiar la duración del clip la base seguía afirmando diez y
+        // el dato quedaba mintiendo sin que nada lo delatara.
+        e.preRollMs ?? null, e.postRollMs ?? null,
       ],
     );
     if (!rows[0]) {
@@ -426,7 +433,8 @@ export class EventsRepository {
 
   async listEvidences(client: PoolClient, eventId: string): Promise<Record<string, unknown>[]> {
     const { rows } = await client.query(
-      `SELECT id, kind, storage_key, content_type, bytes, duration_ms, title, status, created_at
+      `SELECT id, kind, storage_key, content_type, bytes, duration_ms,
+              pre_roll_ms, post_roll_ms, title, status, created_at
          FROM evidences WHERE event_id = $1 ORDER BY created_at`,
       [eventId],
     );
@@ -437,6 +445,8 @@ export class EventsRepository {
       contentType: r.content_type,
       bytes: Number(r.bytes),
       durationMs: r.duration_ms,
+      preRollMs: r.pre_roll_ms,
+      postRollMs: r.post_roll_ms,
       title: r.title,
       status: r.status,
       createdAt: r.created_at?.toISOString?.() ?? r.created_at,

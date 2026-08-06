@@ -178,7 +178,7 @@
               <video [src]="urlEvidencia(ev)" controls preload="metadata"></video>
               <div class="ev-info">
                 <span class="ev-nombre">{{ ev.title || (esProvisional(ev) ? 'Sin revisar' : 'Clip') }}</span>
-                <span class="mute">{{ tamano(ev.bytes) }} · 10 s antes y después</span>
+                <span class="mute">{{ tamano(ev.bytes) }} · {{ ventanaClip(ev) }}</span>
               </div>
               <a class="btn sm" [href]="urlEvidencia(ev)" download>Descargar</a>
             </div>

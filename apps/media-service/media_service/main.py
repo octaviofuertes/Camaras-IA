@@ -27,7 +27,7 @@ import numpy as np
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
-from .clips import PRE_ROLL_S, POST_ROLL_S, build_clip
+from .clips import PRE_ROLL_S, POST_ROLL_S, build_clip, info_clip
 from .registry import CameraRegistry
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -127,7 +127,7 @@ def stream(camera_id: str) -> StreamingResponse:
 
 @app.post("/cameras/{camera_id}/clip")
 def make_clip(camera_id: str, body: dict) -> dict:
-    """Arma el clip de un evento (10 s antes / evento / 10 s después).
+    """Arma el clip de un evento (unos segundos antes / el momento / después).
 
     Con `wait: true` responde recién cuando el archivo está listo, e informa su
     tamaño y hash. Es lo que necesita event-service para registrar la evidencia
@@ -148,6 +148,7 @@ def make_clip(camera_id: str, body: dict) -> dict:
         raise HTTPException(status_code=503, detail="no se pudo armar el clip (¿buffer vacío?)")
 
     datos = ruta.read_bytes()
+    info = info_clip(ruta)
     return {
         "accepted": True,
         "cameraId": camera_id,
@@ -155,7 +156,17 @@ def make_clip(camera_id: str, body: dict) -> dict:
         "path": str(ruta),
         "bytes": len(datos),
         "sha256": hashlib.sha256(datos).hexdigest(),
-        "durationMs": int((PRE_ROLL_S + POST_ROLL_S) * 1000),
+        # Duración REAL del archivo, no la ventana pedida. Si el buffer no
+        # tenía todos los frames —cámara recién arrancada, o corte— el clip sale
+        # más corto, y decir lo contrario haría que la evidencia declare algo
+        # que su propio video no muestra.
+        "durationMs": int(info.get("segundos", PRE_ROLL_S + POST_ROLL_S) * 1000),
+        # Se informan los valores REALES con los que se armó este clip. Antes
+        # event-service los guardaba fijos en 10 s cada uno: al cambiar la
+        # duración, la base seguía diciendo diez y nadie se enteraba de que el
+        # dato estaba mal.
+        "preRollMs": int(PRE_ROLL_S * 1000),
+        "postRollMs": int(POST_ROLL_S * 1000),
     }
 
 

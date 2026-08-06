@@ -171,6 +171,16 @@ export class EventsComponent implements OnInit, OnDestroy {
     });
   }
 
+  /** Cuánto cubre el clip, tomado de lo que se grabó y no de un texto fijo. */
+  ventanaClip(ev: EvidenceItem): string {
+    const antes = ev.preRollMs ? Math.round(ev.preRollMs / 1000) : null;
+    const despues = ev.postRollMs ? Math.round(ev.postRollMs / 1000) : null;
+    if (antes === null || despues === null) {
+      return ev.durationMs ? `${Math.round(ev.durationMs / 1000)} s` : 'clip';
+    }
+    return `${antes} s antes y ${despues} s después`;
+  }
+
   /** El clip todavía no fue confirmado: se conserva sólo si se confirma. */
   esProvisional(ev: EvidenceItem): boolean {
     return ev.status === 'pending';

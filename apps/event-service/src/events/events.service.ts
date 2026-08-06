@@ -298,7 +298,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Pide a media-service que arme el clip (10 s antes / evento / 10 s después)
+   * Pide a media-service que arme el clip (unos segundos antes y después)
    * y registra la evidencia.
    *
    * Corre fuera del pedido HTTP: el clip necesita esperar el post-evento, y el
@@ -319,7 +319,10 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
       body: JSON.stringify({ eventId: evento.id, centerTs, wait: true }),
     });
     if (!res.ok) throw new Error(`media-service respondió ${res.status}`);
-    const info = (await res.json()) as { path?: string; bytes?: number; sha256?: string; durationMs?: number };
+    const info = (await res.json()) as {
+      path?: string; bytes?: number; sha256?: string;
+      durationMs?: number; preRollMs?: number; postRollMs?: number;
+    };
     if (!info?.path) throw new Error('media-service no devolvió la ruta del clip');
 
     try {
@@ -334,6 +337,8 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
           bytes: info.bytes ?? 0,
           sha256: info.sha256 ?? '',
           durationMs: info.durationMs,
+          preRollMs: info.preRollMs,
+          postRollMs: info.postRollMs,
         // El clip provisional no lleva nombre: el nombre lo pone el operador al
         // confirmarlo, y ponerle uno antes sugeriría un veredicto que nadie dio.
           title: status === 'pending' ? undefined : title || `Caída ${new Date(evento.occurredAt).toLocaleString('es-AR')}`,
