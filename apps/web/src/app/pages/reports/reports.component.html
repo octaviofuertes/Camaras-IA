@@ -1,0 +1,151 @@
+<px-page-header
+  title="Informes"
+  subtitle="Uso de los puestos de trabajo"
+/>
+
+<div class="page">
+  <!-- Qué mide esto, dicho antes que cualquier número -->
+  <div class="notice">
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8v.01" />
+    </svg>
+    <span>
+      Mide el <strong>puesto</strong>, no a la persona. No se guarda ni se puede reconstruir
+      quién ocupó cada posición. Los porcentajes son sobre el tiempo que la cámara
+      efectivamente observó, no sobre el rango completo.
+    </span>
+  </div>
+
+  <div class="filtros">
+    <button
+      class="chip"
+      *ngFor="let r of rangos"
+      [class.active]="rango === r.key"
+      (click)="setRango(r.key)"
+    >
+      {{ r.label }}
+    </button>
+  </div>
+
+  <div class="loading" *ngIf="cargando"><span class="spinner"></span> Armando el informe…</div>
+
+  <ng-container *ngIf="!cargando && informe as inf">
+    <!-- Sin datos: se explica por qué, en vez de mostrar ceros -->
+    <div class="panel vacio" *ngIf="!inf.puestos.length">
+      <h3>Todavía no hay mediciones en este rango</h3>
+      <p>
+        El informe se alimenta del módulo <strong>Actividad por puesto</strong>. Para que
+        aparezcan datos, asignalo a una cámara desde la sección Cámaras arrastrándolo sobre
+        ella. Las primeras muestras aparecen al minuto de haberlo asignado.
+      </p>
+    </div>
+
+    <ng-container *ngIf="inf.puestos.length">
+      <!-- Totales -->
+      <section class="kpis" *ngIf="inf.total as t">
+        <div class="panel kpi">
+          <div class="kpi-label">Tiempo observado</div>
+          <div class="kpi-value">{{ duracion(t.observadoSegundos) }}</div>
+          <div class="kpi-sub">de {{ inf.puestos.length }} puesto(s)</div>
+        </div>
+        <div class="panel kpi">
+          <div class="kpi-label">Puestos ocupados</div>
+          <div class="kpi-value">{{ t.ocupacionPct }}<span class="u">%</span></div>
+          <div class="kpi-sub">{{ duracion(t.ocupadoSegundos) }} en total</div>
+        </div>
+        <div class="panel kpi">
+          <div class="kpi-label">Con teléfono a la vista</div>
+          <div class="kpi-value">{{ t.telefonoPct }}<span class="u">%</span></div>
+          <div class="kpi-sub">del tiempo ocupado · cota inferior</div>
+        </div>
+        <div class="panel kpi">
+          <div class="kpi-label">Cobertura de cámara</div>
+          <div class="kpi-value" [class.flojo]="t.coberturaPct < 80">
+            {{ t.coberturaPct }}<span class="u">%</span>
+          </div>
+          <div class="kpi-sub">del rango consultado</div>
+        </div>
+      </section>
+
+      <!-- Desglose por franja -->
+      <section class="panel grafico" *ngIf="barras().length">
+        <div class="panel-head">
+          <h2 class="panel-title">
+            {{ nombrePuestoPrincipal() }}
+            <span class="mute">· ocupación por franja</span>
+          </h2>
+          <div class="leyenda">
+            <span class="ll ocupado"></span> ocupado
+            <span class="ll telefono"></span> con teléfono
+          </div>
+        </div>
+
+        <div class="barras">
+          <div class="barra" *ngFor="let b of barras(); trackBy: trackBarra">
+            <div class="col" [title]="b.sinDatos ? 'sin datos' : b.ocupadoPct + '% ocupado'">
+              <i class="ocupado" [style.height.%]="b.ocupadoPct"></i>
+              <i class="telefono" [style.height.%]="b.telefonoPct"></i>
+              <span class="nodata" *ngIf="b.sinDatos"></span>
+            </div>
+            <span class="eje">{{ b.etiqueta }}</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tabla por puesto -->
+      <section class="panel">
+        <div class="panel-head"><h2 class="panel-title">Detalle por puesto</h2></div>
+        <div class="tabla-wrap">
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th>Puesto</th>
+                <th>Observado</th>
+                <th>Ocupado</th>
+                <th>Vacío</th>
+                <th>Con teléfono</th>
+                <th>Ocupación media</th>
+                <th>Cobertura</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let p of inf.puestos; trackBy: trackPuesto">
+                <td class="nombre">{{ p.zoneName }}</td>
+                <td class="mute">{{ duracion(p.observadoSegundos) }}</td>
+                <td>
+                  <div class="conf">
+                    <span class="conf-bar"><i [style.width.%]="p.ocupacionPct"></i></span>
+                    <span class="conf-num">{{ p.ocupacionPct }}%</span>
+                  </div>
+                  <div class="mute chico">{{ duracion(p.ocupadoSegundos) }}</div>
+                </td>
+                <td class="mute">{{ duracion(p.vacioSegundos) }}</td>
+                <td>
+                  <span class="tel">{{ p.telefonoPct }}%</span>
+                  <div class="mute chico">{{ duracion(p.telefonoSegundos) }}</div>
+                </td>
+                <td class="mute">{{ p.ocupacionMedia }} <span class="chico">pers.</span></td>
+                <td>
+                  <span class="cobertura" [class.flojo]="coberturaFloja(p)">{{ p.coberturaPct }}%</span>
+                  <div class="mute chico" *ngIf="p.sinCoberturaSegundos > 0">
+                    {{ duracion(p.sinCoberturaSegundos) }} sin ver
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Las advertencias viajan con el informe, no en una nota al pie -->
+      <section class="advertencias" *ngIf="inf.advertencias.length">
+        <div class="adv" *ngFor="let a of inf.advertencias">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 3 2 20h20L12 3Z" /><path d="M12 10v4M12 17.5v.5" />
+          </svg>
+          <span>{{ a }}</span>
+        </div>
+      </section>
+    </ng-container>
+  </ng-container>
+</div>

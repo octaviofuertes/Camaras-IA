@@ -1,0 +1,191 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 0 22px 28px;
+}
+
+/* ─── Aviso de qué mide ─────────────────────────────────────────── */
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid #60a5fa;
+  border-radius: var(--radius-sm);
+  background: rgba(96, 165, 250, 0.06);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-mute);
+
+  svg { flex: 0 0 auto; margin-top: 2px; color: #60a5fa; }
+  strong { color: var(--text); }
+}
+
+/* ─── Filtros de rango ──────────────────────────────────────────── */
+.filtros { display: flex; gap: 7px; flex-wrap: wrap; }
+
+.chip {
+  padding: 6px 13px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-mute);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+
+  &:hover { color: var(--text); border-color: var(--border-strong, var(--border)); }
+  &.active { background: var(--accent, #3b82f6); border-color: transparent; color: #fff; }
+}
+
+.loading {
+  display: flex; align-items: center; gap: 9px;
+  padding: 26px; color: var(--text-mute); font-size: 13px;
+}
+
+/* ─── Sin datos ─────────────────────────────────────────────────── */
+.vacio {
+  padding: 30px 26px;
+  h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
+  p { margin: 0; color: var(--text-mute); font-size: 13px; line-height: 1.6; max-width: 62ch; }
+}
+
+/* ─── Indicadores ───────────────────────────────────────────────── */
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 13px;
+}
+
+.kpi {
+  padding: 15px 17px;
+
+  .kpi-label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .5px;
+    color: var(--text-mute); font-weight: 600;
+  }
+  .kpi-value {
+    margin-top: 7px; font-size: 27px; font-weight: 650; line-height: 1;
+    .u { font-size: 15px; font-weight: 500; margin-left: 1px; color: var(--text-mute); }
+    /* Una cobertura floja se marca: el número de al lado vale menos. */
+    &.flojo { color: #fbbf24; }
+  }
+  .kpi-sub { margin-top: 6px; font-size: 11.5px; color: var(--text-mute); }
+}
+
+/* ─── Gráfico por franja ────────────────────────────────────────── */
+.grafico { padding: 15px 17px 10px; }
+
+.panel-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin-bottom: 14px; flex-wrap: wrap;
+}
+.panel-title { margin: 0; font-size: 14px; font-weight: 600; }
+.mute { color: var(--text-mute); font-weight: 400; }
+.chico { font-size: 11px; }
+
+.leyenda {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11.5px; color: var(--text-mute);
+}
+.ll {
+  display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+  &.ocupado { background: #4ade80; }
+  &.telefono { background: #fbbf24; margin-left: 6px; }
+}
+
+.barras {
+  display: flex; align-items: flex-end; gap: 4px;
+  height: 150px; overflow-x: auto; padding-bottom: 2px;
+}
+
+.barra {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  flex: 1 1 0; min-width: 22px;
+}
+
+.col {
+  position: relative;
+  width: 100%;
+  height: 118px;
+  border-radius: 3px;
+  background: var(--panel-2, rgba(255, 255, 255, .04));
+  overflow: hidden;
+
+  i {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    display: block; border-radius: 3px 3px 0 0;
+    &.ocupado { background: #4ade80; opacity: .85; }
+    /* El teléfono se dibuja ENCIMA del ocupado porque es un subconjunto suyo:
+       apilarlos sugeriría que se suman, y no es así. */
+    &.telefono { background: #fbbf24; }
+  }
+
+  /* Sin datos no es cero: se distingue con una trama, no con una barra vacía. */
+  .nodata {
+    position: absolute; inset: 0;
+    background: repeating-linear-gradient(
+      45deg, transparent, transparent 4px,
+      var(--border) 4px, var(--border) 5px
+    );
+    opacity: .5;
+  }
+}
+
+.eje { font-size: 10px; color: var(--text-mute); white-space: nowrap; }
+
+/* ─── Tabla ─────────────────────────────────────────────────────── */
+.tabla-wrap { overflow-x: auto; }
+
+.tbl {
+  width: 100%; border-collapse: collapse; font-size: 12.5px;
+
+  th {
+    text-align: left; padding: 9px 12px; font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .4px; color: var(--text-mute);
+    border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  td { padding: 11px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  .nombre { font-weight: 600; }
+  .mute { color: var(--text-mute); }
+}
+
+.conf { display: flex; align-items: center; gap: 8px; }
+.conf-bar {
+  flex: 1; min-width: 54px; height: 5px; border-radius: 3px;
+  background: var(--panel-2, rgba(255, 255, 255, .06)); overflow: hidden;
+  i { display: block; height: 100%; background: #4ade80; border-radius: 3px; }
+}
+.conf-num { font-variant-numeric: tabular-nums; min-width: 34px; }
+
+.tel { color: #fbbf24; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.cobertura {
+  font-variant-numeric: tabular-nums;
+  &.flojo { color: #fbbf24; font-weight: 600; }
+}
+
+/* ─── Advertencias ──────────────────────────────────────────────── */
+.advertencias { display: flex; flex-direction: column; gap: 7px; }
+
+.adv {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 9px 13px;
+  border: 1px solid var(--border);
+  border-left: 3px solid #fbbf24;
+  border-radius: var(--radius-sm);
+  background: rgba(251, 191, 36, .05);
+  font-size: 12px; line-height: 1.5; color: var(--text-mute);
+
+  svg { flex: 0 0 auto; margin-top: 2px; color: #fbbf24; }
+}
+
+.spinner {
+  width: 13px; height: 13px; border-radius: 50%;
+  border: 2px solid var(--border); border-top-color: var(--text-mute);
+  animation: girar .7s linear infinite;
+}
+@keyframes girar { to { transform: rotate(360deg); } }

@@ -11,27 +11,44 @@
     "secure": false,
     "changeOrigin": true,
     "logLevel": "warn",
-    "pathRewrite": { "^/identity": "" }
+    "pathRewrite": {
+      "^/identity": ""
+    }
   },
   "/device": {
     "target": "http://127.0.0.1:3003",
     "secure": false,
     "changeOrigin": true,
     "logLevel": "warn",
-    "pathRewrite": { "^/device": "" }
+    "pathRewrite": {
+      "^/device": ""
+    }
   },
   "/media": {
     "target": "http://127.0.0.1:3020",
     "secure": false,
     "changeOrigin": true,
     "logLevel": "warn",
-    "pathRewrite": { "^/media": "" }
+    "pathRewrite": {
+      "^/media": ""
+    }
   },
   "/ai": {
     "target": "http://127.0.0.1:3010",
     "secure": false,
     "changeOrigin": true,
     "logLevel": "warn",
-    "pathRewrite": { "^/ai": "" }
+    "pathRewrite": {
+      "^/ai": ""
+    }
+  },
+  "/analytics": {
+    "target": "http://127.0.0.1:3005",
+    "secure": false,
+    "changeOrigin": true,
+    "logLevel": "warn",
+    "pathRewrite": {
+      "^/analytics": ""
+    }
   }
 }

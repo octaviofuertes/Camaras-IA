@@ -36,7 +36,7 @@ function token(role) {
 }
 
 /** Puertos que ocupa el stack. Se liberan antes de arrancar. */
-const PORTS = { identity: 3001, device: 3003, event: 3004, 'ai-worker': 3010, media: 3020, web: 4200 };
+const PORTS = { identity: 3001, device: 3003, event: 3004, analytics: 3005, 'ai-worker': 3010, media: 3020, web: 4200 };
 
 /**
  * Mata lo que esté escuchando en un puerto del stack.
@@ -156,11 +156,15 @@ process.on('SIGTERM', shutdown);
   run('identity', 'node', ['apps/identity-service/dist/main.js']);
   run('device', 'node', ['apps/device-service/dist/main.js']);
   run('event', 'node', ['apps/event-service/dist/main.js']);
+  // Informes: serie de tiempo de actividad por puesto. Va aparte de eventos
+  // a propósito — una medición no es una alerta y no comparte su cola.
+  run('analytics', 'node', ['apps/analytics-service/dist/main.js'], { PORT: '3005' });
 
   const identityOk = await waitPort(3001, '/api/v1/health', 25000);
   const deviceOk = await waitPort(3003, '/api/v1/health', 25000);
   const eventOk = await waitPort(3004, '/api/v1/health', 25000);
-  if (!identityOk || !deviceOk || !eventOk) {
+  const analyticsOk = await waitPort(3005, '/api/v1/health', 25000);
+  if (!identityOk || !deviceOk || !eventOk || !analyticsOk) {
     console.error(
       '\nLas APIs no respondieron. Causa habitual: la base no está levantada.\n' +
         'Abrí Docker Desktop y corré:  pnpm infra:up\n',
@@ -181,6 +185,7 @@ process.on('SIGTERM', shutdown);
     AI_MODULES_PATH: './modules',
     MEDIA_SERVICE_URL: 'http://127.0.0.1:3020',
     EVENT_SERVICE_URL: 'http://127.0.0.1:3004',
+    ANALYTICS_SERVICE_URL: 'http://127.0.0.1:3005',
     DEVICE_SERVICE_URL: 'http://127.0.0.1:3003',
     // Una caída dura entre medio segundo y uno: a 2 fps entran 1-2 frames y no
     // hay con qué medir la velocidad de descenso. 6 fps da ~5 frames de caída,

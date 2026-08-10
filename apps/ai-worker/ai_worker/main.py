@@ -29,6 +29,7 @@ app = FastAPI(title="percepta-ai-worker")
 MODULES_PATH = os.environ.get("AI_MODULES_PATH", "./modules")
 MEDIA_URL = os.environ.get("MEDIA_SERVICE_URL", "http://localhost:3020")
 EVENT_URL = os.environ.get("EVENT_SERVICE_URL", "http://localhost:3004")
+ANALYTICS_URL = os.environ.get("ANALYTICS_SERVICE_URL", "http://127.0.0.1:3005")
 DEVICE_URL = os.environ.get("DEVICE_SERVICE_URL", "http://127.0.0.1:3003")
 SERVICE_TOKEN = os.environ.get("SERVICE_TOKEN", "")
 DEVICE = os.environ.get("AI_WORKER_DEVICE", "cpu")
@@ -181,7 +182,7 @@ def _arrancar_pipelines() -> None:
 
         p = CameraPipeline(
             a, instancias, media_url=MEDIA_URL, event_url=EVENT_URL,
-            token=SERVICE_TOKEN, fps=PIPELINE_FPS,
+            token=SERVICE_TOKEN, fps=PIPELINE_FPS, analytics_url=ANALYTICS_URL,
         )
         p.start()
         _pipelines.append(p)

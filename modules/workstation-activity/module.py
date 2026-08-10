@@ -1,0 +1,240 @@
+"""Módulo de IA: actividad por puesto de trabajo.
+
+Mide cuánto tiempo cada puesto está ocupado, vacío, y con alguien usando el
+teléfono. NO genera alertas: alimenta el apartado de Informes.
+
+DOS DECISIONES QUE DEFINEN ESTE MÓDULO
+--------------------------------------
+1. NO SIGUE A LAS PERSONAS. No usa el tracker y no maneja identificadores por
+   persona. Cuenta ocupación de una REGIÓN. Eso no es una simplificación: es lo
+   que hace que el informe hable de puestos y no de individuos, y que no exista
+   ningún dato que permita reconstruir quién estuvo dónde.
+
+2. NO EMITE EVENTOS DE ALERTA. Las detecciones que produce llevan
+   `attributes["kind"] = "telemetry"`, y el pipeline las manda a analytics-service
+   en vez de crear un evento. Una medición no es una alerta: mezclarlas llenaría
+   la cola de revisión con datos que nadie tiene que atender.
+
+La lógica de contabilidad vive en `actividad.py`, sin dependencias de YOLO, y
+está cubierta por pruebas. Acá sólo se hace el puente.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import sys
+import time
+from dataclasses import fields
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+from percepta_contracts import (
+    Detection,
+    Frame,
+    InferenceResult,
+    ModuleContext,
+    PerceptaModule,
+)
+
+sys.path.insert(0, str(Path(__file__).parent))
+from actividad import (  # noqa: E402
+    Caja,
+    ConfigActividad,
+    ContadorActividad,
+    MuestraZona,
+    Observacion,
+    Zona,
+)
+
+log = logging.getLogger(__name__)
+
+# Clases COCO que le interesan al módulo.
+CLASE_PERSONA = 0
+CLASE_TELEFONO = 67
+
+
+class WorkstationActivityModule(PerceptaModule):
+    def __init__(self) -> None:
+        self._model: Any = None
+        self._ctx: ModuleContext | None = None
+        self._contador: ContadorActividad | None = None
+        self._imgsz = 640
+        self._loaded_at = 0.0
+        self._muestras_emitidas = 0
+
+    def load(self, ctx: ModuleContext) -> None:
+        from ultralytics import YOLO  # import perezoso
+
+        self._ctx = ctx
+        weights = str(ctx.config.get("weights", "yolov8n.pt"))
+        self._imgsz = int(ctx.config.get("imgsz", 640))
+
+        cfg = self._config_validada(ctx.config)
+        self._contador = ContadorActividad(self._zonas_de(ctx), cfg)
+
+        log.info(
+            "cargando %s en %s — %d puesto(s), ventana de %.0f s",
+            weights, ctx.device, len(self._contador.zonas), cfg.windowSeconds,
+        )
+        self._model = YOLO(weights)
+        self._model.to("cpu" if ctx.device.startswith("cpu") else ctx.device)
+        self._loaded_at = time.time()
+
+    def _zonas_de(self, ctx: ModuleContext) -> list[Zona]:
+        """Traduce las zonas de la cámara a puestos de trabajo.
+
+        Sin zonas configuradas el módulo mide la cámara entera como un puesto:
+        tiene que servir apenas se lo asigna, sin obligar a dibujar polígonos.
+        Dibujarlos lo mejora —permite separar puestos dentro de una misma
+        cámara— pero no es un requisito para empezar.
+        """
+        zonas = []
+        for zid, poligono in (ctx.zones or {}).items():
+            zonas.append(
+                Zona(
+                    id=str(zid),
+                    nombre=str(zid),
+                    poligono=[(float(x), float(y)) for x, y in poligono],
+                )
+            )
+        return zonas
+
+    def _config_validada(self, config: dict) -> ConfigActividad:
+        """Aplica la configuración respetando los rangos de `config.schema.json`.
+
+        Mismo criterio que el módulo de caídas: los valores fuera de rango se
+        acotan y se avisa, en vez de tumbar el pipeline de esa cámara por un
+        número mal guardado.
+        """
+        esquema = {}
+        ruta = Path(__file__).parent / "config.schema.json"
+        try:
+            esquema = json.loads(ruta.read_text(encoding="utf-8")).get("properties", {})
+        except Exception:  # noqa: BLE001
+            log.warning("no se pudo leer %s: se aplica sin validar", ruta.name)
+
+        cfg = ConfigActividad()
+        propios = {f.name for f in fields(ConfigActividad)}
+        for clave, valor in (config or {}).items():
+            if clave not in propios:
+                continue
+            tipo = type(getattr(cfg, clave))
+            try:
+                v = tipo(valor)
+            except (TypeError, ValueError):
+                log.warning("config: %s=%r no es %s; se ignora", clave, valor, tipo.__name__)
+                continue
+            regla = esquema.get(clave, {})
+            lo, hi = regla.get("minimum"), regla.get("maximum")
+            if lo is not None and v < lo:
+                v = tipo(lo)
+            if hi is not None and v > hi:
+                v = tipo(hi)
+            setattr(cfg, clave, v)
+        return cfg
+
+    def warmup(self) -> None:
+        if self._model is None:
+            return
+        dummy = np.zeros((self._imgsz, self._imgsz, 3), dtype=np.uint8)
+        self._model.predict(dummy, imgsz=self._imgsz, verbose=False, device="cpu")
+
+    def infer(self, frame: Frame) -> InferenceResult:
+        if self._model is None or self._contador is None:
+            raise RuntimeError("el módulo no fue cargado (falta load())")
+
+        t0 = time.perf_counter()
+        # `predict` y no `track`: el módulo cuenta ocupación de regiones, no
+        # personas individuales. No pedirle identidad al detector es más barato
+        # y, sobre todo, es lo que hace que no exista el dato que permitiría
+        # reconstruir quién estuvo en qué puesto.
+        resultados = self._model.predict(
+            frame.image,
+            imgsz=self._imgsz,
+            classes=[CLASE_PERSONA, CLASE_TELEFONO],
+            conf=0.20,   # el filtro fino lo aplica la contabilidad, por clase
+            verbose=False,
+            device="cpu",
+        )
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+
+        h, w = frame.image.shape[:2]
+        personas: list[Caja] = []
+        telefonos: list[Caja] = []
+
+        for r in resultados:
+            cajas = getattr(r, "boxes", None)
+            if cajas is None:
+                continue
+            for b in cajas:
+                x1, y1, x2, y2 = (float(v) for v in b.xyxy[0].tolist())
+                caja = Caja(
+                    x=x1 / w, y=y1 / h, w=(x2 - x1) / w, h=(y2 - y1) / h,
+                    confianza=float(b.conf.item()),
+                )
+                clase = int(b.cls.item())
+                if clase == CLASE_PERSONA:
+                    personas.append(caja)
+                elif clase == CLASE_TELEFONO:
+                    telefonos.append(caja)
+
+        muestras = self._contador.observar(
+            Observacion(ts=frame.captured_at, personas=personas, telefonos=telefonos)
+        )
+        self._muestras_emitidas += len(muestras)
+
+        return InferenceResult(
+            detections=[self._a_deteccion(m) for m in muestras],
+            inference_ms=elapsed_ms,
+        )
+
+    def _a_deteccion(self, m: MuestraZona) -> Detection:
+        """Traduce una ventana cerrada al contrato de detección.
+
+        `kind=telemetry` es lo que le dice al pipeline que esto NO es una alerta:
+        se persiste como medición y nunca entra en la cola de revisión.
+        """
+        return Detection(
+            class_label="workstation.activity",
+            class_id=0,
+            confidence=1.0,   # es una medición, no una inferencia con duda
+            bbox=(0.0, 0.0, 1.0, 1.0),
+            attributes={
+                "kind": "telemetry",
+                "zoneId": m.zona_id,
+                "zoneName": m.zona_nombre,
+                "from": f"{m.desde:.3f}",
+                "to": f"{m.hasta:.3f}",
+                "occupiedSeconds": f"{m.ocupado_s:.2f}",
+                "phoneSeconds": f"{m.telefono_s:.2f}",
+                "emptySeconds": f"{m.vacio_s:.2f}",
+                "uncoveredSeconds": f"{m.sin_cobertura_s:.2f}",
+                "maxPeople": str(m.max_personas),
+                "meanOccupancy": f"{m.ocupacion_media:.2f}",
+            },
+        )
+
+    def health(self) -> dict[str, Any]:
+        return {
+            "ok": self._model is not None,
+            "model": "yolov8n" if self._model is not None else None,
+            "device": self._ctx.device if self._ctx else None,
+            "muestrasEmitidas": self._muestras_emitidas,
+            "enCurso": self._contador.estado() if self._contador else {},
+            "loadedAt": self._loaded_at or None,
+        }
+
+    def release(self) -> None:
+        # Se cierra la ventana en curso antes de soltar: si no, el último tramo
+        # observado desaparece y en el informe queda un hueco inexplicable.
+        if self._contador is not None:
+            pendientes = self._contador.cerrar_pendiente(time.time())
+            if pendientes:
+                log.info("se cierran %d muestra(s) pendientes al liberar", len(pendientes))
+        self._model = None
+        self._contador = None
+
+
+MODULE_CLASS = WorkstationActivityModule

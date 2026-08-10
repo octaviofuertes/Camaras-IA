@@ -19,6 +19,15 @@ export const AI_MODULES: AiModule[] = [
     icon: 'run',
   },
   {
+    id: 'm-workstation',
+    moduleKey: 'workstation-activity',
+    name: 'Actividad por puesto',
+    description: 'Tiempo ocupado, vacío y con teléfono. Va a Informes, no genera alertas',
+    category: 'hr',
+    color: '#0ea5e9',
+    icon: 'clock',
+  },
+  {
     id: 'm-fall',
     moduleKey: 'fall-detection',
     name: 'Registro de caídas',

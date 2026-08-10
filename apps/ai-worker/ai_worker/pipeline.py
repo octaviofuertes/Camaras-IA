@@ -55,12 +55,14 @@ class CameraPipeline(threading.Thread):
         event_url: str,
         token: str,
         fps: float = 4.0,
+        analytics_url: str = "http://127.0.0.1:3005",
     ) -> None:
         super().__init__(name=f"pipe-{assignment.camera_id}", daemon=True)
         self.a = assignment
         self.instances = instances
         self.media_url = media_url.rstrip("/")
         self.event_url = event_url.rstrip("/")
+        self.analytics_url = analytics_url.rstrip("/")
         self.token = token
         self.interval = 1.0 / fps
         self._stop = threading.Event()
@@ -68,6 +70,7 @@ class CameraPipeline(threading.Thread):
 
         self.frames_processed = 0
         self.events_created = 0
+        self.metrics_sent = 0
         self.last_error: str | None = None
         self.last_detections: list[dict] = []
 
@@ -220,6 +223,48 @@ class CameraPipeline(threading.Thread):
             self.last_error = f"event-service: {exc}"
         return False
 
+    # ── mediciones (informes) ────────────────────────────────────────
+    def _emitir_medicion(self, mod_cfg: dict, det) -> None:
+        """Persiste una ventana de actividad en analytics-service.
+
+        No crea evento, no dispara notificación y no pasa por el enfriamiento de
+        alertas: es una serie de tiempo. Si el servicio no está disponible, la
+        muestra se pierde y se registra — se prefiere un hueco declarado en el
+        informe antes que reintentos que dupliquen tiempo contado.
+        """
+        a = det.attributes
+        payload = {
+            "cameraId": self.a.camera_id,
+            "siteId": self.a.site_id,
+            "moduleKey": mod_cfg["moduleKey"],
+            "moduleVersion": mod_cfg.get("moduleVersion", "1.0.0"),
+            "zoneId": a.get("zoneId") or None,
+            "zoneName": a.get("zoneName") or "Toda la cámara",
+            "from": float(a.get("from", 0.0)),
+            "to": float(a.get("to", 0.0)),
+            "occupiedSeconds": float(a.get("occupiedSeconds", 0.0)),
+            "phoneSeconds": float(a.get("phoneSeconds", 0.0)),
+            "emptySeconds": float(a.get("emptySeconds", 0.0)),
+            "uncoveredSeconds": float(a.get("uncoveredSeconds", 0.0)),
+            "maxPeople": int(a.get("maxPeople", 0)),
+            "meanOccupancy": float(a.get("meanOccupancy", 0.0)),
+        }
+        try:
+            r = requests.post(
+                f"{self.analytics_url}/api/v1/analytics/activity",
+                json=payload,
+                headers={"Authorization": f"Bearer {self.token}"},
+                timeout=6,
+            )
+            if r.status_code in (200, 201):
+                self.metrics_sent += 1
+                return
+            self.last_error = f"analytics-service {r.status_code}: {r.text[:120]}"
+            log.warning("[%s] muestra rechazada: %s", self.a.camera_id, self.last_error)
+        except requests.RequestException as exc:
+            self.last_error = f"analytics-service: {exc}"
+            log.warning("[%s] no se pudo guardar la muestra: %s", self.a.camera_id, exc)
+
     # ── lazo principal ───────────────────────────────────────────────
     def run(self) -> None:
         log.info("[%s] pipeline iniciado con %d módulo(s)", self.a.camera_id, len(self.a.modules))
@@ -253,7 +298,17 @@ class CameraPipeline(threading.Thread):
                     log.exception("[%s] fallo en %s", self.a.camera_id, key)
                     continue
 
-                fire, strong = self._evaluate(mod_cfg.get("config", {}), res.detections, st, t0)
+                # Una MEDICIÓN no es una alerta. Los módulos de informe —el de
+                # actividad por puesto— emiten ventanas de tiempo ya cerradas,
+                # que se persisten como serie y nunca entran en la cola de
+                # revisión humana. Mezclarlas llenaría esa cola de datos que
+                # nadie tiene que atender, y el operador dejaría de mirarla.
+                mediciones = [d for d in res.detections if d.attributes.get("kind") == "telemetry"]
+                alertas = [d for d in res.detections if d.attributes.get("kind") != "telemetry"]
+                for m in mediciones:
+                    self._emitir_medicion(mod_cfg, m)
+
+                fire, strong = self._evaluate(mod_cfg.get("config", {}), alertas, st, t0)
                 snapshot.extend(
                     {
                         "moduleKey": key,
@@ -281,6 +336,7 @@ class CameraPipeline(threading.Thread):
             "modules": [m["moduleKey"] for m in self.a.modules],
             "framesProcessed": self.frames_processed,
             "eventsCreated": self.events_created,
+            "metricsSent": self.metrics_sent,
             "lastError": self.last_error,
             "liveDetections": self.last_detections,
         }

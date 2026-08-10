@@ -1,0 +1,308 @@
+"""Contabilidad de tiempo por puesto de trabajo. Sin dependencias de YOLO.
+
+QUÉ MIDE, Y QUÉ NO
+------------------
+Mide el PUESTO, no a la persona. Acumula, por zona:
+
+  ocupado  — hay al menos una persona dentro del polígono del puesto
+  teléfono — hay al menos una persona con un teléfono asociado a su cuerpo
+  vacío    — no hay nadie
+
+No guarda quién estuvo ahí ni permite reconstruirlo: el identificador de
+seguimiento no entra en la contabilidad. Es una decisión de diseño, no una
+limitación — el sistema no tiene forma de saber quién es cada persona (los
+identificadores del tracker se reasignan constantemente), y un informe por
+puesto responde igual las preguntas operativas que importan: cuánto se usa cada
+posición, en qué franjas, con qué carga.
+
+CÓMO SE CUENTA EL TIEMPO
+------------------------
+Con el tiempo real entre frames, no multiplicando frames por un fps supuesto. Si
+la cámara se corta o el pipeline se atrasa, los segundos que no se observaron NO
+se cuentan: quedan registrados aparte como tiempo sin cobertura. Un informe que
+rellena los huecos con suposiciones es peor que uno que dice "de esta hora vi 52
+minutos".
+
+HONESTIDAD DE LA MEDICIÓN
+-------------------------
+El tiempo de "teléfono" es el más débil de los tres y el módulo lo declara: sólo
+cuenta cuando el teléfono se VE. Alguien mirando el teléfono apoyado sobre el
+escritorio, o de espaldas a la cámara, no se detecta. Por eso el informe reporta
+el tiempo de teléfono como una COTA INFERIOR y no como un total.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass
+class ConfigActividad:
+    """Parámetros de la contabilidad."""
+
+    # Cada cuánto se cierra una ventana y se emite una muestra. Ventanas cortas
+    # dan más resolución en el informe y más filas; 60 s es el equilibrio para
+    # informes por hora y por turno.
+    windowSeconds: float = 60.0
+
+    # Confianza mínima para creer que hay una persona.
+    personConfidence: float = 0.45
+    # El teléfono es un objeto chico y se detecta peor: exigirle la misma
+    # confianza que a una persona lo volvería invisible. Se compensa después
+    # tratando su tiempo como cota inferior.
+    phoneConfidence: float = 0.30
+
+    # Fracción superior del cuerpo donde tiene sentido que aparezca un teléfono
+    # que se está usando. Un teléfono en el piso o sobre el escritorio lejos del
+    # cuerpo no cuenta como uso.
+    phoneBodyTop: float = 0.65
+    # Cuánto puede sobresalir el teléfono del cuerpo y seguir contando: la mano
+    # extendida saca el teléfono fuera del recuadro.
+    phoneMargin: float = 0.12
+
+    # Si entre dos frames pasó más que esto, se considera que hubo un corte y el
+    # intervalo no se le atribuye a ningún estado. Ver `sin_cobertura`.
+    maxGapSeconds: float = 5.0
+
+
+@dataclass
+class Caja:
+    """Recuadro normalizado 0..1."""
+    x: float
+    y: float
+    w: float
+    h: float
+    confianza: float = 0.0
+
+    @property
+    def centro(self) -> tuple[float, float]:
+        return (self.x + self.w / 2, self.y + self.h / 2)
+
+    @property
+    def pies(self) -> tuple[float, float]:
+        """Punto de apoyo: es lo que define en qué zona del piso está alguien.
+
+        Se usa el borde inferior y no el centro porque las zonas son regiones
+        del SUELO. Alguien parado justo afuera del borde de un puesto tiene el
+        centro del cuerpo adentro y los pies afuera; lo que corresponde es dónde
+        está parado.
+        """
+        return (self.x + self.w / 2, self.y + self.h)
+
+
+@dataclass
+class Zona:
+    """Un puesto de trabajo: un polígono con nombre."""
+    id: str
+    nombre: str
+    poligono: list[tuple[float, float]]
+
+    def contiene(self, punto: tuple[float, float]) -> bool:
+        # Sin polígono la zona es toda la imagen: es el caso de una cámara que
+        # apunta a un solo puesto y a nadie le hace falta dibujar nada.
+        if len(self.poligono) < 3:
+            return True
+        return _punto_en_poligono(punto, self.poligono)
+
+
+@dataclass
+class VentanaZona:
+    """Lo acumulado de una zona en la ventana en curso."""
+    zona_id: str
+    zona_nombre: str
+    ocupado_s: float = 0.0
+    telefono_s: float = 0.0
+    vacio_s: float = 0.0
+    sin_cobertura_s: float = 0.0
+    max_personas: int = 0
+    # Suma de personas × segundos: dividida por el tiempo observado da la
+    # ocupación media, que es más representativa que el pico.
+    persona_segundos: float = 0.0
+
+    @property
+    def observado_s(self) -> float:
+        return self.ocupado_s + self.vacio_s
+
+    def reiniciar(self) -> None:
+        self.ocupado_s = self.telefono_s = self.vacio_s = 0.0
+        self.sin_cobertura_s = 0.0
+        self.max_personas = 0
+        self.persona_segundos = 0.0
+
+
+@dataclass
+class Observacion:
+    """Lo que el módulo ve en un frame, ya sin depender del detector."""
+    ts: float
+    personas: list[Caja] = field(default_factory=list)
+    telefonos: list[Caja] = field(default_factory=list)
+
+
+@dataclass
+class MuestraZona:
+    """Una ventana cerrada, lista para persistir."""
+    zona_id: str
+    zona_nombre: str
+    desde: float
+    hasta: float
+    ocupado_s: float
+    telefono_s: float
+    vacio_s: float
+    sin_cobertura_s: float
+    max_personas: int
+    ocupacion_media: float
+
+
+class ContadorActividad:
+    """Acumula tiempo por zona y cierra ventanas periódicamente."""
+
+    def __init__(self, zonas: list[Zona], config: ConfigActividad | None = None) -> None:
+        self.cfg = config or ConfigActividad()
+        # Sin zonas configuradas se asume que la cámara mira un solo puesto. El
+        # módulo tiene que servir sin configurar nada; las zonas lo mejoran.
+        self.zonas = zonas or [Zona(id="", nombre="Toda la cámara", poligono=[])]
+        self._ventanas = {z.id: VentanaZona(z.id, z.nombre) for z in self.zonas}
+        self._ultimo_ts: float | None = None
+        self._inicio_ventana: float | None = None
+
+    # ── medición ────────────────────────────────────────────────────
+    def observar(self, obs: Observacion) -> list[MuestraZona]:
+        """Registra un frame. Devuelve muestras si se cerró una ventana."""
+        cfg = self.cfg
+
+        if self._ultimo_ts is None or self._inicio_ventana is None:
+            self._ultimo_ts = obs.ts
+            self._inicio_ventana = obs.ts
+            return []
+
+        dt = obs.ts - self._ultimo_ts
+        self._ultimo_ts = obs.ts
+
+        if dt < 0:
+            # El reloj retrocedió (reconexión de cámara). No se puede atribuir
+            # tiempo negativo a nada: se reinicia la ventana en curso para no
+            # mezclar dos tramos temporales distintos en la misma muestra.
+            self._inicio_ventana = obs.ts
+            for v in self._ventanas.values():
+                v.reiniciar()
+            return []
+
+        personas_validas = [p for p in obs.personas if p.confianza >= cfg.personConfidence]
+        telefonos_validos = [t for t in obs.telefonos if t.confianza >= cfg.phoneConfidence]
+
+        hubo_corte = dt > cfg.maxGapSeconds
+        for zona in self.zonas:
+            v = self._ventanas[zona.id]
+            if hubo_corte:
+                # No se vio nada en ese intervalo: no se le atribuye estado.
+                # Rellenarlo con el último estado conocido sería inventar datos
+                # en un informe, que es exactamente lo que no puede pasar.
+                v.sin_cobertura_s += dt
+                continue
+
+            dentro = [p for p in personas_validas if zona.contiene(p.pies)]
+            if dentro:
+                v.ocupado_s += dt
+                v.persona_segundos += len(dentro) * dt
+                v.max_personas = max(v.max_personas, len(dentro))
+                if any(_telefono_en_uso(p, telefonos_validos, cfg) for p in dentro):
+                    v.telefono_s += dt
+            else:
+                v.vacio_s += dt
+
+        if obs.ts - self._inicio_ventana >= cfg.windowSeconds:
+            return self._cerrar_ventana(obs.ts)
+        return []
+
+    def cerrar_pendiente(self, ts: float) -> list[MuestraZona]:
+        """Cierra la ventana en curso aunque no haya llegado a su duración.
+
+        Se usa al apagar el módulo o al soltar la cámara: sin esto, el último
+        tramo observado se perdería, y en un informe eso se ve como un hueco que
+        nadie puede explicar.
+        """
+        if self._inicio_ventana is None or ts <= self._inicio_ventana:
+            return []
+        return self._cerrar_ventana(ts)
+
+    def _cerrar_ventana(self, ts: float) -> list[MuestraZona]:
+        desde = self._inicio_ventana or ts
+        muestras = []
+        for zona in self.zonas:
+            v = self._ventanas[zona.id]
+            observado = v.observado_s
+            if observado <= 0 and v.sin_cobertura_s <= 0:
+                continue
+            muestras.append(
+                MuestraZona(
+                    zona_id=v.zona_id,
+                    zona_nombre=v.zona_nombre,
+                    desde=desde,
+                    hasta=ts,
+                    ocupado_s=round(v.ocupado_s, 2),
+                    telefono_s=round(v.telefono_s, 2),
+                    vacio_s=round(v.vacio_s, 2),
+                    sin_cobertura_s=round(v.sin_cobertura_s, 2),
+                    max_personas=v.max_personas,
+                    ocupacion_media=round(v.persona_segundos / observado, 2) if observado > 0 else 0.0,
+                )
+            )
+            v.reiniciar()
+        self._inicio_ventana = ts
+        return muestras
+
+    # ── diagnóstico ─────────────────────────────────────────────────
+    def estado(self) -> dict:
+        return {
+            "zonas": [
+                {
+                    "id": z.id,
+                    "nombre": z.nombre,
+                    "ocupadoS": round(self._ventanas[z.id].ocupado_s, 1),
+                    "telefonoS": round(self._ventanas[z.id].telefono_s, 1),
+                    "vacioS": round(self._ventanas[z.id].vacio_s, 1),
+                    "sinCoberturaS": round(self._ventanas[z.id].sin_cobertura_s, 1),
+                }
+                for z in self.zonas
+            ],
+            "ventanaAbiertaS": round((self._ultimo_ts or 0) - (self._inicio_ventana or 0), 1),
+        }
+
+
+def _telefono_en_uso(persona: Caja, telefonos: list[Caja], cfg: ConfigActividad) -> bool:
+    """¿Alguno de los teléfonos está asociado al cuerpo de esta persona?
+
+    Se pide que el teléfono esté en la mitad superior del cuerpo, con un margen
+    que tolera el brazo estirado. Un teléfono apoyado sobre el escritorio, o el
+    de otra persona, no cuenta.
+
+    Esto detecta el teléfono VISIBLE. Si queda tapado por el cuerpo o la persona
+    está de espaldas, no se ve — por eso el tiempo que sale de acá es una cota
+    inferior y el informe lo dice así.
+    """
+    m = cfg.phoneMargin
+    x0, x1 = persona.x - m, persona.x + persona.w + m
+    y0 = persona.y - m
+    y1 = persona.y + persona.h * cfg.phoneBodyTop
+
+    for t in telefonos:
+        cx, cy = t.centro
+        if x0 <= cx <= x1 and y0 <= cy <= y1:
+            return True
+    return False
+
+
+def _punto_en_poligono(punto: tuple[float, float], poligono: list[tuple[float, float]]) -> bool:
+    """Algoritmo del rayo. Devuelve True si el punto cae dentro del polígono."""
+    x, y = punto
+    dentro = False
+    n = len(poligono)
+    j = n - 1
+    for i in range(n):
+        xi, yi = poligono[i]
+        xj, yj = poligono[j]
+        if (yi > y) != (yj > y):
+            corte_x = (xj - xi) * (y - yi) / ((yj - yi) or 1e-12) + xi
+            if x < corte_x:
+                dentro = not dentro
+        j = i
+    return dentro

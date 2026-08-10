@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "1.0.0",
+  "moduleKey": "workstation-activity",
+  "name": "Actividad por puesto",
+  "description": "Mide cuánto tiempo cada puesto está ocupado, vacío y con uso de teléfono. Alimenta el apartado de Informes; no genera alertas. La contabilidad es por región: no almacena identificador de persona ni dato que permita reconstruir quién ocupó un puesto.",
+  "version": "1.0.0",
+  "pluginApiVersion": "1.0.0",
+  "category": "productivity",
+  "vendor": "percepta-core",
+  "model": {
+    "backend": "yolo",
+    "artifactRef": "yolov8n.pt",
+    "classes": [
+      "person",
+      "cell phone"
+    ]
+  },
+  "input": {
+    "requiresZones": false,
+    "minFps": 1,
+    "maxFps": 10,
+    "colorSpace": "bgr"
+  },
+  "configSchemaRef": "./config.schema.json",
+  "configSchemaVersion": "1.0.0",
+  "eventTypes": [
+    {
+      "type": "workstation.activity",
+      "defaultSeverity": "low",
+      "eventClass": "telemetry"
+    }
+  ],
+  "resources": {
+    "gpu": false,
+    "vramMb": 0,
+    "targetFps": 3
+  }
+}
