@@ -167,8 +167,6 @@ class FallConfig:
     #
     # NO es permanencia en el suelo: son dos frames, menos de medio segundo.
     impactConfirmFrames: int = 2
-    # Se conserva para configuraciones existentes; ya no gatea la alerta.
-    impactConfirmSeconds: float = 0.35
 
     # ── severidad ───────────────────────────────────────────────────
     # Si sigue en el suelo más que esto, la caída se considera grave
@@ -177,16 +175,8 @@ class FallConfig:
 
     # Ángulo de torso que refuerza la evidencia (no es obligatorio).
     downAngleDeg: float = 50.0
-    # Relación alto/ancho por debajo de la cual el cuerpo está tendido.
-    downRatio: float = 1.1
 
-    minConfidence: float = 0.5
     trackTimeoutSeconds: float = 5.0
-
-    # Compatibilidad con configuraciones anteriores; ya no gatea la alerta.
-    confirmSeconds: float = 0.5
-    recoverySeconds: float = 2.0
-    stillnessVelocity: float = 0.15
 
 
 @dataclass
@@ -218,7 +208,6 @@ class TrackState:
     down_frames: int = 0                  # frames seguidos con el cuerpo abajo
     collapse_since: float | None = None   # desde cuándo está colapsado
     down_since: float | None = None       # desde cuándo está abajo (severidad)
-    alerted_at: float | None = None
     # Ya se concluyó que esta postura baja no fue una caída (se sentó, se
     # agachó). Se mantiene hasta que la persona vuelva a incorporarse, para no
     # entrar a confirmar impacto una y otra vez sobre la misma postura quieta.
@@ -376,17 +365,19 @@ class FallDetector:
             del self.tracks[t]
 
     def _descenso_reciente(self, st: TrackState, now: float) -> float:
-        """Mayor velocidad de descenso dentro de la ventana de caída.
+        """Velocidad con la que el cuerpo llegó a donde está AHORA.
 
-        Se comparan TODOS los pares de instantes de la ventana, no cada frame
-        contra el primero. La diferencia importa: si la persona estuvo quieta
-        medio segundo y recién ahí se cayó, medir contra el inicio de la ventana
-        reparte la caída sobre todo ese tiempo y diluye la velocidad justo por
-        debajo del umbral. Buscando el mejor par se encuentra el tramo real de
-        caída, dure lo que dure.
+        Se evalúan todos los tramos que terminan en el instante actual y se toma
+        el más veloz. Dos decisiones, las dos aprendidas midiendo:
 
-        La ventana es corta (~1 s) y el fps bajo, así que son unos pocos frames:
-        el costo cuadrático es irrelevante.
+        - Terminan en el instante actual, y no en cualquier par de la ventana.
+          Lo que importa físicamente es a qué velocidad llegó el cuerpo a donde
+          quedó; tomando el pico de cualquier momento, un movimiento rápido
+          ajeno —enderezarse, girar— se le prestaba a un descenso lento
+          posterior.
+        - Se mira una VENTANA y no sólo el frame anterior. Si la persona estuvo
+          quieta y recién ahí se cayó, comparar contra el frame previo pierde el
+          tramo real de caída cuando el fps es bajo.
         """
         cfg = self.cfg
         recientes = [(t, h, c) for (t, h, c) in st.history if now - t <= cfg.fallWindowSeconds]
@@ -423,6 +414,7 @@ class FallDetector:
 
     def update(self, pf: PoseFrame) -> FallResult:
         cfg = self.cfg
+        pf = _sanear(pf)
         st = self.tracks.get(pf.track_id)
         if st is None:
             st = TrackState(last_ts=pf.ts)
@@ -450,15 +442,21 @@ class FallDetector:
         referencia = st.baseline or altura
         quality_ok = n_torso >= cfg.minTorsoPoints and referencia >= cfg.minPersonHeight
 
-        st.history.append((pf.ts, altura, centro_y))
-        st.det_scores.append(pf.det_score)
-        velocidad = self._descenso_reciente(st, pf.ts)
-
         if not quality_ok:
             # Sin pose confiable no se afirma nada: no se aprende la altura de
             # referencia, no se avanza de estado y no se alerta. Mantener el
             # estado congelado es lo correcto — una oclusión momentánea no debe
             # borrar una caída en curso ni inventar una nueva.
+            #
+            # Y TAMPOCO entra al historial. Antes sí entraba, y eso convertía la
+            # guarda en un placebo: el frame se descartaba para decidir pero sus
+            # coordenadas basura quedaban registradas, así que el frame SIGUIENTE
+            # —bueno— medía una velocidad enorme contra ellas. Reproducido: una
+            # pose con todos sus puntos por debajo del umbral de confianza, cuyo
+            # centro cae donde diga el recuadro, inyecta una velocidad de 3.83
+            # con la persona inmóvil y de pie. El umbral de alerta es 0.70.
+            # Ésa era una de las fábricas de "caídas de la nada".
+            velocidad = self._descenso_reciente(st, pf.ts)
             st.last_ts = pf.ts
             return FallResult(
                 track_id=pf.track_id, state=st.state, confidence=0.0,
@@ -468,6 +466,11 @@ class FallDetector:
                 quality_ok=False,
                 collapse_ratio=(altura / st.baseline) if st.baseline else None,
             )
+
+        # A partir de acá la observación es confiable: recién ahora se registra.
+        st.history.append((pf.ts, altura, centro_y))
+        st.det_scores.append(pf.det_score)
+        velocidad = self._descenso_reciente(st, pf.ts)
 
         # ── altura de referencia ────────────────────────────────────────
         # Se estima como el percentil 90 de las alturas observadas, no como la
@@ -483,7 +486,12 @@ class FallDetector:
         # levantó sin que se haya movido.
         if quality_ok and st.state != State.ALERTED:
             st.baseline_heights.append(altura)
-            if len(st.baseline_heights) >= cfg.baselineFrames:
+            # `max(..., 1)`: con baselineFrames en 0 la condición se cumplía con
+            # la lista vacía y el índice del percentil daba -1 sobre una lista
+            # sin elementos. Un valor de configuración absurdo tiene que producir
+            # un detector conservador, no una excepción que tumba el pipeline.
+            minimo = max(cfg.baselineFrames, 1)
+            if len(st.baseline_heights) >= minimo:
                 ordenadas = sorted(st.baseline_heights)
                 idx = min(int(len(ordenadas) * 0.9), len(ordenadas) - 1)
                 st.baseline = ordenadas[idx]
@@ -493,7 +501,7 @@ class FallDetector:
             # invertido porque en la imagen la `y` crece hacia abajo.
             if y_tronco is not None:
                 st.trunk_ys.append(y_tronco)
-                if len(st.trunk_ys) >= cfg.baselineFrames:
+                if len(st.trunk_ys) >= minimo:
                     ordenadas = sorted(st.trunk_ys)
                     idx = min(int(len(ordenadas) * 0.1), len(ordenadas) - 1)
                     st.trunk_baseline = ordenadas[idx]
@@ -568,7 +576,6 @@ class FallDetector:
                 # NO se espera a ver si se queda tirado.
                 if st.down_frames >= cfg.impactConfirmFrames and st.peak_velocity >= cfg.fallVelocity:
                     st.state = State.ALERTED
-                    st.alerted_at = pf.ts
                     is_fall = True
                     reason = f"caída: {', '.join(motivos)}, descenso {st.peak_velocity:.2f}"
                 else:
@@ -604,7 +611,6 @@ class FallDetector:
                 transcurrido = pf.ts - (st.collapse_since or pf.ts)
                 if st.down_frames >= cfg.impactConfirmFrames and st.peak_velocity >= cfg.fallVelocity:
                     st.state = State.ALERTED
-                    st.alerted_at = pf.ts
                     is_fall = True
                     reason = f"caída: {', '.join(motivos)}, descenso {st.peak_velocity:.2f}"
                 elif transcurrido > cfg.fallWindowSeconds * 2:
@@ -743,6 +749,42 @@ class FallDetector:
         # el segundo de la caída no vuelve dudosa su existencia.
         techo = max(st.det_scores) if st.det_scores else det_score
         return round(min(score, techo), 4)
+
+
+def _sanear(pf: PoseFrame) -> PoseFrame:
+    """Descarta coordenadas no finitas antes de que entren al razonamiento.
+
+    Un NaN en un punto del esqueleto no rompía nada de forma visible: se
+    propagaba hasta la bajada de tronco, y como toda comparación con NaN da
+    falso, el detector dejaba de afirmar que alguien estaba abajo. Es decir,
+    quedaba CIEGO en silencio, que es el peor modo de fallar para algo cuya
+    razón de existir es avisar.
+
+    Un punto con coordenadas imposibles simplemente no se vio: se le pone
+    confianza cero y el resto de la lógica —que ya sabe qué hacer sin ese
+    punto— sigue funcionando.
+    """
+    limpios = None
+    for i, k in enumerate(pf.keypoints):
+        if not (math.isfinite(k.x) and math.isfinite(k.y) and math.isfinite(k.score)):
+            if limpios is None:
+                limpios = list(pf.keypoints)
+            limpios[i] = Keypoint(0.0, 0.0, 0.0)
+
+    bbox = pf.bbox
+    if not all(math.isfinite(v) for v in bbox):
+        bbox = (0.0, 0.0, 0.0, 0.0)
+
+    ts = pf.ts if math.isfinite(pf.ts) else 0.0
+    score = pf.det_score if math.isfinite(pf.det_score) else 0.0
+
+    if limpios is None and bbox is pf.bbox and ts == pf.ts and score == pf.det_score:
+        return pf
+    return PoseFrame(
+        track_id=pf.track_id, ts=ts,
+        keypoints=limpios if limpios is not None else pf.keypoints,
+        bbox=bbox, det_score=score,
+    )
 
 
 def _marcar_abajo(st: TrackState, ts: float) -> None:

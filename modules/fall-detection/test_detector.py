@@ -499,6 +499,268 @@ def test_olvida_personas_que_desaparecen():
     assert len(d.tracks) == 0
 
 
+# ═══════════════════════════════════════════════════════════════════
+# Los umbrales, fijados uno por uno
+#
+# Estas pruebas existen porque se midió que faltaban: al romper el detector a
+# propósito (test_mutaciones.py), aflojar cualquiera de los cuatro umbrales
+# pasaba sin que ninguna prueba se quejara. O sea que alguien podía devolver el
+# detector al comportamiento que lo hacía inservible —alertar cuando alguien se
+# sienta— y verlo todo en verde.
+#
+# Cada una construye un caso que cae DENTRO del margen: entre el valor correcto
+# y el valor aflojado. Así la prueba falla exactamente cuando el umbral se
+# mueve, y no antes.
+# ═══════════════════════════════════════════════════════════════════
+
+def _descenso_en(segundos: float, bajada: float = 0.36, quieto: float = 3.0):
+    """Trayectoria que baja hasta el piso en el tiempo indicado y se queda ahí.
+
+    La velocidad que mide el detector no es la del centro del cuerpo: al rotar,
+    los hombros recorren bastante más. Por eso la prueba se calibra por DURACIÓN
+    —que es lo que se controla— y después verifica el valor medido, en vez de
+    suponer una fórmula.
+    """
+    n = max(int(segundos * FPS), 2)
+    pasos = de_pie(0, quieto)
+    for i in range(1, n + 1):
+        f = i / n
+        pasos.append((quieto + i * DT, 0.5 + bajada * f, DE_PIE, 3 + (TENDIDO_ANG - 3) * f))
+    t = quieto + n * DT
+    pasos += [(t + i * DT, 0.5 + bajada, DE_PIE, TENDIDO_ANG) for i in range(25)]
+    return pasos
+
+
+def test_umbral_de_velocidad_no_se_puede_aflojar():
+    """Un descenso a media velocidad no es una caída, aunque termine abajo.
+
+    Fija `fallVelocity`: el caso baja a ~0.5 estaturas/s, entre el umbral real
+    (0.70) y la mitad. Si alguien baja el umbral, esto empieza a alertar.
+    """
+    cfg = FallConfig()
+    d = FallDetector(cfg)
+    # Dos segundos de descenso: medido, ~0.59 estaturas/s. Cae entre la mitad
+    # del umbral y el umbral, que es justo el margen que hay que proteger.
+    res = correr(d, _descenso_en(2.0))
+    pico = max(r.velocity for r in res)
+    assert cfg.fallVelocity / 2 < pico < cfg.fallVelocity, (
+        f"el escenario debía caer en el margen protegido; midió {pico:.2f} "
+        f"contra un umbral de {cfg.fallVelocity}"
+    )
+    assert not any(r.is_fall for r in res), (
+        "bajar a media velocidad y quedar abajo NO es una caída: es acostarse"
+    )
+
+
+def test_dejarse_caer_en_una_silla_rapido_no_alerta():
+    """Sentarse de golpe: rápido de verdad, pero el tronco baja poco.
+
+    Fija `trunkDropRatio`. El caso tiene velocidad muy por encima del umbral —lo
+    que descarta que pase por lento— y una bajada de tronco de sentarse (~0.30).
+    Es lo que separa una silla del piso.
+    """
+    d = FallDetector(FallConfig())
+    # Cae 0.16 estaturas en 0.2 s: unas 0.8 estaturas/s, bien sobre el umbral.
+    pasos = de_pie(0, 3.0)
+    pasos += [(3.0, 0.55, DE_PIE, 8.0), (3.1, 0.58, DE_PIE, 10.0)]
+    pasos += [(3.2 + i * DT, 0.58, DE_PIE, 10.0) for i in range(30)]
+
+    res = correr(d, pasos)
+    pico = max(r.velocity for r in res)
+    assert pico >= FallConfig().fallVelocity, (
+        f"el escenario debía ser rápido para no pasar por lento; midió {pico:.2f}"
+    )
+    assert not any(r.is_fall for r in res), (
+        "dejarse caer en una silla es rápido pero el tronco baja poco: no es una caída"
+    )
+
+
+def test_bajada_intermedia_sin_cuerpo_horizontal_no_alerta():
+    """Baja bastante y rápido, pero el cuerpo se sigue viendo vertical.
+
+    Fija `trunkDropSure` y `downVerticality` a la vez: la bajada queda entre
+    `trunkDropRatio` y `trunkDropSure`, así que se necesita además una postura
+    horizontal. Como no la hay, no debe alertar. Si alguien baja `trunkDropSure`
+    o vuelve permisiva la verticalidad, esto alerta.
+    """
+    d = FallDetector(FallConfig())
+    pasos = de_pie(0, 3.0)
+    # Cae rápido quedando de rodillas: el cuerpo se sigue proyectando vertical
+    # (relación alto/ancho medida: 2.58, muy por encima del umbral de 1.2).
+    pasos += [(3.0, 0.68, DE_PIE * 0.60, 12.0), (3.1, 0.72, DE_PIE * 0.60, 14.0)]
+    pasos += [(3.2 + i * DT, 0.72, DE_PIE * 0.60, 14.0) for i in range(30)]
+
+    res = correr(d, pasos)
+    caidas = [r for r in res if r.trunk_drop is not None]
+    assert caidas, "el escenario no llegó a medir la bajada de tronco"
+    maxima = max(r.trunk_drop for r in caidas)
+    cfg = FallConfig()
+    assert cfg.trunkDropRatio < maxima < cfg.trunkDropSure, (
+        f"la bajada ({maxima:.2f}) debía caer entre {cfg.trunkDropRatio} y {cfg.trunkDropSure}"
+    )
+    assert not any(r.is_fall for r in res), (
+        "una bajada intermedia con el cuerpo vertical no alcanza para afirmar una caída"
+    )
+
+
+def test_la_altura_de_referencia_es_la_envolvente_no_la_mediana():
+    """Aprende la altura DE PIE aunque la persona pase agachada casi todo el rato.
+
+    Fija cómo se estima la referencia. Con la mediana, alguien que trabaja
+    agachado termina con una referencia baja, y después estar de pie se lee como
+    una altura imposible — se midieron 246 % en cámara real.
+    """
+    d = FallDetector(FallConfig())
+    # 6 frames de pie y 30 agachado: la mediana daría la altura agachada.
+    pasos = de_pie(0, 0.6)
+    pasos += [(0.6 + i * DT, 0.62, DE_PIE * 0.55, 25.0) for i in range(30)]
+    correr(d, pasos)
+
+    base = d.tracks[1].baseline
+    assert base is not None, "no llegó a fijar una referencia"
+    assert base > DE_PIE * 0.85, (
+        f"la referencia debe ser la altura DE PIE (~{DE_PIE}), no la agachada; dio {base:.3f}"
+    )
+
+
+def test_la_referencia_se_congela_tras_alertar():
+    """Alguien tirado mucho rato no debe pasar a leerse como si estuviera de pie.
+
+    Si la referencia siguiera aprendiendo mientras la persona está en el suelo,
+    la ventana se llenaría de alturas de alguien tendido y el detector concluiría
+    que se levantó sin que se haya movido — perdiendo la severidad creciente
+    justo en el caso más grave, el de quien no puede levantarse.
+    """
+    d = FallDetector(FallConfig())
+    pasos = de_pie(0, 2.0) + transicion(2.0, 0.3, 0.5, 0.85, 3, 85) + tendido(2.3, 25.0)
+    res = correr(d, pasos)
+    assert any(r.is_fall for r in res), "el escenario debía alertar primero"
+
+    base_al_alertar = None
+    for r in res:
+        if r.is_fall:
+            base_al_alertar = d.tracks[1].baseline
+            break
+    assert d.tracks[1].state == State.ALERTED, "debería seguir marcada como caída"
+    assert abs(d.tracks[1].baseline - base_al_alertar) < 1e-9, (
+        "la referencia cambió mientras la persona seguía en el suelo"
+    )
+    assert res[-1].down_seconds > 20, (
+        "tras 25 s tirada, el contador de permanencia debería seguir corriendo"
+    )
+
+
+def test_el_esquema_y_el_codigo_no_pueden_divergir():
+    """Los valores por omisión del esquema son los mismos que los del código.
+
+    Se encontraron cuatro desincronizados —el esquema decía fallVelocity 0.55
+    cuando el código usaba 0.70— y eso no es cosmético: la interfaz muestra esos
+    números y, si los guarda, devuelve el detector a la configuración anterior
+    sin que nadie lo note.
+    """
+    import json
+    from dataclasses import fields
+    from pathlib import Path
+
+    esquema = json.loads(
+        (Path(__file__).parent / "config.schema.json").read_text(encoding="utf-8")
+    )["properties"]
+    d = FallConfig()
+
+    problemas = []
+    for f in fields(FallConfig):
+        if f.name not in esquema:
+            continue
+        real, declarado = getattr(d, f.name), esquema[f.name].get("default")
+        if declarado != real:
+            problemas.append(f"{f.name}: esquema={declarado!r} código={real!r}")
+        lo, hi = esquema[f.name].get("minimum"), esquema[f.name].get("maximum")
+        if lo is not None and real < lo:
+            problemas.append(f"{f.name}: el default {real} es menor que el mínimo {lo}")
+        if hi is not None and real > hi:
+            problemas.append(f"{f.name}: el default {real} supera el máximo {hi}")
+
+    assert not problemas, "esquema y código desincronizados:\n  " + "\n  ".join(problemas)
+
+
+def test_una_pose_mala_no_contamina_la_velocidad():
+    """Un frame descartado por mala no puede dejar rastro en el historial.
+
+    Se midió que sí lo dejaba: la guarda de calidad impedía DECIDIR sobre ese
+    frame pero sus coordenadas basura quedaban registradas, y el frame siguiente
+    —bueno— medía 3.83 de velocidad contra ellas con la persona inmóvil y de
+    pie. El umbral de alerta es 0.70. Era una fábrica de caídas inexistentes.
+    """
+    d = FallDetector(FallConfig())
+    res = correr(d, de_pie(0, 3.0))
+    assert not any(r.is_fall for r in res)
+
+    # Pose inservible: todos los puntos por debajo del umbral de confianza, y un
+    # recuadro que la ubica arriba de todo.
+    d.update(
+        PoseFrame(
+            track_id=1, ts=3.0,
+            keypoints=make_pose(0.5, DE_PIE, 3.0, visible=False),
+            bbox=(0.4, 0.0, 0.12, 0.04), det_score=0.3,
+        )
+    )
+    r = d.update(
+        PoseFrame(track_id=1, ts=3.1, keypoints=make_pose(0.5, DE_PIE, 3.0),
+                  bbox=bbox_de(DE_PIE, 3.0), det_score=0.92)
+    )
+    assert r.velocity < FallConfig().fallVelocity, (
+        f"una pose descartada inyectó velocidad falsa: {r.velocity:.2f}"
+    )
+    assert not r.is_fall
+
+
+def test_coordenadas_imposibles_no_dejan_ciego_al_detector():
+    """Un NaN en el esqueleto no puede apagar la detección en silencio.
+
+    Sin la limpieza previa, el NaN se propagaba hasta la bajada de tronco, y como
+    toda comparación con NaN da falso, el detector dejaba de afirmar que alguien
+    estaba abajo. No fallaba: se volvía ciego. Para algo cuya razón de existir es
+    avisar, ése es el peor modo de romperse, porque desde afuera se ve igual que
+    "no pasó nada".
+    """
+    import math as _m
+
+    d = FallDetector(FallConfig())
+    correr(d, de_pie(0, 3.0))
+
+    k = make_pose(0.5, DE_PIE, 3.0)
+    k[5] = Keypoint(float("nan"), float("nan"), 0.9)
+    k[11] = Keypoint(float("inf"), 0.5, 0.9)
+    r = d.update(PoseFrame(1, 3.0, k, bbox_de(DE_PIE, 3.0), 0.9))
+
+    for nombre, v in (("velocidad", r.velocity), ("confianza", r.confidence),
+                      ("troncoBajo", r.trunk_drop), ("verticalidad", r.verticality)):
+        assert v is None or _m.isfinite(v), f"{nombre} quedó contaminado: {v}"
+
+    # Y sigue detectando: la basura no puede dejarlo inutilizado.
+    res = correr(d, transicion(3.1, 0.3, 0.5, 0.85, 3, 85) + tendido(3.4, 3.0))
+    assert any(x.is_fall for x in res), (
+        "tras recibir coordenadas imposibles, el detector dejó de funcionar"
+    )
+
+
+def test_una_configuracion_absurda_no_tumba_el_detector():
+    """Un valor imposible tiene que dar un detector conservador, no una excepción.
+
+    La configuración llega desde la base y ahí puede tener cualquier cosa. Un
+    `baselineFrames: 0` guardado a mano rompía el módulo con un IndexError, y en
+    producción eso es el pipeline de esa cámara caído.
+    """
+    for bf, bw in ((0, 0), (-5, 3), (1, 1)):
+        cfg = FallConfig(baselineFrames=bf, baselineWindowFrames=bw)
+        d = FallDetector(cfg)
+        for i in range(8):
+            d.update(
+                PoseFrame(track_id=1, ts=i * DT, keypoints=make_pose(0.5, DE_PIE, 3.0),
+                          bbox=bbox_de(DE_PIE, 3.0), det_score=0.9)
+            )
+
+
 if __name__ == "__main__":
     import sys
 

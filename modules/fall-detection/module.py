@@ -19,9 +19,11 @@ segundos en el suelo, velocidad de descenso) para que una persona la revise.
 """
 from __future__ import annotations
 
+import json
 import logging
 import sys
 import time
+from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
@@ -76,20 +78,9 @@ class FallDetectionModule(PerceptaModule):
         self._person_conf = float(ctx.config.get("personConfidence", 0.15))
         self._tracker_cfg = str(Path(__file__).parent / "bytetrack.yaml")
 
-        # La configuración de la cámara alimenta directamente al detector: cada
-        # cámara puede tener su propia sensibilidad sin tocar código.
-        cfg = FallConfig()
-        for campo in (
-            "keypointScore", "minTorsoPoints", "downAngleDeg", "downRatio",
-            "fallVelocity", "collapseRatio", "baselineFrames",
-            "impactConfirmSeconds", "impactConfirmFrames", "fallWindowSeconds", "prolongedSeconds",
-            "trunkDropRatio", "trunkDropSure", "downVerticality",
-            "minConfidence", "trackTimeoutSeconds", "minPersonHeight",
-            "baselineWindowFrames",
-        ):
-            if campo in ctx.config:
-                setattr(cfg, campo, type(getattr(cfg, campo))(ctx.config[campo]))
-        self._detector = FallDetector(cfg)
+        # La configuración de la cámara alimenta al detector: cada cámara puede
+        # tener su propia sensibilidad sin tocar código.
+        self._detector = FallDetector(self._config_validada(ctx.config))
 
         # El clasificador entrenado es opcional: si todavía no se entrenó,
         # el módulo funciona sólo con reglas.
@@ -101,6 +92,55 @@ class FallDetectionModule(PerceptaModule):
         self._model = YOLO(weights)
         self._model.to("cpu" if ctx.device.startswith("cpu") else ctx.device)
         self._loaded_at = time.time()
+
+    def _config_validada(self, config: dict) -> FallConfig:
+        """Aplica la configuración de la cámara respetando `config.schema.json`.
+
+        El esquema existía y NADIE lo hacía cumplir: describía rangos que la
+        interfaz respeta, pero la configuración llega desde la base y ahí puede
+        tener cualquier cosa. Un `baselineFrames: 0` guardado a mano tumbaba el
+        módulo con un IndexError, y un umbral fuera de rango habría degradado la
+        detección en silencio.
+
+        Los valores fuera de rango se ACOTAN en vez de rechazarse: un pipeline
+        que no arranca por un número mal puesto es peor que uno que arranca con
+        el valor más cercano permitido y lo dice en el log. Los que no son
+        números, o los nombres que el esquema no conoce, se ignoran avisando —
+        casi siempre son ajustes de otra capa (`eventType`, `cooldownSeconds`)
+        que el detector no debe interpretar.
+        """
+        esquema = {}
+        ruta = Path(__file__).parent / "config.schema.json"
+        try:
+            esquema = json.loads(ruta.read_text(encoding="utf-8")).get("properties", {})
+        except Exception:  # noqa: BLE001
+            log.warning("no se pudo leer %s: la configuración se aplica sin validar", ruta.name)
+
+        cfg = FallConfig()
+        propios = {f.name for f in fields(FallConfig)}
+
+        for clave, valor in (config or {}).items():
+            if clave not in propios:
+                continue  # ajuste de otra capa; no es un error
+            regla = esquema.get(clave, {})
+            tipo = type(getattr(cfg, clave))
+            try:
+                v = tipo(valor)
+            except (TypeError, ValueError):
+                log.warning("config: %s=%r no es un %s; se usa %r", clave, valor, tipo.__name__, getattr(cfg, clave))
+                continue
+
+            lo, hi = regla.get("minimum"), regla.get("maximum")
+            acotado = v
+            if lo is not None and acotado < lo:
+                acotado = tipo(lo)
+            if hi is not None and acotado > hi:
+                acotado = tipo(hi)
+            if acotado != v:
+                log.warning("config: %s=%r fuera del rango permitido; se acota a %r", clave, v, acotado)
+            setattr(cfg, clave, acotado)
+
+        return cfg
 
     def warmup(self) -> None:
         if self._model is None:
@@ -254,9 +294,30 @@ class FallDetectionModule(PerceptaModule):
         # Olvidar de vez en cuando a quien ya no se ve.
         if ts - self._last_purge > 5.0:
             self._detector.purge(ts)
+            self._olvidar_tracks_idos()
             self._last_purge = ts
 
         return InferenceResult(detections=detections, inference_ms=elapsed_ms)
+
+    def _olvidar_tracks_idos(self) -> None:
+        """Suelta lo acumulado de las personas que el detector ya olvidó.
+
+        Se purgaba el detector y NO estos cuatro diccionarios, que también están
+        indexados por persona seguida. El tracker asigna un id nuevo cada vez que
+        pierde y recupera a alguien —en una sesión de pruebas se llegó al id 259
+        con dos personas en la sala—, así que la cuenta sólo sube. La ventana de
+        features de cada persona son 60 vectores de 56 flotantes: unos 27 KB por
+        id que nunca se libera, para siempre.
+
+        Se toma como verdad el conjunto de tracks del detector: es el que ya
+        aplica el tiempo de olvido configurado.
+        """
+        if self._detector is None:
+            return
+        vivos = set(self._detector.tracks)
+        for d in (self._ventanas, self._ultimo_hip, self._ultimo_ts, self._ultimo):
+            for tid in [t for t in d if t not in vivos]:
+                del d[tid]
 
     def health(self) -> dict[str, Any]:
         # Se expone el estado por persona: permite ver en vivo cómo evoluciona

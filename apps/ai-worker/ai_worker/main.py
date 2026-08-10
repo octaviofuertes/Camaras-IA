@@ -38,6 +38,7 @@ PIPELINE_FPS = float(os.environ.get("PIPELINE_FPS", "3"))
 SYNC_SECONDS = float(os.environ.get("ASSIGNMENT_SYNC_SECONDS", "15"))
 
 _discovery = discover(MODULES_PATH)
+# Clave: '<camara>:<modulo>'. Una instancia por cámara, no una por módulo.
 _instances: dict[str, PerceptaModule] = {}
 _pipelines: list[CameraPipeline] = []
 
@@ -120,42 +121,66 @@ def _load_assignments() -> list[CameraAssignment]:
 
 
 def _arrancar_pipelines() -> None:
-    """(Re)construye los pipelines según las asignaciones vigentes."""
-    assignments = _load_assignments()
-    needed = {m["moduleKey"] for a in assignments for m in a.modules}
+    """(Re)construye los pipelines según las asignaciones vigentes.
 
-    for disc in _discovery.loaded:
-        if disc.module_key not in needed:
-            continue
-        cfg: dict = {}
-        for a in assignments:
-            for m in a.modules:
-                if m["moduleKey"] == disc.module_key:
-                    cfg = m.get("config", {})
-                    break
-        inst = disc.module_class()
-        ctx = ModuleContext(
-            ai_module_id=disc.manifest.get("moduleKey", disc.module_key),
-            module_key=disc.module_key,
-            module_version=disc.version,
-            device=DEVICE,
-            config=cfg,
-            zones={},
-        )
-        try:
-            inst.load(ctx)
-            inst.warmup()
-            _instances[disc.module_key] = inst
-            log.info("módulo listo: %s v%s", disc.module_key, disc.version)
-        except Exception:
-            log.exception("no se pudo cargar el módulo %s", disc.module_key)
+    Cada cámara recibe su PROPIA instancia de cada módulo. Antes había una sola
+    instancia por módulo compartida entre todas las cámaras, y eso rompía tres
+    cosas a la vez:
+
+      1. El estado por persona se mezclaba. Los módulos con memoria temporal
+         —la detección de caídas aprende la altura de pie de cada persona— usan
+         el id de seguimiento como clave, y ese id lo numera el tracker desde 1
+         en CADA cámara. La persona 1 de la cámara A y la persona 1 de la B eran
+         la misma entrada. Medido: la referencia de altura saltaba de 0.250 a
+         0.600 al intercalarse los frames de la otra cámara, y la persona de la
+         primera pasaba a leerse al 42 % de su altura sin haberse movido.
+      2. El seguimiento se corrompía. YOLO con `persist=True` mantiene UN tracker
+         por modelo; alimentarlo alternando dos cámaras equivale a decirle que
+         son un solo video donde la escena cambia por completo cada frame.
+      3. No había seguridad entre hilos. Cada cámara corre en su propio hilo y
+         todas llamaban a `infer()` sobre el mismo objeto, sin ningún candado.
+
+    El costo es un modelo de pose por cámara. Es el precio correcto: compartirlo
+    no ahorraba nada que valiera perder la identidad de las personas.
+    """
+    assignments = _load_assignments()
 
     for a in assignments:
-        if not any(m["moduleKey"] in _instances for m in a.modules):
+        instancias: dict[str, PerceptaModule] = {}
+
+        for m in a.modules:
+            disc = next((d for d in _discovery.loaded if d.module_key == m["moduleKey"]), None)
+            if disc is None:
+                log.warning("[%s] el módulo %s no está disponible", a.camera_id, m["moduleKey"])
+                continue
+
+            # La configuración es la de ESTA cámara. Antes se tomaba la de la
+            # primera que usara el módulo, así que los ajustes por cámara
+            # —la razón de ser de la tabla de asignaciones— se ignoraban.
+            ctx = ModuleContext(
+                ai_module_id=disc.manifest.get("moduleKey", disc.module_key),
+                module_key=disc.module_key,
+                module_version=disc.version,
+                device=DEVICE,
+                config=m.get("config", {}),
+                zones={},
+            )
+            inst = disc.module_class()
+            try:
+                inst.load(ctx)
+                inst.warmup()
+                instancias[disc.module_key] = inst
+                _instances[f"{a.camera_id}:{disc.module_key}"] = inst
+                log.info("[%s] módulo listo: %s v%s", a.camera_id, disc.module_key, disc.version)
+            except Exception:
+                log.exception("[%s] no se pudo cargar %s", a.camera_id, disc.module_key)
+
+        if not instancias:
             log.warning("[%s] ningún módulo asignado está disponible", a.camera_id)
             continue
+
         p = CameraPipeline(
-            a, _instances, media_url=MEDIA_URL, event_url=EVENT_URL,
+            a, instancias, media_url=MEDIA_URL, event_url=EVENT_URL,
             token=SERVICE_TOKEN, fps=PIPELINE_FPS,
         )
         p.start()
@@ -188,6 +213,15 @@ def _vigilar_asignaciones() -> None:
             for p in _pipelines:
                 p.stop()
             _pipelines.clear()
+            # Soltar las instancias viejas antes de crear las nuevas: cada una
+            # tiene su propio modelo de pose cargado, y no liberarlas dejaba uno
+            # colgado en memoria por cada cambio de asignación.
+            for inst in _instances.values():
+                try:
+                    inst.release()
+                except Exception:  # noqa: BLE001
+                    log.exception("fallo al liberar un módulo")
+            _instances.clear()
             _arrancar_pipelines()
         except Exception:
             log.exception("fallo al sincronizar asignaciones")
@@ -217,7 +251,13 @@ def health() -> dict:
         "service": "ai-worker",
         "device": DEVICE,
         "modules": [
-            {"moduleKey": m.module_key, "version": m.version, "loaded": m.module_key in _instances}
+            {
+                "moduleKey": m.module_key,
+                "version": m.version,
+                # Cuántas cámaras lo tienen cargado, que ahora puede ser más de una.
+                "instancias": sum(1 for k in _instances if k.endswith(f":{m.module_key}")),
+                "loaded": any(k.endswith(f":{m.module_key}") for k in _instances),
+            }
             for m in _discovery.loaded
         ],
         "failedModules": [{"name": f.name, "reason": f.reason} for f in _discovery.failed],
@@ -232,15 +272,39 @@ def detections() -> dict:
 
 
 @app.get("/modules/{module_key}/state")
-def module_state(module_key: str) -> dict:
-    """Estado interno de un módulo. Sirve para ver en vivo cómo razona."""
-    inst = _instances.get(module_key)
-    if inst is None:
-        return {"error": f"módulo {module_key} no cargado"}
-    try:
-        return inst.health()
-    except Exception as exc:  # noqa: BLE001
-        return {"error": repr(exc)}
+def module_state(module_key: str, camera: str | None = None) -> dict:
+    """Estado interno de un módulo. Sirve para ver en vivo cómo razona.
+
+    Con varias cámaras hay una instancia por cada una, así que el estado se
+    devuelve por cámara. Sin el parámetro `camera` se devuelve el de todas: era
+    engañoso mostrar una sola y presentarla como "el módulo".
+    """
+    coincidencias = {
+        k.split(":", 1)[0]: v for k, v in _instances.items() if k.endswith(f":{module_key}")
+    }
+    if not coincidencias:
+        return {"error": f"módulo {module_key} no cargado en ninguna cámara"}
+
+    if camera is not None:
+        inst = coincidencias.get(camera)
+        if inst is None:
+            return {"error": f"la cámara {camera} no tiene cargado {module_key}"}
+        try:
+            return inst.health()
+        except Exception as exc:  # noqa: BLE001
+            return {"error": repr(exc)}
+
+    salida: dict = {"camaras": {}}
+    for cam, inst in coincidencias.items():
+        try:
+            salida["camaras"][cam] = inst.health()
+        except Exception as exc:  # noqa: BLE001
+            salida["camaras"][cam] = {"error": repr(exc)}
+    # Se conserva la forma anterior cuando hay una sola cámara, para no romper
+    # las herramientas que ya la consumen.
+    if len(coincidencias) == 1:
+        salida.update(next(iter(salida["camaras"].values())))
+    return salida
 
 
 if __name__ == "__main__":
