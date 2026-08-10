@@ -159,18 +159,32 @@ END $$;
 GRANT SELECT ON activity_hourly TO percepta_app;
 
 -- ── Catálogo ───────────────────────────────────────────────────────────────
-INSERT INTO ai_modules (id, module_key, name, description, version, category, enabled)
+-- Sin esta fila el módulo existe en disco pero no aparece en el dashboard: el
+-- catálogo de la pantalla de Cámaras se sirve desde esta tabla, no desde los
+-- archivos. `status='available'` es lo que lo hace visible — los `pending` se
+-- ocultan, que es por lo que helmet-detection no se ve.
+INSERT INTO ai_modules (id, organization_id, module_key, name, description, category, version,
+                        plugin_api_version, manifest, config_schema, config_schema_version, status)
 VALUES (
     '00000000-0000-4000-c000-0000000ac701',
+    NULL,
     'workstation-activity',
     'Actividad por puesto',
-    'Mide cuánto tiempo cada puesto está ocupado, vacío y con uso de teléfono. Alimenta Informes; no genera alertas ni identifica personas.',
+    'Mide cuánto tiempo cada puesto está ocupado, vacío y con uso de teléfono. Alimenta Informes; no genera alertas. La contabilidad es por región: no almacena identificador de persona.',
+    'productivity',
     '1.0.0',
-    'operations',
-    true
+    '1.0.0',
+    '{"schemaVersion":"1.0.0","moduleKey":"workstation-activity","version":"1.0.0","category":"productivity","model":{"backend":"yolo","artifactRef":"yolov8n.pt","classes":["person","cell phone"]},"input":{"requiresZones":false,"minFps":1,"maxFps":10,"colorSpace":"bgr"},"eventTypes":[{"type":"workstation.activity","defaultSeverity":"low","eventClass":"telemetry"}],"resources":{"gpu":false,"vramMb":0,"targetFps":3}}',
+    '{"type":"object","properties":{"windowSeconds":{"type":"number","default":60},"personConfidence":{"type":"number","default":0.45},"phoneConfidence":{"type":"number","default":0.3},"maxGapSeconds":{"type":"number","default":5}}}',
+    '1.0.0',
+    'available'
 )
-ON CONFLICT (module_key) DO UPDATE
+ON CONFLICT (id) DO UPDATE
     SET name = EXCLUDED.name,
         description = EXCLUDED.description,
         version = EXCLUDED.version,
-        category = EXCLUDED.category;
+        category = EXCLUDED.category,
+        manifest = EXCLUDED.manifest,
+        config_schema = EXCLUDED.config_schema,
+        status = EXCLUDED.status;
+
