@@ -114,9 +114,32 @@ class VentanaZona:
     vacio_s: float = 0.0
     sin_cobertura_s: float = 0.0
     max_personas: int = 0
+    # Cuenta de la observación anterior. El pico sólo se acepta si se repite en
+    # dos frames seguidos: ver `_actualizar_pico`.
+    _ultima_cuenta: int = 0
     # Suma de personas × segundos: dividida por el tiempo observado da la
     # ocupación media, que es más representativa que el pico.
     persona_segundos: float = 0.0
+
+    def _actualizar_pico(self, cuenta: int) -> None:
+        """Registra el pico de personas, exigiendo que se sostenga dos frames.
+
+        El detector produce recuadros parciales de la misma persona —medio
+        cuerpo, un reflejo— que a veces cruzan el umbral de confianza por un
+        instante. Tomando el máximo instantáneo, ese parpadeo queda en el
+        informe como si hubiera habido más gente: con tres personas frente a la
+        cámara se registró un pico de cinco.
+
+        Pedir que la cuenta se repita en dos observaciones seguidas descarta el
+        parpadeo sin perder una entrada real, que dura bastante más que dos
+        frames. El tiempo ocupado y la ocupación media no dependían de esto —el
+        primero sólo necesita que haya alguien, la segunda promedia— pero el
+        pico se lee como un dato duro y tiene que serlo.
+        """
+        sostenida = min(cuenta, self._ultima_cuenta)
+        if sostenida > self.max_personas:
+            self.max_personas = sostenida
+        self._ultima_cuenta = cuenta
 
     @property
     def observado_s(self) -> float:
@@ -126,6 +149,7 @@ class VentanaZona:
         self.ocupado_s = self.telefono_s = self.vacio_s = 0.0
         self.sin_cobertura_s = 0.0
         self.max_personas = 0
+        self._ultima_cuenta = 0
         self.persona_segundos = 0.0
 
 
@@ -200,10 +224,10 @@ class ContadorActividad:
                 continue
 
             dentro = [p for p in personas_validas if zona.contiene(p.pies)]
+            v._actualizar_pico(len(dentro))
             if dentro:
                 v.ocupado_s += dt
                 v.persona_segundos += len(dentro) * dt
-                v.max_personas = max(v.max_personas, len(dentro))
                 if any(_telefono_en_uso(p, telefonos_validos, cfg) for p in dentro):
                     v.telefono_s += dt
             else:

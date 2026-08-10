@@ -200,6 +200,47 @@ def test_la_ocupacion_media_refleja_cuanta_gente_hubo():
     assert muestras[0].max_personas == 3
 
 
+def test_un_parpadeo_no_infla_el_pico_de_personas():
+    """Un recuadro espurio de un solo frame no puede sumar una persona.
+
+    Medido en cámara real: con TRES personas frente al objetivo, el detector
+    produce además recuadros parciales de esas mismas personas —medio cuerpo, un
+    reflejo— que a veces cruzan el umbral de confianza por un instante. El pico
+    instantáneo registró CINCO. En un informe eso se lee como un dato duro, así
+    que el pico exige que la cuenta se sostenga en dos observaciones seguidas.
+    """
+    c = ContadorActividad([], ConfigActividad(windowSeconds=10.0))
+    tres = [persona(x=0.1), persona(x=0.4), persona(x=0.7)]
+    espurias = tres + [persona(x=0.42), persona(x=0.72)]  # duplicados de dos de ellas
+
+    pasos = []
+    for i in range(51):
+        # Un único frame con los duplicados por encima del umbral.
+        pasos.append((espurias if i == 20 else tres, []))
+    muestras = correr(c, pasos)
+
+    assert muestras[0].max_personas == 3, (
+        f"el parpadeo infló el pico: reportó {muestras[0].max_personas} con 3 personas"
+    )
+
+
+def test_un_ingreso_real_si_sube_el_pico():
+    """La contracara: si entra alguien de verdad, el pico tiene que subir.
+
+    Sin esta prueba, la corrección anterior podría haberse implementado
+    ignorando los aumentos y nadie se enteraría.
+    """
+    c = ContadorActividad([], ConfigActividad(windowSeconds=10.0))
+    dos = [persona(x=0.2), persona(x=0.5)]
+    tres = dos + [persona(x=0.8)]
+
+    pasos = [(dos, []) for _ in range(20)] + [(tres, []) for _ in range(31)]
+    muestras = correr(c, pasos)
+    assert muestras[0].max_personas == 3, (
+        f"una tercera persona que se queda debe subir el pico; dio {muestras[0].max_personas}"
+    )
+
+
 def test_cerrar_pendiente_no_pierde_el_ultimo_tramo():
     """Al soltar la cámara, lo observado desde la última ventana tiene que salir."""
     c = ContadorActividad([], ConfigActividad(windowSeconds=3600.0))
