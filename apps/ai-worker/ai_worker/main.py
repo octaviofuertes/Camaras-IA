@@ -39,6 +39,72 @@ PIPELINE_FPS = float(os.environ.get("PIPELINE_FPS", "3"))
 SYNC_SECONDS = float(os.environ.get("ASSIGNMENT_SYNC_SECONDS", "15"))
 
 _discovery = discover(MODULES_PATH)
+
+
+def _descubierto(module_key: str):
+    return next((d for d in _discovery.loaded if d.module_key == module_key), None)
+
+
+def _tipo_declarado(module_key: str, campo: str, si_falta: str) -> str:
+    """Lo que el manifiesto dice del primer tipo de evento del módulo."""
+    d = _descubierto(module_key)
+    tipos = (d.manifest.get("eventTypes") if d else None) or []
+    return str(tipos[0].get(campo) or si_falta) if tipos else si_falta
+
+
+_defaults_cache: dict[str, dict] = {}
+
+
+def preparar_modulo(a: dict) -> dict:
+    """Convierte una asignación de la base en la configuración que corre.
+
+    Tres capas, de menor a mayor prioridad: lo que declara el manifiesto, lo que
+    declara el config.schema.json del módulo, y lo que guardó esta cámara.
+
+    Antes no había capas: se usaba la config de la base tal cual y, para lo que
+    faltara, un valor adivinado a partir del NOMBRE del módulo —de
+    'person-identification' salía el evento 'person.detected', que ese módulo no
+    emite—. Una asignación con config vacía quedaba corriendo con reglas que no
+    eran de nadie, y la alerta se descartaba sin dejar rastro.
+    """
+    clave = a["moduleKey"]
+    cfg = {**_defaults_del_modulo(clave), **(a.get("config") or {})}
+    return {
+        "moduleKey": clave,
+        "aiModuleId": a["aiModuleId"],
+        "moduleVersion": a.get("moduleVersion", "1.0.0"),
+        "eventType": cfg.get("eventType") or _tipo_declarado(clave, "type", f"{clave}.detected"),
+        "severity": cfg.get("severity") or _tipo_declarado(clave, "defaultSeverity", "medium"),
+        "config": cfg,
+    }
+
+
+def _defaults_del_modulo(module_key: str) -> dict:
+    """Valores por defecto declarados en el config.schema.json del módulo.
+
+    Son los mismos que el formulario del dashboard escribe al asignar. Leerlos
+    acá hace que el pipeline se comporte igual con una asignación hecha desde la
+    UI que con una insertada a mano, en vez de depender de que alguien haya
+    pasado por la pantalla correcta.
+    """
+    if module_key in _defaults_cache:
+        return _defaults_cache[module_key]
+
+    valores: dict = {}
+    d = _descubierto(module_key)
+    if d is not None:
+        ref = str(d.manifest.get("configSchemaRef") or "./config.schema.json")
+        ruta = (d.path / ref).resolve()
+        try:
+            esquema = json.loads(ruta.read_text(encoding="utf-8"))
+            for nombre, prop in (esquema.get("properties") or {}).items():
+                if isinstance(prop, dict) and "default" in prop:
+                    valores[nombre] = prop["default"]
+        except (OSError, json.JSONDecodeError) as exc:
+            log.warning("no se pudieron leer los defaults de %s: %s", module_key, exc)
+
+    _defaults_cache[module_key] = valores
+    return valores
 # Clave: '<camara>:<modulo>'. Una instancia por cámara, no una por módulo.
 _instances: dict[str, PerceptaModule] = {}
 _pipelines: list[CameraPipeline] = []
@@ -67,19 +133,7 @@ def _assignments_from_api() -> list[CameraAssignment] | None:
     for a in assigns.json().get("items", []):
         if not a.get("enabled", True):
             continue
-        cfg = a.get("config") or {}
-        by_camera.setdefault(a["cameraId"], []).append(
-            {
-                "moduleKey": a["moduleKey"],
-                "aiModuleId": a["aiModuleId"],
-                "moduleVersion": a.get("moduleVersion", "1.0.0"),
-                # Tipo y severidad del evento: configurables por cámara, con
-                # un valor por defecto derivado del módulo.
-                "eventType": cfg.get("eventType", f"{a['moduleKey'].split('-')[0]}.detected"),
-                "severity": cfg.get("severity", "medium"),
-                "config": cfg,
-            }
-        )
+        by_camera.setdefault(a["cameraId"], []).append(preparar_modulo(a))
 
     out: list[CameraAssignment] = []
     for c in cams.json().get("items", []):

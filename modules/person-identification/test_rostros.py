@@ -40,6 +40,22 @@ def rostro(v: list[float], x=0.4, y=0.1, w=0.12, h=0.16) -> Rostro:
     return Rostro(vector=v, x=x, y=y, w=w, h=h)
 
 
+def a_parecido(v: list[float], objetivo: float, semilla: int = 999) -> list[float]:
+    """Otro vector cuyo coseno contra `v` es exactamente `objetivo`.
+
+    Se mezcla el original con una dirección perpendicular. Es preferible a
+    agregarle ruido a ojo: el parecido es el dato del que depende la prueba y
+    tiene que quedar fijado, no estimado.
+    """
+    otro = vector(semilla)
+    proy = sum(a * b for a, b in zip(otro, v))
+    perp = [o - proy * a for o, a in zip(otro, v)]
+    n = math.sqrt(sum(x * x for x in perp)) or 1.0
+    perp = [x / n for x in perp]
+    k = math.sqrt(max(1.0 - objetivo ** 2, 0.0))
+    return [objetivo * a + k * b for a, b in zip(v, perp)]
+
+
 def con_empleados(*personas: Persona, cfg: ConfigRostros | None = None) -> Identificador:
     ident = Identificador(cfg or ConfigRostros())
     ident.galeria.actualizar(list(personas))
@@ -211,6 +227,101 @@ def test_la_memoria_de_desconocidos_esta_acotada():
     assert ident.desconocidos.recordados <= 20, (
         f"la memoria creció a {ident.desconocidos.recordados}"
     )
+
+
+# ── que la cola de revisión siga siendo usable ─────────────────────
+
+def test_no_se_repregunta_por_la_misma_persona_de_otro_angulo():
+    """El fallo real: 29 preguntas por 3 personas en dos minutos.
+
+    Entre dos vistas de la misma cara con distinto giro, el parecido cae —medido
+    en cámara, hasta +0.30—. Al compararlo contra el umbral de IDENTIDAD (0.42)
+    cada vista parecía una persona nueva y volvía a preguntar.
+    """
+    ident = con_empleados()
+    v1 = vector(7)
+    assert ident.identificar([rostro(v1)], ahora=1000.0)[0].preguntar
+
+    # Misma persona, otro ángulo: parecido por encima del umbral de repregunta
+    # pero por debajo del de identidad. 0.30 es el mínimo medido en cámara
+    # entre dos vistas de la misma cara.
+    v2 = a_parecido(v1, 0.30)
+    parecido = coseno(v1, v2)
+    assert 0.25 <= parecido < 0.42, f"el caso de prueba no reproduce el escenario ({parecido:.3f})"
+
+    r = ident.identificar([rostro(v2)], ahora=1010.0)[0]
+    assert not r.preguntar, f"se repreguntó por la misma persona (parecido {parecido:.3f})"
+
+
+def test_a_una_persona_distinta_si_se_le_pregunta():
+    """El umbral bajo no puede tragarse a alguien nuevo."""
+    ident = con_empleados()
+    ident.identificar([rostro(vector(11))], ahora=1000.0)
+    r = ident.identificar([rostro(vector(12))], ahora=1001.0)[0]
+    assert r.preguntar, "otra persona tiene que generar su propia pregunta"
+
+
+def test_no_se_pregunta_por_una_nuca():
+    """Un recorte de perfil es una pregunta que el operador no puede contestar."""
+    ident = con_empleados()
+    r = ident.identificar(
+        [Rostro(vector=vector(21), x=.4, y=.1, w=.12, h=.16, calidad=.9, yaw=75.0)],
+        ahora=1000.0,
+    )[0]
+    assert not r.preguntar and "perfil" in r.motivo, r.motivo
+
+
+def test_no_se_pregunta_por_una_coronilla():
+    """De frente a la cámara pero mirando el escritorio: se ve la cabeza, no la cara."""
+    ident = con_empleados()
+    r = ident.identificar(
+        [Rostro(vector=vector(23), x=.4, y=.1, w=.12, h=.16, calidad=.9, yaw=3.0, pitch=-55.0)],
+        ahora=1000.0,
+    )[0]
+    assert not r.preguntar and "piso" in r.motivo, r.motivo
+
+
+def test_una_cara_de_frente_si_pregunta():
+    """El contrapeso de los dos anteriores: el filtro no puede bloquear todo."""
+    ident = con_empleados()
+    r = ident.identificar(
+        [Rostro(vector=vector(24), x=.4, y=.1, w=.12, h=.16, calidad=.8, yaw=-12.0, pitch=-9.0)],
+        ahora=1000.0,
+    )[0]
+    assert r.preguntar, r.motivo
+
+
+def test_no_se_pregunta_por_una_cara_borrosa():
+    """Y además sería una mala primera plantilla para esa persona."""
+    ident = con_empleados()
+    r = ident.identificar(
+        [Rostro(vector=vector(22), x=.4, y=.1, w=.12, h=.16, calidad=.4)], ahora=1000.0,
+    )[0]
+    assert not r.preguntar, r.motivo
+
+
+def test_una_cara_que_no_sirve_para_preguntar_igual_identifica():
+    """Reconocer a alguien ya dado de alta tolera mucho más que darlo de alta."""
+    juan = Persona("p1", "Juan", [vector(31)])
+    ident = con_empleados(juan)
+    r = ident.identificar(
+        [Rostro(vector=vector(31, ruido=0.3), x=.4, y=.1, w=.06, h=.06,
+                calidad=.5, yaw=70.0)],
+        ahora=1000.0,
+    )[0]
+    assert r.persona_id == "p1", f"no se lo identificó: {r.motivo}"
+
+
+def test_una_cara_descartada_no_se_recuerda_como_preguntada():
+    """Si no se preguntó, no puede bloquear la pregunta de cuando sí se pueda."""
+    ident = con_empleados()
+    perfil = Rostro(vector=vector(41), x=.4, y=.1, w=.12, h=.16, calidad=.9, yaw=75.0)
+    ident.identificar([perfil], ahora=1000.0)
+    assert ident.desconocidos.recordados == 0
+
+    # La misma persona, ahora de frente: acá sí hay que preguntar.
+    r = ident.identificar([rostro(vector(41))], ahora=1005.0)[0]
+    assert r.preguntar, "al darse vuelta tiene que poder preguntarse"
 
 
 if __name__ == "__main__":

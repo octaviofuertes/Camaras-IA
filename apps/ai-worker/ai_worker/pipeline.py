@@ -93,19 +93,32 @@ class CameraPipeline(threading.Thread):
             return None
 
     # ── reglas ───────────────────────────────────────────────────────
-    def _evaluate(self, cfg: dict, dets: list, st: _ModuleState, now: float) -> tuple[bool, list]:
+    def _evaluate(self, mod_cfg: dict, dets: list, st: _ModuleState, now: float) -> tuple[bool, list]:
         """Aplica la configuración de la cámara. Devuelve (dispara, detecciones).
 
         Estas son las reglas que NO viven en el módulo: el módulo entrega
         confianza cruda y acá se decide si eso amerita molestar a un operador.
         """
+        cfg = mod_cfg.get("config", {})
+        clave = mod_cfg.get("moduleKey", "?")
         min_conf = float(cfg.get("minConfidence", 0.45))
         min_persist = int(cfg.get("minPersistenceFrames", 3))
         cooldown = float(cfg.get("cooldownSeconds", 60))
         min_persons = int(cfg.get("minPersons", 1))
-        wanted = set(cfg.get("classes") or ["person"])
+        # `classes` es la lista blanca de qué detecciones ameritan una alerta.
+        # Estaba por defecto en ["person"], un valor inventado que no sale de
+        # ningún módulo: cualquier módulo cuya alerta se llame distinto —la
+        # pregunta "¿reconocés a esta persona?" se llama 'person.unknown'— era
+        # descartada acá, sin evento y sin una sola línea de log. Si el módulo no
+        # declara la lista, no se filtra por clase: el módulo es el que sabe qué
+        # emite, y adivinar por él es lo que rompió esto.
+        declaradas = cfg.get("classes")
+        wanted = set(declaradas) if declaradas else None
 
-        strong = [d for d in dets if d.confidence >= min_conf and d.class_label in wanted]
+        strong = [
+            d for d in dets
+            if d.confidence >= min_conf and (wanted is None or d.class_label in wanted)
+        ]
 
         # Un módulo que ya confirmó la caída y queda afuera por confianza es un
         # descarte que hay que poder ver: si no, el operador sólo observa que la
@@ -113,15 +126,25 @@ class CameraPipeline(threading.Thread):
         # regla la filtró. No se anula su umbral —esa decisión es suya— pero se
         # deja registro.
         for d in dets:
-            if (
-                d.class_label in wanted
-                and d.confidence < min_conf
-                and d.attributes.get("confirmed") == "true"
-            ):
+            if d.attributes.get("confirmed") != "true":
+                continue
+            if wanted is not None and d.class_label not in wanted:
+                # El caso que dejó la pregunta por un desconocido sin llegar
+                # nunca a Eventos. Un módulo que confirmó algo y queda afuera
+                # por la lista blanca es un error de configuración, no una
+                # decisión: se dice con el nombre de la clase, que es el dato
+                # que hace falta para arreglarlo.
+                log.error(
+                    "[%s] %s confirmó '%s' pero `classes` sólo acepta %s: la alerta se descarta",
+                    self.a.camera_id, clave, d.class_label, sorted(wanted),
+                )
+                continue
+            if d.confidence < min_conf:
                 log.warning(
-                    "[%s] caída confirmada por el módulo DESCARTADA por minConfidence: "
-                    "confianza %.2f < %.2f (%s)",
-                    self.a.camera_id, d.confidence, min_conf, d.attributes.get("reason", ""),
+                    "[%s] detección confirmada por el módulo DESCARTADA por minConfidence: "
+                    "'%s' con confianza %.2f < %.2f (%s)",
+                    self.a.camera_id, d.class_label, d.confidence, min_conf,
+                    d.attributes.get("reason", ""),
                 )
 
         if len(strong) >= min_persons:
@@ -302,6 +325,7 @@ class CameraPipeline(threading.Thread):
             )
             if r.status_code in (200, 201):
                 self.metrics_sent += 1
+                self.last_error = None
                 return
             self.last_error = f"analytics-service {r.status_code}: {r.text[:120]}"
             log.warning("[%s] muestra rechazada: %s", self.a.camera_id, self.last_error)
@@ -337,6 +361,7 @@ class CameraPipeline(threading.Thread):
             )
             if r.status_code in (200, 201):
                 self.metrics_sent += 1
+                self.last_error = None
                 return
             self.last_error = f"analytics-service {r.status_code}: {r.text[:120]}"
             log.warning("[%s] muestra por persona rechazada: %s", self.a.camera_id, self.last_error)
@@ -412,7 +437,7 @@ class CameraPipeline(threading.Thread):
                     else:
                         self._emitir_medicion(mod_cfg, m)
 
-                fire, strong = self._evaluate(mod_cfg.get("config", {}), alertas, st, t0)
+                fire, strong = self._evaluate(mod_cfg, alertas, st, t0)
                 snapshot.extend(
                     {
                         "moduleKey": key,
@@ -435,9 +460,31 @@ class CameraPipeline(threading.Thread):
         log.info("[%s] pipeline detenido", self.a.camera_id)
 
     def stats(self) -> dict:
+        salud: dict[str, dict] = {}
+        for clave, inst in self.instances.items():
+            try:
+                salud[clave] = inst.health()
+            except Exception as exc:  # noqa: BLE001
+                salud[clave] = {"ok": False, "error": repr(exc)}
+
         return {
             "cameraId": self.a.camera_id,
             "modules": [m["moduleKey"] for m in self.a.modules],
+            # Lo que el módulo dice de sí mismo: cuántas caras vio, cuántas
+            # preguntas emitió, a cuántos empleados tiene cargados. Es la
+            # diferencia entre "la alerta no llega" y "no hay nada que alertar".
+            "moduleHealth": salud,
+            # Qué reglas se le están aplicando. Un `classes` que no incluye lo
+            # que el módulo emite hace desaparecer la alerta, y era invisible.
+            "rules": {
+                m["moduleKey"]: {
+                    "eventType": m.get("eventType"),
+                    "severity": m.get("severity"),
+                    "classes": (m.get("config") or {}).get("classes"),
+                    "minConfidence": (m.get("config") or {}).get("minConfidence", 0.45),
+                }
+                for m in self.a.modules
+            },
             "framesProcessed": self.frames_processed,
             "eventsCreated": self.events_created,
             "metricsSent": self.metrics_sent,

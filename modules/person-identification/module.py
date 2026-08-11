@@ -76,6 +76,15 @@ class PersonIdentificationModule(PerceptaModule):
         self._loaded_at = 0.0
         self._identificados = 0
         self._preguntas = 0
+        # Para poder distinguir "la alerta no llega" de "la cámara no le ve la
+        # cara a nadie", que desde afuera se parecen y se arreglan distinto.
+        self._rostros_vistos = 0
+        self._ultima_cara_alto = 0.0
+        # Cuerpos por los que ya se preguntó: track_id -> cuándo. Vence con el
+        # mismo plazo que la memoria de caras, para que no crezca sin límite y
+        # para que un identificador de seguimiento reutilizado más tarde no
+        # silencie una pregunta legítima.
+        self._preguntados: dict[int, float] = {}
         self._ultima_galeria = 0.0
         self._parar = threading.Event()
 
@@ -235,14 +244,22 @@ class PersonIdentificationModule(PerceptaModule):
         for c in self._app.get(frame.image):
             x1, y1, x2, y2 = (float(v) for v in c.bbox)
             emb = np.asarray(c.normed_embedding, dtype=np.float32)
+            # pose = (pitch, yaw, roll). El yaw es lo que decide si la cara se
+            # ve o si se está viendo un perfil.
+            pose = getattr(c, "pose", None)
             rostros.append(
                 Rostro(
                     vector=emb.tolist(),
                     x=max(x1 / w, 0.0), y=max(y1 / h, 0.0),
                     w=(x2 - x1) / w, h=(y2 - y1) / h,
                     calidad=float(getattr(c, "det_score", 1.0)),
+                    yaw=float(pose[1]) if pose is not None and len(pose) > 1 else 0.0,
+                    pitch=float(pose[0]) if pose is not None and len(pose) > 0 else 0.0,
                 )
             )
+        self._rostros_vistos += len(rostros)
+        if rostros:
+            self._ultima_cara_alto = max(r.h for r in rostros)
         identificaciones = self._ident.identificar(rostros, ahora=frame.captured_at)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -272,6 +289,21 @@ class PersonIdentificationModule(PerceptaModule):
                 continue
 
             if res.preguntar:
+                # Si ya se preguntó por el cuerpo que lleva esta cara, no se
+                # vuelve a preguntar aunque el vector no lo reconozca. Es el
+                # único criterio que no se rompe cuando la persona gira la
+                # cabeza, y girar la cabeza es lo que la gente hace todo el día.
+                tid_cara = cuerpos[idx][0] if idx is not None else None
+                if tid_cara is not None:
+                    vence = self._ident.cfg.askCooldownMinutes * 60.0
+                    ahora = frame.captured_at
+                    self._preguntados = {
+                        k: v for k, v in self._preguntados.items() if ahora - v <= vence
+                    }
+                    if tid_cara in self._preguntados:
+                        self._preguntados[tid_cara] = ahora
+                        continue
+                    self._preguntados[tid_cara] = ahora
                 self._preguntas += 1
                 detecciones.append(
                     Detection(
@@ -387,7 +419,15 @@ class PersonIdentificationModule(PerceptaModule):
             "empleadosDadosDeAlta": len(self._ident.galeria.personas) if self._ident else 0,
             "identificaciones": self._identificados,
             "preguntasEmitidas": self._preguntas,
+            "rostrosDetectados": self._rostros_vistos,
+            "rostrosDescartadosPorTamano": self._ident.descartados_por_tamano if self._ident else 0,
+            # Alto de la última cara vista, como fracción del alto de la imagen.
+            # Si queda por debajo de `minFaceSize`, la persona está demasiado
+            # lejos de la cámara y no hay nada que el software pueda arreglar.
+            "ultimaCaraAlto": round(self._ultima_cara_alto, 4),
+            "minFaceSize": self._ident.cfg.minFaceSize if self._ident else None,
             "desconocidosEnMemoria": self._ident.desconocidos.recordados if self._ident else 0,
+            "cuerposYaPreguntados": len(self._preguntados),
             "galeriaActualizadaHace": (
                 round(time.time() - self._ultima_galeria, 1) if self._ultima_galeria else None
             ),

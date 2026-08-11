@@ -52,6 +52,40 @@ class ConfigRostros:
     # memoria en un lugar de paso.
     maxDesconocidos: int = 200
 
+    # ── no volver a preguntar por la misma persona ──────────────────
+    # Umbral SEPARADO del de identidad, y más bajo. Acá los errores cuestan al
+    # revés: confundir a dos desconocidos sólo hace que no se repregunte por uno
+    # (se vuelve a preguntar cuando venza la memoria), mientras que no reconocer
+    # que ya se preguntó llena la cola de revisión con la misma cara.
+    #
+    # Medido sobre 54 rostros de esta cámara: la misma persona nunca bajó de
+    # +0.303 y dos personas distintas nunca pasaron de +0.135. Con 0.42 —el de
+    # identidad, que era el que se usaba— se repreguntaba por la misma persona
+    # una y otra vez: 29 preguntas para 3 personas en dos minutos.
+    repeatThreshold: float = 0.25
+
+    # ── calidad mínima para PREGUNTAR ───────────────────────────────
+    # Preguntar es más exigente que identificar, por dos razones distintas:
+    # el recorte tiene que poder contestarlo un humano (una nuca no se puede
+    # reconocer), y el vector se convierte en la PRIMERA plantilla de esa
+    # persona si la respuesta es que sí. Identificar a alguien ya dado de alta
+    # tolera mucho menos que eso, y por eso conserva sus propios umbrales.
+    askMinFaceSize: float = 0.07
+    askMinScore: float = 0.65
+    # Giro de la cabeza, en grados. El corte salió de mirar 90 rostros de esta
+    # cámara ordenados por pose: hasta |yaw| 17 se le ve la cara y se puede
+    # decir quién es; desde 21 ya son perfiles y desde 30, nucas.
+    askMaxYaw: float = 20.0
+    # Cabeceo. Alguien mirando su escritorio tiene la cara de frente pero
+    # apuntando al piso, y el recorte es la coronilla.
+    askMaxPitch: float = 25.0
+
+    # Consecuencia asumida de los dos: a quien nunca mira hacia la cámara no se
+    # lo pregunta, y su tiempo aparece como "sin identificar" en el informe. Es
+    # preferible a una alerta que nadie puede contestar. Con levantar la vista
+    # una sola vez en diez minutos alcanza para que se pregunte: de 90 rostros,
+    # 19 pasaron este filtro, y hace falta uno solo por persona.
+
 
 @dataclass
 class Persona:
@@ -71,6 +105,11 @@ class Rostro:
     w: float
     h: float
     calidad: float = 1.0
+    # Pose de la cabeza en grados (0 = mirando a la cámara). La estima el
+    # detector: `yaw` es girar a los costados, `pitch` es levantar o bajar la
+    # vista. Deciden si el recorte se puede reconocer.
+    yaw: float = 0.0
+    pitch: float = 0.0
 
 
 @dataclass
@@ -131,7 +170,7 @@ class RegistroDesconocidos:
         self._vistos = [(v, t) for v, t in self._vistos if ahora - t <= limite]
 
         for i, (v, _) in enumerate(self._vistos):
-            if coseno(vector, v) >= self.cfg.matchThreshold:
+            if coseno(vector, v) >= self.cfg.repeatThreshold:
                 self._vistos[i] = (v, ahora)
                 return True
         return False
@@ -156,6 +195,10 @@ class Identificador:
         self.cfg = cfg or ConfigRostros()
         self.galeria = Galeria()
         self.desconocidos = RegistroDesconocidos(self.cfg)
+        # Cuántas caras se vieron pero quedaron afuera por chicas. Sin este
+        # número, "no llega la pregunta" no se distingue de "la persona está
+        # demasiado lejos de la cámara".
+        self.descartados_por_tamano = 0
 
     def identificar(self, rostros: list[Rostro], ahora: float) -> list[Identificacion]:
         cfg = self.cfg
@@ -163,6 +206,7 @@ class Identificador:
 
         for r in rostros:
             if r.h < cfg.minFaceSize:
+                self.descartados_por_tamano += 1
                 # Demasiado chica: el vector no da para afirmar nada, y tampoco
                 # para preguntar —le mostraríamos al operador una mancha.
                 salida.append(Identificacion(r, None, None, 0.0, False, "cara demasiado chica"))
@@ -188,6 +232,25 @@ class Identificador:
 
             if self.desconocidos.ya_preguntado(r.vector, ahora):
                 salida.append(Identificacion(r, None, None, parecido, False, "ya se preguntó"))
+                continue
+
+            # Preguntar por una cara que el operador no puede reconocer no es
+            # una alerta: es ruido en la cola de revisión. Y su vector sería
+            # además una mala primera plantilla, así que la persona quedaría
+            # dada de alta con algo que no la representa.
+            if r.calidad < cfg.askMinScore:
+                salida.append(Identificacion(r, None, None, parecido, False, "cara poco nítida"))
+                continue
+            if r.h < cfg.askMinFaceSize:
+                salida.append(Identificacion(r, None, None, parecido, False, "cara chica para preguntar"))
+                continue
+            if abs(r.yaw) > cfg.askMaxYaw:
+                salida.append(Identificacion(r, None, None, parecido, False,
+                                             f"de perfil ({r.yaw:.0f}°): irreconocible"))
+                continue
+            if abs(r.pitch) > cfg.askMaxPitch:
+                salida.append(Identificacion(r, None, None, parecido, False,
+                                             f"mirando al piso ({r.pitch:.0f}°): irreconocible"))
                 continue
 
             self.desconocidos.anotar(r.vector, ahora)
