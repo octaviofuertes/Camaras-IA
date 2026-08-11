@@ -68,7 +68,19 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
       process.env.PURGE_ORG_ID ?? '00000000-0000-4000-b000-000000000001',
       (c) => this.repo.orgsConEvidenciaPurgable(c),
     );
-    for (const org of orgs) await this.purgarEvidenciaSinRevisar(org, dias);
+    for (const org of orgs) {
+      await this.purgarEvidenciaSinRevisar(org, dias);
+      // Una alerta de reconocimiento que nadie contestó en el plazo de
+      // retención no la va a contestar nunca, y mientras tanto conserva la cara
+      // de alguien que quizá no trabaja acá. Se le quita el rostro con el mismo
+      // criterio con el que se le borra el clip a una alerta sin revisar.
+      try {
+        const n = await this.db.withTenant(org, (c) => this.repo.stripStaleBiometrics(c, dias));
+        if (n) this.logger.log(`purga: rostro borrado de ${n} alerta(s) sin contestar`);
+      } catch (err) {
+        this.logger.warn(`purga de rostros: ${err}`);
+      }
+    }
   }
 
   async list(auth: AuthContext, filters: ListFilters): Promise<{ items: EventDto[]; total: number }> {
@@ -234,6 +246,23 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       // Que falle el manejo del clip no puede tumbar la revisión del operador.
       this.logger.warn(`no se pudo resolver la evidencia del evento ${id}: ${err}`);
+    }
+
+    // La alerta de "¿reconocés a esta persona?" viaja con la foto de la cara y
+    // su vector facial. Existen para que un humano pueda contestar la pregunta
+    // y no un minuto más: de quien no se dio de alta no se guarda nada, y de
+    // quien sí, su plantilla ya vive en `person_faces` con el consentimiento
+    // registrado. Se borran en el servidor y no en el navegador porque el
+    // operador puede cerrar la pestaña, y entonces quedarían para siempre.
+    try {
+      const limpiados = await this.db.withTenant(auth.organizationId, (c) =>
+        this.repo.stripBiometrics(c, id),
+      );
+      if (limpiados) {
+        this.logger.log(`evento ${id}: se borró el rostro que acompañaba la pregunta`);
+      }
+    } catch (err) {
+      this.logger.error(`no se pudo borrar el rostro del evento ${id}: ${err}`);
     }
 
     return evento;

@@ -392,6 +392,36 @@ export class EventsRepository {
     return rows.map((r) => ({ id: r.id, storageKey: r.storage_key }));
   }
 
+  /**
+   * Borra de la detección el rostro y el vector facial que acompañaban a la
+   * pregunta "¿reconocés a esta persona?".
+   *
+   * Se hace sobre la fila, no sobre una copia: es un dato biométrico, y la
+   * única forma de que deje de existir es que deje de estar en la tabla.
+   */
+  async stripBiometrics(client: PoolClient, id: string): Promise<number> {
+    const r = await client.query(
+      `UPDATE events
+          SET detection = (detection - 'faceThumbnail' - 'faceEmbedding' - 'embedding')
+        WHERE id = $1
+          AND detection ?| ARRAY['faceThumbnail','faceEmbedding','embedding']`,
+      [id],
+    );
+    return r.rowCount ?? 0;
+  }
+
+  /** Igual que `stripBiometrics`, para las alertas que nadie contestó nunca. */
+  async stripStaleBiometrics(client: PoolClient, dias: number): Promise<number> {
+    const r = await client.query(
+      `UPDATE events
+          SET detection = (detection - 'faceThumbnail' - 'faceEmbedding' - 'embedding')
+        WHERE occurred_at < now() - ($1 || ' days')::interval
+          AND detection ?| ARRAY['faceThumbnail','faceEmbedding','embedding']`,
+      [String(Math.max(dias, 1))],
+    );
+    return r.rowCount ?? 0;
+  }
+
   async deleteEvidence(client: PoolClient, ids: string[]): Promise<number> {
     if (!ids.length) return 0;
     const r = await client.query(`DELETE FROM evidences WHERE id = ANY($1::uuid[])`, [ids]);
