@@ -52,6 +52,12 @@
       "maximum": 120,
       "default": 5
     },
+    "phonePersistFrames": {
+      "type": "integer",
+      "title": "Cuántas veces seguidas hay que ver el teléfono para contarlo",
+      "description": "A la distancia de una cámara de oficina el teléfono son unas decenas de píxeles y la confianza del detector queda cerca del ruido. Un teléfono real se sostiene varios segundos; un falso positivo parpadea. Bajarlo a 1 hace que un solo cuadro dudoso le sume tiempo a una persona.",
+      "minimum": 1, "maximum": 10, "default": 2
+    },
     "phoneCropMargin": {
       "type": "number",
       "title": "Cuánto se ensancha el recorte para los brazos",

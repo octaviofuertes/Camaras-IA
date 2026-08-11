@@ -312,6 +312,112 @@ def test_cerrar_pendiente_no_pierde_el_ultimo_tramo():
     assert muestras[0].ocupado_s > 4.0
 
 
+# ── el teléfono tiene que repetirse para contar ────────────────────
+
+def test_un_solo_cuadro_con_telefono_no_cuenta():
+    """A esta distancia la confianza del detector roza el ruido.
+
+    Medido en cámara y sin ningún teléfono presente, el mejor candidato dio
+    0.29 contra un umbral de 0.30. Un cuadro que se pase por poco no puede
+    sumarle segundos a nadie.
+    """
+    c = ContadorActividad([], ConfigActividad(windowSeconds=30.0, phonePersistFrames=2))
+    p = persona()
+    correr(c, [([p], []), ([p], [telefono_en(p)]), ([p], []), ([p], []), ([p], [])])
+    m = c.cerrar_pendiente(1000.0 + 5 * DT)[0]
+    assert m.telefono_s == 0, f"contó {m.telefono_s:.1f}s por un solo cuadro"
+
+
+def test_el_telefono_sostenido_si_cuenta():
+    c = ContadorActividad([], ConfigActividad(windowSeconds=30.0, phonePersistFrames=2))
+    p = persona()
+    pasos = [([p], [telefono_en(p)])] * 10
+    correr(c, pasos)
+    m = c.cerrar_pendiente(1000.0 + 10 * DT)[0]
+    # Se pierde el primer cuadro, que es el precio de no equivocarse.
+    assert m.telefono_s >= 8 * DT, f"sólo contó {m.telefono_s:.1f}s de {10*DT:.1f}s"
+
+
+def test_la_racha_se_corta_al_guardar_el_telefono():
+    """Guardarlo y volver a sacarlo exige volver a confirmarlo.
+
+    Se comparan dos secuencias idénticas salvo por un cuadro suelto al final:
+    si ese cuadro sumara tiempo, la racha no se estaría cortando.
+    """
+    def correr_secuencia(pasos):
+        c = ContadorActividad([], ConfigActividad(windowSeconds=30.0, phonePersistFrames=2))
+        p = persona()
+        correr(c, [([p], [telefono_en(p)] if con else []) for con in pasos])
+        return c.cerrar_pendiente(1000.0 + (len(pasos) + 1) * DT)[0].telefono_s
+
+    sostenido = [True] * 4 + [False] * 3
+    con_suelto = sostenido + [True]
+    assert correr_secuencia(con_suelto) == correr_secuencia(sostenido), (
+        "el cuadro suelto del final sumó tiempo: la racha no se cortó"
+    )
+    assert correr_secuencia(sostenido) > 0, "no contó nada de la racha sostenida"
+
+
+def test_irse_del_puesto_reinicia_la_racha():
+    """Volver al puesto exige volver a confirmar el teléfono.
+
+    Si la racha sobreviviera al puesto vacío, el primer cuadro de quien vuelve
+    —o de quien llega después— ya contaría como uso confirmado.
+    """
+    cfg = ConfigActividad(windowSeconds=60.0, phonePersistFrames=2, maxGapSeconds=30.0)
+    c = ContadorActividad([], cfg)
+    p = persona()
+    # Se lo ve con el teléfono, se va, vuelve y se lo ve una sola vez más.
+    pasos = [([p], [telefono_en(p)])] * 3 + [([], [])] * 3 + [([p], [telefono_en(p)])]
+    correr(c, pasos)
+    con_vuelta = c.cerrar_pendiente(1000.0 + len(pasos) * DT)[0].telefono_s
+
+    c2 = ContadorActividad([], cfg)
+    sin_vuelta = [([p], [telefono_en(p)])] * 3 + [([], [])] * 3
+    correr(c2, sin_vuelta)
+    sin_ella = c2.cerrar_pendiente(1000.0 + len(sin_vuelta) * DT)[0].telefono_s
+
+    assert con_vuelta == sin_ella, (
+        "el primer cuadro tras volver al puesto contó como teléfono confirmado"
+    )
+
+
+def test_por_defecto_ya_se_exige_persistencia():
+    """La protección tiene que venir puesta, no depender de configurarla.
+
+    Con `phonePersistFrames=1` un solo cuadro dudoso vuelve a sumar tiempo, y a
+    la distancia de una cámara de oficina la confianza del detector roza el
+    ruido. Si alguien baja este valor que sea a sabiendas.
+    """
+    assert ConfigActividad().phonePersistFrames >= 2, (
+        "el valor por defecto dejó de exigir que el teléfono se repita"
+    )
+
+    c = ContadorActividad([], ConfigActividad(windowSeconds=30.0))   # sin tocar nada
+    p = persona()
+    correr(c, [([p], []), ([p], [telefono_en(p)]), ([p], []), ([p], [])])
+    assert c.cerrar_pendiente(1000.0 + 4 * DT)[0].telefono_s == 0
+
+
+def test_dos_personas_no_comparten_la_racha():
+    """El teléfono de uno no puede habilitar el conteo del otro."""
+    c = ContadorActividad([], ConfigActividad(windowSeconds=30.0, phonePersistFrames=2))
+    a = persona(x=0.10)
+    b = persona(x=0.60)
+    ids = [("p-a", "Ana"), ("p-b", "Beto")]
+    for i in range(6):
+        # Ana con el teléfono todo el tiempo; Beto sólo en el último cuadro.
+        tels = [telefono_en(a)] + ([telefono_en(b)] if i == 5 else [])
+        c.observar(Observacion(ts=1000.0 + i * DT, personas=[a, b], telefonos=tels,
+                               identidades=ids))
+    c.cerrar_pendiente(1000.0 + 6 * DT)
+    por = {m.persona_id: m for m in c.ultimas_personas}
+    assert por["p-a"].telefono_s > 3 * DT, por["p-a"].telefono_s
+    assert por["p-b"].telefono_s == 0, (
+        f"a Beto se le contaron {por['p-b'].telefono_s:.1f}s por un solo cuadro"
+    )
+
+
 if __name__ == "__main__":
     import sys
 

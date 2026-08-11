@@ -59,6 +59,19 @@ class ConfigActividad:
     # extendida saca el teléfono fuera del recuadro.
     phoneMargin: float = 0.12
 
+    # Observaciones seguidas con teléfono antes de empezar a contarlo.
+    #
+    # A la distancia a la que trabaja una cámara de oficina, un teléfono son unas
+    # decenas de píxeles y la confianza del detector queda cerca del ruido:
+    # medido en esta cámara sin ningún teléfono presente, el candidato más alto
+    # dio 0.29 contra un umbral de 0.30. Un solo cuadro equivocado le sumaría
+    # segundos a una persona por algo que no hizo.
+    #
+    # Un teléfono real se sostiene varios segundos; un falso positivo parpadea.
+    # Exigir que se repita es lo que separa una cosa de la otra, y es el mismo
+    # criterio con el que el detector de caídas no alerta por un solo frame.
+    phonePersistFrames: int = 2
+
     # Si entre dos frames pasó más que esto, se considera que hubo un corte y el
     # intervalo no se le atribuye a ningún estado. Ver `sin_cobertura`.
     maxGapSeconds: float = 5.0
@@ -229,6 +242,9 @@ class ContadorActividad:
         # las de zona porque son datos de distinta naturaleza: una mide una
         # posición de trabajo, la otra atribuye tiempo a un individuo.
         self.ultimas_personas: list[MuestraPersona] = []
+        # (zona, persona) -> cuántas observaciones seguidas se le ve el teléfono.
+        # Es lo que impide que un solo cuadro dudoso le sume tiempo a alguien.
+        self._racha_telefono: dict[tuple, int] = {}
 
     # ── medición ────────────────────────────────────────────────────
     def observar(self, obs: Observacion) -> list[MuestraZona]:
@@ -274,14 +290,23 @@ class ContadorActividad:
                 v.ocupado_s += dt
                 v.persona_segundos += len(dentro) * dt
                 algun_telefono = False
+                vistos_ahora: set = set()
                 for i, p in dentro:
-                    con_tel = _telefono_en_uso(p, telefonos_validos, cfg)
+                    crudo = _telefono_en_uso(p, telefonos_validos, cfg)
+                    # La persistencia se cuenta por persona, no por puesto: dos
+                    # personas al lado no pueden turnarse el mismo contador.
+                    ident_p = obs.identidad_de(i)
+                    llave = (zona.id, ident_p[0] if ident_p else f"pos{round(p.x, 2)}")
+                    if crudo:
+                        vistos_ahora.add(llave)
+                        self._racha_telefono[llave] = self._racha_telefono.get(llave, 0) + 1
+                    con_tel = crudo and self._racha_telefono.get(llave, 0) >= cfg.phonePersistFrames
                     algun_telefono = algun_telefono or con_tel
 
                     # A cada quien lo suyo: el teléfono se le atribuye a la
                     # persona sobre cuyo cuerpo se detectó, no a todos los que
                     # estaban en el puesto.
-                    ident = obs.identidad_de(i)
+                    ident = ident_p
                     clave = ident[0] if ident else None
                     tp = v.por_persona.get(clave)
                     if tp is None:
@@ -293,8 +318,16 @@ class ContadorActividad:
 
                 if algun_telefono:
                     v.telefono_s += dt
+
+                # Se corta la racha de quien dejó de tener el teléfono a la
+                # vista: si no, un falso positivo de hace un minuto seguiría
+                # habilitando el conteo del siguiente.
+                for llave in [k for k in self._racha_telefono if k[0] == zona.id and k not in vistos_ahora]:
+                    del self._racha_telefono[llave]
             else:
                 v.vacio_s += dt
+                for llave in [k for k in self._racha_telefono if k[0] == zona.id]:
+                    del self._racha_telefono[llave]
 
         if obs.ts - self._inicio_ventana >= cfg.windowSeconds:
             return self._cerrar_ventana(obs.ts)
