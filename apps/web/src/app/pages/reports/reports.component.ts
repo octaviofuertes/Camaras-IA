@@ -5,6 +5,8 @@ import { PageHeaderComponent } from '../../shared/page-header.component';
 import {
   ReportsService,
   type Informe,
+  type FilaNominal,
+  type InformeNominal,
   type PuntoSerie,
   type ResumenPuesto,
 } from '../../core/reports.service';
@@ -29,6 +31,7 @@ export class ReportsComponent implements OnInit {
   private readonly api = inject(ReportsService);
 
   informe: Informe | null = null;
+  nominal: InformeNominal | null = null;
   cargando = true;
   rango: Rango = 'hoy';
 
@@ -55,6 +58,9 @@ export class ReportsComponent implements OnInit {
       this.informe = i;
       this.cargando = false;
     });
+    // El informe con nombres va por su propio endpoint y su propio permiso: si
+    // el usuario no lo tiene, esa sección explica por qué en vez de faltar.
+    this.api.porPersona({ desde, hasta }).subscribe((n) => (this.nominal = n));
   }
 
   private ventana(): { desde: string; hasta: string; bucket: 'hour' | 'day' } {
@@ -147,6 +153,30 @@ export class ReportsComponent implements OnInit {
 
   trackPuesto(_: number, p: ResumenPuesto): string {
     return `${p.cameraId}|${p.zoneId ?? ''}`;
+  }
+
+  /**
+   * Las advertencias de los dos informes, sin repetir.
+   *
+   * Van juntas a propósito: quien lee "Juan: 1 h con el teléfono" tiene que ver
+   * en la misma pantalla que ese número es una cota inferior y que la identidad
+   * se sostiene por continuidad la mayor parte del tiempo.
+   */
+  avisos(): string[] {
+    // Los dos informes advierten sobre lo mismo con palabras distintas (la cota
+    // inferior del teléfono, por ejemplo). Mostrar las dos versiones seguidas
+    // hace que se lean como ruido y se dejen de leer. Se agrupan por su primera
+    // cláusula y gana la del informe nominal, que es la más estricta.
+    const clave = (a: string): string => a.split(':')[0].trim().toLowerCase();
+    const porClave = new Map<string, string>();
+    for (const a of [...(this.informe?.advertencias ?? []), ...(this.nominal?.advertencias ?? [])]) {
+      porClave.set(clave(a), a);
+    }
+    return [...porClave.values()];
+  }
+
+  trackPersona(_: number, p: FilaNominal): string {
+    return p.personId ?? 'sin-identificar';
   }
 
   trackBarra(i: number): number {

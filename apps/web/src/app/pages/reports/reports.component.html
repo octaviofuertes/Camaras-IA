@@ -10,9 +10,10 @@
       <circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8v.01" />
     </svg>
     <span>
-      Mide el <strong>puesto</strong>, no a la persona. No se guarda ni se puede reconstruir
-      quién ocupó cada posición. Los porcentajes son sobre el tiempo que la cámara
-      efectivamente observó, no sobre el rango completo.
+      Los porcentajes son sobre el tiempo que la cámara <strong>efectivamente observó</strong>,
+      no sobre el rango completo. Si además está activa la identificación de personas, el
+      tiempo se atribuye a cada empleado dado de alta con su consentimiento; de quien no
+      está dado de alta no se guarda ningún dato.
     </span>
   </div>
 
@@ -92,6 +93,59 @@
         </div>
       </section>
 
+      <!-- Por persona: sólo para quien tiene el permiso -->
+      <section class="panel" *ngIf="nominal as nom">
+        <div class="panel-head">
+          <h2 class="panel-title">Por persona</h2>
+        </div>
+
+        <div class="sin-permiso" *ngIf="nom.sinPermiso">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="4" y="10" width="16" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" />
+          </svg>
+          <span>
+            Tu usuario no tiene permiso para ver los informes con nombre y apellido.
+            Es deliberado: cuanta menos gente accede a este dato, mejor. Pedíselo a
+            un administrador si lo necesitás para tu tarea.
+          </span>
+        </div>
+
+        <div class="empty" *ngIf="!nom.sinPermiso && !nom.personas.length">
+          Todavía no hay tiempo atribuido a personas. Hace falta que el módulo
+          <strong>Identificación de personas</strong> esté asignado a la cámara y que
+          las personas estén dadas de alta desde Eventos.
+        </div>
+
+        <div class="tabla-wrap" *ngIf="!nom.sinPermiso && nom.personas.length">
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th>Persona</th>
+                <th>En su puesto</th>
+                <th>Con teléfono</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let p of nom.personas; trackBy: trackPersona" [class.anonima]="!p.identificado">
+                <td class="nombre">{{ p.displayName }}</td>
+                <td class="mute">{{ duracion(p.presenteSegundos) }}</td>
+                <td>
+                  <ng-container *ngIf="p.identificado">
+                    <span class="tel">{{ p.telefonoPct }}%</span>
+                    <div class="mute chico">{{ duracion(p.telefonoSegundos) }}</div>
+                  </ng-container>
+                  <span class="mute" *ngIf="!p.identificado">—</span>
+                </td>
+                <td class="mute chico">
+                  <span *ngIf="!p.identificado">no se pudo atribuir a nadie</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <!-- Tabla por puesto -->
       <section class="panel">
         <div class="panel-head"><h2 class="panel-title">Detalle por puesto</h2></div>
@@ -138,8 +192,8 @@
       </section>
 
       <!-- Las advertencias viajan con el informe, no en una nota al pie -->
-      <section class="advertencias" *ngIf="inf.advertencias.length">
-        <div class="adv" *ngFor="let a of inf.advertencias">
+      <section class="advertencias" *ngIf="inf.advertencias.length || (nominal && nominal.advertencias.length)">
+        <div class="adv" *ngFor="let a of avisos()">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 3 2 20h20L12 3Z" /><path d="M12 10v4M12 17.5v.5" />
           </svg>

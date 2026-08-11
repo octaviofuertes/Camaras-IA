@@ -51,6 +51,25 @@ const VACIO: Informe = {
   advertencias: [],
 };
 
+export interface FilaNominal {
+  personId: string | null;
+  displayName: string;
+  presenteSegundos: number;
+  telefonoSegundos: number;
+  telefonoPct: number;
+  identificado: boolean;
+}
+
+export interface InformeNominal {
+  desde: string;
+  hasta: string;
+  personas: FilaNominal[];
+  sinIdentificarSegundos: number;
+  advertencias: string[];
+  /** true si el usuario no tiene permiso para ver nombres. */
+  sinPermiso?: boolean;
+}
+
 @Injectable({ providedIn: 'root' })
 export class ReportsService {
   private readonly http = inject(HttpClient);
@@ -78,5 +97,36 @@ export class ReportsService {
         return of({ ...VACIO, desde: params.desde, hasta: params.hasta });
       }),
     );
+  }
+
+  /**
+   * Informe con nombre y apellido.
+   *
+   * Requiere `reports:identified`, que sólo tienen los administradores. Un 403
+   * no es un error a esconder: se devuelve marcado para que la pantalla explique
+   * por qué no se ve, en vez de mostrar una sección vacía sin motivo.
+   */
+  porPersona(params: { desde: string; hasta: string; cameraId?: string }): Observable<InformeNominal> {
+    const qs = new URLSearchParams({ desde: params.desde, hasta: params.hasta });
+    if (params.cameraId) qs.set('cameraId', params.cameraId);
+
+    return this.http
+      .get<InformeNominal>(`/analytics/api/v1/persons/report/activity?${qs.toString()}`)
+      .pipe(
+        catchError((err) => {
+          const sinPermiso = err?.status === 403;
+          if (!sinPermiso) {
+            console.warn('[informes] no se pudo traer el informe por persona:', err?.status);
+          }
+          return of({
+            desde: params.desde,
+            hasta: params.hasta,
+            personas: [],
+            sinIdentificarSegundos: 0,
+            advertencias: [],
+            sinPermiso,
+          });
+        }),
+      );
   }
 }

@@ -23,6 +23,19 @@ const STATUS_FILTERS: { key: FilterKey; label: string }[] = [
   { key: 'false_positive', label: 'Falsos positivos' },
 ];
 
+/** Convierte el vector facial que viajó en base64 de vuelta a números. */
+function desempaquetar(b64?: string): number[] | undefined {
+  if (!b64) return undefined;
+  try {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return Array.from(new Float32Array(bytes.buffer));
+  } catch {
+    return undefined;
+  }
+}
+
 @Component({
   selector: 'px-events',
   standalone: true,
@@ -55,6 +68,13 @@ export class EventsComponent implements OnInit, OnDestroy {
   confirmando: EventItem | null = null;
   tituloEvidencia = '';
   notaRevision = '';
+
+  // ── reconocimiento de personas ─────────────────────────────────────
+  /** Alerta "¿reconocés a esta persona?" que se está respondiendo. */
+  reconociendo: EventItem | null = null;
+  nombrePersona = '';
+  baseConsentimiento = '';
+  guardandoPersona = false;
 
   evidencias: EvidenceItem[] = [];
   cargandoEvidencias = false;
@@ -102,6 +122,70 @@ export class EventsComponent implements OnInit, OnDestroy {
       this.busy = null;
       this.load();
       this.refreshStats();
+    });
+  }
+
+  esReconocimiento(e: EventItem): boolean {
+    return e.eventType === 'person.unknown';
+  }
+
+  /** Abre el diálogo para ponerle nombre a la persona de la alerta. */
+  abrirReconocimiento(e: EventItem): void {
+    this.reconociendo = e;
+    this.nombrePersona = '';
+    this.baseConsentimiento = '';
+  }
+
+  cerrarReconocimiento(): void {
+    this.reconociendo = null;
+  }
+
+  /**
+   * "Sí, trabaja acá": da de alta a la persona con su consentimiento registrado.
+   *
+   * El vector facial de la alerta se convierte en su primera plantilla. A partir
+   * de acá el sistema la reconoce y su tiempo aparece con nombre en Informes.
+   */
+  confirmarPersona(): void {
+    const e = this.reconociendo;
+    if (!e) return;
+    const nombre = this.nombrePersona.trim();
+    const base = this.baseConsentimiento.trim();
+    if (nombre.length < 2 || base.length < 3) return;
+
+    this.guardandoPersona = true;
+    this.api
+      .altaPersona({
+        displayName: nombre,
+        consentBasis: base,
+        embedding: desempaquetar(e.faceEmbedding),
+      })
+      .subscribe((res) => {
+        this.guardandoPersona = false;
+        this.reconociendo = null;
+        if (!res) return;
+        // La alerta se resuelve como confirmada: la pregunta fue respondida.
+        this.busy = e.id;
+        this.api.resolve(e.id, 'confirmed', `Dado de alta como ${nombre}`).subscribe(() => {
+          this.busy = null;
+          this.load();
+        });
+      });
+  }
+
+  /**
+   * "No trabaja acá": se descarta sin guardar NADA.
+   *
+   * Ni plantilla ni foto. El sistema va a volver a preguntar si esa persona
+   * reaparece dentro de un rato, y es el precio elegido a cambio de no armar un
+   * fichero biométrico de gente que nunca dio su consentimiento.
+   */
+  ignorarPersona(e: EventItem): void {
+    if (this.demoMode) return;
+    this.busy = e.id;
+    this.api.resolve(e.id, 'false_positive', 'No trabaja en este entorno').subscribe(() => {
+      this.busy = null;
+      this.load();
     });
   }
 
@@ -221,6 +305,16 @@ export class EventsComponent implements OnInit, OnDestroy {
 
   confidencePct(c: number): number {
     return Math.round(c * 100);
+  }
+
+  /** URL lista para un <img> con la miniatura que vino en la alerta. */
+  urlMiniatura(e: EventItem): string {
+    const b64 = e.faceThumbnail;
+    if (!b64) return '';
+    // El módulo manda el base64 pelado. Si alguna vez llegara ya con prefijo, el
+    // `img` quedaría roto sin decir nada, y acá lo único que se le pide al
+    // operador es mirar una cara: se acepta cualquiera de las dos formas.
+    return b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`;
   }
 
   trackEvent(_: number, e: EventItem): string {

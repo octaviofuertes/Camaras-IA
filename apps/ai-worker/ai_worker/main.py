@@ -184,6 +184,8 @@ def _arrancar_pipelines() -> None:
                 device=DEVICE,
                 config=m.get("config", {}),
                 zones={},
+                analytics_url=ANALYTICS_URL,
+                service_token=SERVICE_TOKEN,
             )
             inst = disc.module_class()
             try:

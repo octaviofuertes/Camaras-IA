@@ -38,7 +38,13 @@ if (!secret) {
 let perms;
 let ttl = process.env.JWT_ACCESS_TTL ? Number(process.env.JWT_ACCESS_TTL) : 900;
 if (role === 'service') {
-  perms = ['events:ingest', 'events:read', 'cameras:read', 'camera-module-configs:read', 'modules:read'];
+  // `persons:read` le deja al módulo traer la galería de rostros de los
+  // empleados dados de alta. NO incluye `persons:write`: un servicio no da
+  // de alta a nadie, eso lo hace una persona registrando el consentimiento.
+  perms = [
+    'events:ingest', 'events:read', 'cameras:read',
+    'camera-module-configs:read', 'modules:read', 'persons:read',
+  ];
   // Un servicio no puede volver a autenticarse solo: el ai-worker lee el token
   // del entorno una vez y no lo renueva. Con el TTL de 15 minutos de un humano,
   // a los 15 minutos de arrancar TODA alta de evento pasaba a fallar con 401 y

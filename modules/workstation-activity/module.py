@@ -205,9 +205,35 @@ class WorkstationActivityModule(PerceptaModule):
         )
         self._muestras_emitidas += len(muestras)
 
-        return InferenceResult(
-            detections=[self._a_deteccion(m) for m in muestras],
-            inference_ms=elapsed_ms,
+        detecciones = [self._a_deteccion(m) for m in muestras]
+        # Además del puesto, el tiempo atribuido a cada persona. Van como
+        # mediciones distintas porque responden preguntas distintas: una dice
+        # cuánto se usó una posición de trabajo, la otra qué hizo alguien.
+        if muestras:
+            detecciones += [self._a_deteccion_persona(mp) for mp in self._contador.ultimas_personas]
+
+        return InferenceResult(detections=detecciones, inference_ms=elapsed_ms)
+
+    def _a_deteccion_persona(self, m) -> Detection:
+        return Detection(
+            class_label="workstation.person",
+            class_id=0,
+            confidence=1.0,
+            bbox=(0.0, 0.0, 1.0, 1.0),
+            attributes={
+                "kind": "telemetry",
+                # Marca a qué serie pertenece: el pipeline la manda al endpoint
+                # de personas y no al de puestos.
+                "serie": "person",
+                "zoneId": m.zona_id,
+                "zoneName": m.zona_nombre,
+                "personId": m.persona_id or "",
+                "personName": m.nombre,
+                "from": f"{m.desde:.3f}",
+                "to": f"{m.hasta:.3f}",
+                "presentSeconds": f"{m.presente_s:.2f}",
+                "phoneSeconds": f"{m.telefono_s:.2f}",
+            },
         )
 
     def _quien_es(self, persona: Caja) -> tuple[str, str] | None:

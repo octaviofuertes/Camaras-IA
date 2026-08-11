@@ -206,9 +206,14 @@ function advertir(puestos: ResumenPuesto[]): string[] {
     );
   }
 
+  // Este informe suma por puesto sin mirar quién estaba. Decía además que el
+  // sistema "no identifica personas", y desde que existe el módulo de
+  // identificación eso dejó de ser cierto: un aviso legal que miente es peor
+  // que no tenerlo.
   avisos.push(
-    'La medición es por puesto de trabajo. No identifica personas ni permite ' +
-      'reconstruir quién ocupó cada posición.',
+    'Este informe suma por puesto de trabajo, sin distinguir quién lo ocupaba. ' +
+      'La atribución por persona, si está activa, va en el informe aparte y ' +
+      'requiere su propio permiso.',
   );
   return avisos;
 }

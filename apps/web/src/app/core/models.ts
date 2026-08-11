@@ -45,6 +45,9 @@ export interface EventItem {
   reviewedBy?: string;
   /** Nombre que le puso el operador al confirmarla. */
   reviewTitle?: string;
+  /** Sólo en alertas de reconocimiento. Se va con el evento al resolverlo. */
+  faceThumbnail?: string;
+  faceEmbedding?: string;
 }
 
 /** Etiquetas en español de las categorías (la DB guarda el enum en inglés). */

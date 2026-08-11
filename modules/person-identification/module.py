@@ -175,10 +175,15 @@ class PersonIdentificationModule(PerceptaModule):
         sin galería convertiría a todos los empleados conocidos en desconocidos
         y llenaría la cola de revisión de preguntas ya respondidas.
         """
-        cfg = (self._ctx.config if self._ctx else {}) or {}
-        base = str(cfg.get("analyticsUrl", "http://127.0.0.1:3005")).rstrip("/")
-        token = str(cfg.get("serviceToken", "")) or None
-        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        ctx = self._ctx
+        base = (getattr(ctx, "analytics_url", "") or "http://127.0.0.1:3005").rstrip("/")
+        token = getattr(ctx, "service_token", "") if ctx else ""
+        if not token:
+            # Sin credencial no hay galería, y sin galería toda persona conocida
+            # vuelve a ser desconocida. Se dice fuerte en vez de degradar callado.
+            log.error("no hay token de servicio: la galería de empleados no se puede consultar")
+            return
+        headers = {"Authorization": f"Bearer {token}"}
 
         try:
             r = requests.get(f"{base}/api/v1/persons/faces", headers=headers, timeout=6)

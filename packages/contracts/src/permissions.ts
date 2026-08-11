@@ -18,6 +18,12 @@ export const PERMISSIONS = [
   'roles:read', 'roles:write',
   'billing:read', 'billing:write',
   'audit:read',
+  // Informes con nombre y apellido. Va aparte de `events:read` a propósito:
+  // un operador que revisa alertas de seguridad no tiene por qué acceder a
+  // cuánto tiempo pasó cada empleado con el teléfono. Cuanta menos gente
+  // alcance ese dato, mejor.
+  'persons:read', 'persons:write',
+  'reports:identified',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -37,6 +43,8 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRole, Permission[] | ['*']> =
   platform_superadmin: ['*'],
   org_admin: [
     'organizations:read',
+    'persons:read', 'persons:write',
+    'reports:identified',
     'sites:read', 'sites:write',
     'zones:read', 'zones:write',
     'cameras:read', 'cameras:write', 'cameras:live',
@@ -52,6 +60,8 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRole, Permission[] | ['*']> =
   ],
   site_admin: [
     'sites:read',
+    'persons:read', 'persons:write',
+    'reports:identified',
     'zones:read', 'zones:write',
     'cameras:read', 'cameras:write', 'cameras:live',
     'modules:read',

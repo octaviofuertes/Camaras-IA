@@ -25,6 +25,7 @@ interface ApiEvent {
   reviewedBy?: string;
   reviewNote?: string;
   reviewTitle?: string;
+  detection?: Record<string, unknown>;
 }
 
 export interface EvidenceItem {
@@ -39,6 +40,13 @@ export interface EvidenceItem {
   title: string | null;
   status: string;
   createdAt: string;
+}
+
+/** Alta de una persona a partir de una alerta de reconocimiento. */
+export interface AltaPersona {
+  displayName: string;
+  consentBasis: string;
+  embedding?: number[];
 }
 
 export interface TrainingStats {
@@ -62,6 +70,7 @@ const TITLES: Record<string, string> = {
   'object.abandoned': 'Objeto abandonado',
   'person.loitering': 'Merodeo detectado',
   'person.fall': 'Caída detectada',
+  'person.unknown': '¿Reconocés a esta persona?',
 };
 
 @Injectable({ providedIn: 'root' })
@@ -122,6 +131,18 @@ export class EventsService {
       .pipe(catchError(() => of(null)));
   }
 
+  /**
+   * Da de alta a la persona de una alerta de reconocimiento.
+   *
+   * `consentBasis` es obligatorio y la base lo hace cumplir: sin él no se puede
+   * guardar el dato biométrico de nadie.
+   */
+  altaPersona(p: AltaPersona): Observable<{ id: string } | null> {
+    return this.http
+      .post<{ id: string }>('/analytics/api/v1/persons', p)
+      .pipe(catchError(() => of(null)));
+  }
+
   /** URL de descarga del clip. El archivo lo sirve media-service. */
   evidenceUrl(cameraId: string, storageKey: string): string {
     // Se corta por AMBOS separadores: media-service corre sobre Windows y sus
@@ -147,6 +168,11 @@ export class EventsService {
       confidence: e.confidence,
       reviewedBy: e.reviewedBy,
       reviewTitle: e.reviewTitle,
+      // Sólo presentes en las alertas de reconocimiento: la miniatura para
+      // que el operador vea de quién se habla, y el vector para poder dar
+      // de alta si la respuesta es que sí.
+      faceThumbnail: (e.detection?.['faceThumbnail'] as string) ?? undefined,
+      faceEmbedding: (e.detection?.['faceEmbedding'] as string) ?? undefined,
     };
   }
 }

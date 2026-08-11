@@ -136,16 +136,26 @@
                   Reconocer
                 </button>
                 <ng-container *ngIf="e.status === 'acknowledged'">
-                  <button
-                    class="btn sm ok"
-                    [disabled]="demoMode"
-                    (click)="esCaida(e) ? abrirConfirmacion(e) : resolve(e, 'confirmed')"
-                  >
-                    {{ esCaida(e) ? 'Fue una caída real' : 'Confirmar' }}
-                  </button>
-                  <button class="btn sm" [disabled]="demoMode" (click)="resolve(e, 'false_positive')">
-                    Falso positivo
-                  </button>
+                  <ng-container *ngIf="esReconocimiento(e); else revisionNormal">
+                    <button class="btn sm ok" [disabled]="demoMode" (click)="abrirReconocimiento(e)">
+                      Sí, trabaja acá
+                    </button>
+                    <button class="btn sm" [disabled]="demoMode" (click)="ignorarPersona(e)">
+                      No trabaja acá
+                    </button>
+                  </ng-container>
+                  <ng-template #revisionNormal>
+                    <button
+                      class="btn sm ok"
+                      [disabled]="demoMode"
+                      (click)="esCaida(e) ? abrirConfirmacion(e) : resolve(e, 'confirmed')"
+                    >
+                      {{ esCaida(e) ? 'Fue una caída real' : 'Confirmar' }}
+                    </button>
+                    <button class="btn sm" [disabled]="demoMode" (click)="resolve(e, 'false_positive')">
+                      Falso positivo
+                    </button>
+                  </ng-template>
                 </ng-container>
                 <span class="mute closed" *ngIf="e.status !== 'new' && e.status !== 'acknowledged'">
                   Revisado
@@ -168,7 +178,17 @@
              simulada: mostrarle al operador un video de mentira mientras se le
              pide que dictamine sobre una persona real es lo peor que podía
              hacer esta pantalla. -->
-        <div class="clip-revision">
+        <!-- Alerta de reconocimiento: se muestra a quién hay que identificar -->
+        <div class="cara" *ngIf="esReconocimiento(e) && e.faceThumbnail">
+          <img [src]="urlMiniatura(e)" alt="Rostro sin reconocer" />
+          <p class="mute">
+            Esta persona no está dada de alta. Si trabaja acá, dale de alta con su nombre
+            —vas a tener que indicar cómo se documentó su consentimiento—. Si no, marcala
+            como ajena: <strong>no se guarda ningún dato suyo</strong>.
+          </p>
+        </div>
+
+        <div class="clip-revision" *ngIf="!esReconocimiento(e)">
           <div class="mute" *ngIf="cargandoEvidencias">
             <span class="spinner"></span> buscando el clip…
           </div>
@@ -230,6 +250,56 @@
       </div>
     </div>
   </section>
+</div>
+
+<!-- Dar de alta a la persona reconocida -->
+<div class="modal-backdrop" *ngIf="reconociendo as rec" (click)="cerrarReconocimiento()">
+  <div class="modal panel" (click)="$event.stopPropagation()">
+    <div class="panel-head">
+      <h2 class="panel-title">Dar de alta a esta persona</h2>
+      <button class="icon-x" (click)="cerrarReconocimiento()">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 6 6 18M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+
+    <div class="modal-body">
+      <img class="cara-modal" *ngIf="rec.faceThumbnail" [src]="urlMiniatura(rec)" alt="Rostro" />
+
+      <p class="modal-intro aviso">
+        Vas a guardar el <strong>dato biométrico</strong> de esta persona. En Argentina es un
+        dato sensible: requiere su consentimiento expreso e informado. Registrá abajo cómo se
+        documentó — queda asociado a tu usuario.
+      </p>
+
+      <label class="field">
+        <span>Nombre y apellido</span>
+        <input type="text" [(ngModel)]="nombrePersona" placeholder="Ej: Juan Rodríguez" />
+      </label>
+
+      <label class="field">
+        <span>Cómo se documentó el consentimiento</span>
+        <input
+          type="text"
+          [(ngModel)]="baseConsentimiento"
+          placeholder="Ej: Consentimiento firmado 10/08/2026, legajo 1042"
+        />
+        <small>Sin esto no se puede dar de alta: la base de datos lo rechaza.</small>
+      </label>
+    </div>
+
+    <div class="modal-foot">
+      <button class="btn" (click)="cerrarReconocimiento()">Cancelar</button>
+      <button
+        class="btn btn-primary"
+        (click)="confirmarPersona()"
+        [disabled]="guardandoPersona || nombrePersona.trim().length < 2 || baseConsentimiento.trim().length < 3"
+      >
+        {{ guardandoPersona ? 'Guardando…' : 'Dar de alta' }}
+      </button>
+    </div>
+  </div>
 </div>
 
 <!-- Confirmar caída real y ponerle nombre a la evidencia -->

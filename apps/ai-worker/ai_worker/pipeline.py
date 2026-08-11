@@ -177,6 +177,18 @@ class CameraPipeline(threading.Thread):
                 "classLabel": top.class_label,
                 "bbox": [round(v, 4) for v in top.bbox],
                 "count": len(dets),
+                # La pregunta "¿reconocés a esta persona?" necesita mostrar de
+                # quién se habla, y guardar su vector para poder darla de alta
+                # si la respuesta es que sí. Ambos viajan con el evento y se van
+                # con él: si la respuesta es "no trabaja acá", no queda nada.
+                **(
+                    {"faceThumbnail": top.attributes["faceThumbnail"]}
+                    if top.attributes.get("faceThumbnail") else {}
+                ),
+                **(
+                    {"faceEmbedding": top.attributes["embedding"]}
+                    if top.attributes.get("embedding") else {}
+                ),
                 "all": [
                     {"classLabel": d.class_label, "confidence": round(float(d.confidence), 3)}
                     for d in dets[:10]
@@ -297,6 +309,41 @@ class CameraPipeline(threading.Thread):
             self.last_error = f"analytics-service: {exc}"
             log.warning("[%s] no se pudo guardar la muestra: %s", self.a.camera_id, exc)
 
+    def _emitir_medicion_persona(self, mod_cfg: dict, det) -> None:
+        """Persiste el tiempo atribuido a una persona.
+
+        Va a un endpoint distinto del de puestos porque son datos de distinta
+        naturaleza y distinta sensibilidad: éste lleva nombre y apellido, y su
+        lectura está detrás de un permiso que un operador no tiene.
+        """
+        a = det.attributes
+        payload = {
+            "cameraId": self.a.camera_id,
+            "siteId": self.a.site_id,
+            "zoneId": a.get("zoneId") or None,
+            "zoneName": a.get("zoneName") or "Toda la cámara",
+            "personId": a.get("personId") or None,
+            "from": float(a.get("from", 0.0)),
+            "to": float(a.get("to", 0.0)),
+            "presentSeconds": float(a.get("presentSeconds", 0.0)),
+            "phoneSeconds": float(a.get("phoneSeconds", 0.0)),
+        }
+        try:
+            r = requests.post(
+                f"{self.analytics_url}/api/v1/persons/activity",
+                json=payload,
+                headers={"Authorization": f"Bearer {self.token}"},
+                timeout=6,
+            )
+            if r.status_code in (200, 201):
+                self.metrics_sent += 1
+                return
+            self.last_error = f"analytics-service {r.status_code}: {r.text[:120]}"
+            log.warning("[%s] muestra por persona rechazada: %s", self.a.camera_id, self.last_error)
+        except requests.RequestException as exc:
+            self.last_error = f"analytics-service: {exc}"
+            log.warning("[%s] no se pudo guardar la muestra por persona: %s", self.a.camera_id, exc)
+
     # ── lazo principal ───────────────────────────────────────────────
     def run(self) -> None:
         log.info("[%s] pipeline iniciado con %d módulo(s)", self.a.camera_id, len(self.a.modules))
@@ -360,7 +407,10 @@ class CameraPipeline(threading.Thread):
                     if d.attributes.get("kind") not in ("telemetry", "identity")
                 ]
                 for m in mediciones:
-                    self._emitir_medicion(mod_cfg, m)
+                    if m.attributes.get('serie') == 'person':
+                        self._emitir_medicion_persona(mod_cfg, m)
+                    else:
+                        self._emitir_medicion(mod_cfg, m)
 
                 fire, strong = self._evaluate(mod_cfg.get("config", {}), alertas, st, t0)
                 snapshot.extend(

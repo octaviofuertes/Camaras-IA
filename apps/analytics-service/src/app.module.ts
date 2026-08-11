@@ -6,6 +6,9 @@ import { DatabaseService } from './db/database.service';
 import { ActivityController } from './activity/activity.controller';
 import { ActivityService } from './activity/activity.service';
 import { ActivityRepository } from './activity/activity.repository';
+import { PersonsController } from './persons/persons.controller';
+import { PersonsService } from './persons/persons.service';
+import { PersonsRepository } from './persons/persons.repository';
 
 @Module({
   imports: [
@@ -16,7 +19,11 @@ import { ActivityRepository } from './activity/activity.repository';
       envFilePath: [join(__dirname, '../../../.env'), '.env'],
     }),
   ],
-  controllers: [HealthController, ActivityController],
-  providers: [DatabaseService, ActivityService, ActivityRepository],
+  controllers: [HealthController, ActivityController, PersonsController],
+  providers: [
+    DatabaseService,
+    ActivityService, ActivityRepository,
+    PersonsService, PersonsRepository,
+  ],
 })
 export class AppModule {}

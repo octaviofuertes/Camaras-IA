@@ -31,7 +31,13 @@ INSERT INTO permissions (key, description) VALUES
   ('roles:write',                 'Administrar roles y permisos'),
   ('billing:read',                'Ver planes y uso'),
   ('billing:write',               'Administrar suscripción'),
-  ('audit:read',                  'Ver auditoría')
+  ('audit:read',                  'Ver auditoría'),
+  -- Personas identificadas. Separados del resto a propósito: dan acceso a
+  -- datos biométricos y a informes con nombre y apellido, y los tiene sólo
+  -- quien administra, no quien opera.
+  ('persons:read',                'Ver las personas dadas de alta'),
+  ('persons:write',               'Dar de alta o de baja personas (registra el consentimiento)'),
+  ('reports:identified',          'Ver informes de actividad con nombre y apellido')
 ON CONFLICT (key) DO NOTHING;
 
 -- Roles de sistema (organization_id NULL, is_system)
@@ -59,7 +65,8 @@ INSERT INTO role_permissions (role_id, permission_key)
 SELECT '00000000-0000-4000-a000-000000000003', unnest(ARRAY[
   'sites:read','zones:read','zones:write','cameras:read','cameras:write','cameras:live',
   'modules:read','camera-module-configs:read','camera-module-configs:write',
-  'events:read','events:acknowledge','events:resolve','evidences:read','notifications:read'])
+  'events:read','events:acknowledge','events:resolve','evidences:read','notifications:read',
+  'persons:read','persons:write','reports:identified'])
 ON CONFLICT DO NOTHING;
 
 -- operator

@@ -58,6 +58,14 @@ class ModuleContext:
     config: dict[str, Any]      # config VALIDADA contra el JSON Schema del manifest
     zones: dict[str, list[tuple[float, float]]]   # polígonos normalizados por zona
 
+    # Credenciales del worker, para el módulo que necesita consultar a la
+    # plataforma (la identificación de personas trae su galería de empleados).
+    # Van aparte de `config` a propósito: `config` es editable por el cliente
+    # desde la UI, y un token de servicio no puede vivir en un campo que
+    # cualquier administrador ve o pisa.
+    analytics_url: str = ""
+    service_token: str = ""
+
 
 class PerceptaModule(ABC):
     """Contrato único que todo módulo de IA implementa."""

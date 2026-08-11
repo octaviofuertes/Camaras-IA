@@ -189,3 +189,25 @@
   animation: girar .7s linear infinite;
 }
 @keyframes girar { to { transform: rotate(360deg); } }
+
+/* ─── Informe por persona ───────────────────────────────────────── */
+.sin-permiso {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 14px 16px; margin: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-2, rgba(255, 255, 255, .04));
+  color: var(--text-mute); font-size: 12.5px; line-height: 1.55;
+
+  svg { flex: 0 0 auto; margin-top: 2px; }
+}
+
+/* La fila del tiempo no atribuido se distingue: no es una persona, y leerla
+   como si lo fuera sería el mismo error que la identificación vino a evitar. */
+tr.anonima {
+  .nombre { font-weight: 400; font-style: italic; color: var(--text-mute); }
+}
+
+.empty {
+  padding: 22px 18px; color: var(--text-mute);
+  font-size: 12.5px; line-height: 1.6;
+}
