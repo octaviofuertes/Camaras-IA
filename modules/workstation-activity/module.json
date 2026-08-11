@@ -2,7 +2,7 @@
   "schemaVersion": "1.0.0",
   "moduleKey": "workstation-activity",
   "name": "Actividad por puesto",
-  "description": "Mide cuánto tiempo cada puesto está ocupado, vacío y con uso de teléfono. Alimenta el apartado de Informes; no genera alertas. La contabilidad es por región: no almacena identificador de persona ni dato que permita reconstruir quién ocupó un puesto.",
+  "description": "Mide cuánto tiempo cada persona está en su puesto y cuánto con el teléfono. Requiere el módulo de Identificación de personas: sin saber quién es cada uno, el tiempo se repartiría entre todos los presentes y quien no hizo nada quedaría igual de mal que quien sí. Alimenta Informes; no genera alertas.",
   "version": "1.0.0",
   "pluginApiVersion": "1.0.0",
   "category": "productivity",
@@ -34,5 +34,8 @@
     "gpu": false,
     "vramMb": 0,
     "targetFps": 3
-  }
+  },
+  "requires": [
+    "person-identification"
+  ]
 }

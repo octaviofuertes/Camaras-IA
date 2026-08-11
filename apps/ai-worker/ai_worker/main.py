@@ -149,11 +149,30 @@ def _arrancar_pipelines() -> None:
     for a in assignments:
         instancias: dict[str, PerceptaModule] = {}
 
+        asignados = {m["moduleKey"] for m in a.modules}
+
         for m in a.modules:
             disc = next((d for d in _discovery.loaded if d.module_key == m["moduleKey"]), None)
             if disc is None:
                 log.warning("[%s] el módulo %s no está disponible", a.camera_id, m["moduleKey"])
                 continue
+
+            # Dependencias entre módulos. `workstation-activity` declara que
+            # necesita `person-identification`: sin él sólo puede medir el
+            # puesto, no atribuirle el tiempo a nadie.
+            requiere = list(disc.manifest.get("requires") or [])
+            faltan = [r for r in requiere if r not in asignados]
+            if faltan:
+                # Se rechaza en vez de correr degradado. Un módulo a medias que
+                # nadie sabe que está a medias produce un informe que parece
+                # completo y no lo está — y en este caso lo que faltaría son
+                # justamente los nombres.
+                log.error(
+                    "[%s] %s NO se carga: necesita %s, que no está asignado a esta cámara",
+                    a.camera_id, disc.module_key, ", ".join(faltan),
+                )
+                continue
+            m["requires"] = requiere
 
             # La configuración es la de ESTA cámara. Antes se tomaba la de la
             # primera que usara el módulo, así que los ajustes por cámara

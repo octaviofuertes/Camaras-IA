@@ -200,6 +200,67 @@ def test_la_ocupacion_media_refleja_cuanta_gente_hubo():
     assert muestras[0].max_personas == 3
 
 
+def test_el_telefono_se_le_atribuye_solo_a_quien_lo_usa():
+    """LA RAZÓN DE SER DE LA IDENTIFICACIÓN.
+
+    Sin nombres, el informe dice "en este puesto hubo 10 s de teléfono" y reparte
+    la sospecha entre todos los presentes: quien no hizo nada queda igual de mal
+    que quien sí. Con identidad, cada uno carga con lo suyo.
+    """
+    from actividad import Observacion as Obs
+
+    c = ContadorActividad([], ConfigActividad(windowSeconds=10.0))
+    juan = persona(x=0.1)
+    ana = persona(x=0.6)
+    tel_de_ana = telefono_en(ana)
+
+    for i in range(51):
+        c.observar(Obs(
+            ts=1000 + i * DT,
+            personas=[juan, ana],
+            telefonos=[tel_de_ana],
+            identidades=[("p-juan", "Juan"), ("p-ana", "Ana")],
+        ))
+
+    por_nombre = {m.nombre: m for m in c.ultimas_personas}
+    assert set(por_nombre) == {"Juan", "Ana"}, f"faltan personas: {list(por_nombre)}"
+    assert por_nombre["Juan"].presente_s > 9, "Juan estuvo presente todo el rato"
+    assert por_nombre["Juan"].telefono_s == 0.0, (
+        f"a Juan se le atribuyó el teléfono de Ana: {por_nombre['Juan'].telefono_s}s"
+    )
+    assert por_nombre["Ana"].telefono_s > 9, "el teléfono era de Ana"
+
+
+def test_el_tiempo_sin_identificar_no_se_reparte():
+    """Quien no se pudo identificar no le suma minutos a nadie.
+
+    Repartir ese tiempo entre los identificados le atribuiría a un empleado
+    minutos que quizá fueron de un visitante — el mismo error que la
+    identificación vino a resolver, cometido por otra vía.
+    """
+    from actividad import Observacion as Obs
+
+    c = ContadorActividad([], ConfigActividad(windowSeconds=10.0))
+    juan = persona(x=0.1)
+    alguien = persona(x=0.6)
+
+    for i in range(51):
+        c.observar(Obs(
+            ts=1000 + i * DT,
+            personas=[juan, alguien],
+            telefonos=[],
+            identidades=[("p-juan", "Juan"), None],
+        ))
+
+    por_id = {m.persona_id: m for m in c.ultimas_personas}
+    assert "p-juan" in por_id
+    assert None in por_id, "el tiempo no identificado tiene que reportarse aparte"
+    assert por_id["p-juan"].presente_s < 11, (
+        "a Juan se le sumó el tiempo del no identificado"
+    )
+    assert por_id[None].nombre == "Sin identificar"
+
+
 def test_un_parpadeo_no_infla_el_pico_de_personas():
     """Un recuadro espurio de un solo frame no puede sumar una persona.
 

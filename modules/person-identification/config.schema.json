@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Configuración de Identificación de personas",
+  "description": "Reconoce a los empleados dados de alta con consentimiento registrado. De quien no está dado de alta no se guarda nada persistente.",
+  "type": "object",
+  "properties": {
+    "matchThreshold": {
+      "type": "number",
+      "title": "Parecido mínimo para afirmar una identidad",
+      "description": "Subirlo hace que se identifique menos pero que casi nunca se confunda a una persona con otra. Bajarlo identifica más y arriesga atribuirle a alguien el tiempo de otro, que es el error que nadie detecta.",
+      "minimum": 0.2, "maximum": 0.8, "default": 0.42
+    },
+    "matchMargin": {
+      "type": "number",
+      "title": "Ventaja mínima sobre el segundo candidato",
+      "description": "Si dos empleados se parecen, sin este margen se turnarían el nombre según el ruido de cada frame. Con él, ante la duda no se identifica a ninguno.",
+      "minimum": 0, "maximum": 0.4, "default": 0.06
+    },
+    "minFaceSize": {
+      "type": "number",
+      "title": "Tamaño mínimo de la cara",
+      "description": "Fracción del alto de la imagen. Más chica que esto no alcanza ni para identificar ni para preguntarle al operador.",
+      "minimum": 0.01, "maximum": 0.5, "default": 0.05
+    },
+    "askCooldownMinutes": {
+      "type": "number",
+      "title": "No volver a preguntar durante (min)",
+      "description": "Se cuenta desde la última vez que se vio a esa persona. Vive sólo en memoria del proceso: al reiniciar se olvida, porque de quien no está dado de alta no se guarda nada.",
+      "minimum": 1, "maximum": 240, "default": 10
+    },
+    "maxDesconocidos": {
+      "type": "integer",
+      "title": "Cuántos desconocidos recordar a la vez",
+      "minimum": 10, "maximum": 2000, "default": 200
+    },
+    "detSize": {
+      "type": "integer",
+      "title": "Resolución de detección de rostros",
+      "enum": [320, 480, 640],
+      "default": 640
+    }
+  },
+  "additionalProperties": false
+}

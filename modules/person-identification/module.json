@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "1.0.0",
+  "moduleKey": "person-identification",
+  "name": "Identificación de personas",
+  "description": "Reconoce a los empleados dados de alta para poder atribuir la actividad a cada uno. Requiere consentimiento expreso registrado por persona. A quien no está dado de alta no se le guarda ningún dato biométrico.",
+  "version": "1.0.0",
+  "pluginApiVersion": "1.0.0",
+  "category": "hr",
+  "vendor": "percepta-core",
+  "model": {
+    "backend": "onnx",
+    "artifactRef": "buffalo_l",
+    "classes": ["face"]
+  },
+  "input": {
+    "requiresZones": false,
+    "minFps": 1,
+    "maxFps": 5,
+    "colorSpace": "bgr"
+  },
+  "configSchemaRef": "./config.schema.json",
+  "configSchemaVersion": "1.0.0",
+  "eventTypes": [
+    { "type": "person.unknown", "defaultSeverity": "low", "eventClass": "alert" }
+  ],
+  "resources": { "gpu": false, "vramMb": 0, "targetFps": 2 }
+}

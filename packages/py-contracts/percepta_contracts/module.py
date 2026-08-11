@@ -80,6 +80,20 @@ class PerceptaModule(ABC):
         rules-engine a partir de camera_module_configs.config.
         """
 
+    def observar_contexto(self, detecciones: list[Detection]) -> None:
+        """Recibe lo que detectaron los módulos de los que éste depende.
+
+        Se invoca ANTES de `infer` en el mismo frame, con las detecciones que ya
+        produjeron los módulos declarados en `requires` del manifest.
+
+        No es abstracto a propósito: la enorme mayoría de los módulos mira un
+        frame y no necesita a nadie más, y obligarlos a implementar un método
+        vacío sólo agregaría ruido. Los que sí lo necesitan lo redefinen — el
+        módulo de actividad usa esto para saber QUIÉN es cada persona del cuadro
+        y poder atribuirle su tiempo, en vez de repartirlo entre todos.
+        """
+        return None
+
     @abstractmethod
     def health(self) -> dict[str, Any]:
         """Estado para readiness/liveness."""

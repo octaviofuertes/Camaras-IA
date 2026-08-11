@@ -120,6 +120,11 @@ class VentanaZona:
     # Suma de personas × segundos: dividida por el tiempo observado da la
     # ocupación media, que es más representativa que el pico.
     persona_segundos: float = 0.0
+    # Tiempo atribuido a cada persona identificada. La clave None junta a
+    # todos los presentes sin identificar: su tiempo se reporta aparte y NO
+    # se reparte entre los identificados — repartirlo le sumaría a un
+    # empleado minutos que quizá fueron de un visitante.
+    por_persona: dict = field(default_factory=dict)
 
     def _actualizar_pico(self, cuenta: int) -> None:
         """Registra el pico de personas, exigiendo que se sostenga dos frames.
@@ -151,14 +156,47 @@ class VentanaZona:
         self.max_personas = 0
         self._ultima_cuenta = 0
         self.persona_segundos = 0.0
+        self.por_persona = {}
 
 
 @dataclass
 class Observacion:
-    """Lo que el módulo ve en un frame, ya sin depender del detector."""
+    """Lo que el módulo ve en un frame, ya sin depender del detector.
+
+    `identidades` empareja por índice con `personas`: identidades[i] es quién es
+    personas[i], o None si no se lo pudo identificar. Es lo que permite decir
+    "Juan estuvo 1 h con el teléfono" en vez de repartir ese tiempo entre todos
+    los que estaban en el puesto.
+    """
     ts: float
     personas: list[Caja] = field(default_factory=list)
     telefonos: list[Caja] = field(default_factory=list)
+    identidades: list[tuple[str, str] | None] = field(default_factory=list)
+
+    def identidad_de(self, i: int) -> tuple[str, str] | None:
+        return self.identidades[i] if i < len(self.identidades) else None
+
+
+@dataclass
+class TiempoPersona:
+    """Tiempo atribuido a una persona concreta dentro de una zona."""
+    persona_id: str | None      # None = presente pero no identificada
+    nombre: str
+    presente_s: float = 0.0
+    telefono_s: float = 0.0
+
+
+@dataclass
+class MuestraPersona:
+    """Lo medido de una persona en una ventana, listo para persistir."""
+    zona_id: str
+    zona_nombre: str
+    persona_id: str | None
+    nombre: str
+    desde: float
+    hasta: float
+    presente_s: float
+    telefono_s: float
 
 
 @dataclass
@@ -187,6 +225,10 @@ class ContadorActividad:
         self._ventanas = {z.id: VentanaZona(z.id, z.nombre) for z in self.zonas}
         self._ultimo_ts: float | None = None
         self._inicio_ventana: float | None = None
+        # Muestras por persona de la última ventana cerrada. Van aparte de
+        # las de zona porque son datos de distinta naturaleza: una mide una
+        # posición de trabajo, la otra atribuye tiempo a un individuo.
+        self.ultimas_personas: list[MuestraPersona] = []
 
     # ── medición ────────────────────────────────────────────────────
     def observar(self, obs: Observacion) -> list[MuestraZona]:
@@ -210,7 +252,10 @@ class ContadorActividad:
                 v.reiniciar()
             return []
 
-        personas_validas = [p for p in obs.personas if p.confianza >= cfg.personConfidence]
+        indexadas = [
+            (i, p) for i, p in enumerate(obs.personas) if p.confianza >= cfg.personConfidence
+        ]
+        personas_validas = [p for _, p in indexadas]
         telefonos_validos = [t for t in obs.telefonos if t.confianza >= cfg.phoneConfidence]
 
         hubo_corte = dt > cfg.maxGapSeconds
@@ -223,12 +268,30 @@ class ContadorActividad:
                 v.sin_cobertura_s += dt
                 continue
 
-            dentro = [p for p in personas_validas if zona.contiene(p.pies)]
+            dentro = [(i, p) for i, p in indexadas if zona.contiene(p.pies)]
             v._actualizar_pico(len(dentro))
             if dentro:
                 v.ocupado_s += dt
                 v.persona_segundos += len(dentro) * dt
-                if any(_telefono_en_uso(p, telefonos_validos, cfg) for p in dentro):
+                algun_telefono = False
+                for i, p in dentro:
+                    con_tel = _telefono_en_uso(p, telefonos_validos, cfg)
+                    algun_telefono = algun_telefono or con_tel
+
+                    # A cada quien lo suyo: el teléfono se le atribuye a la
+                    # persona sobre cuyo cuerpo se detectó, no a todos los que
+                    # estaban en el puesto.
+                    ident = obs.identidad_de(i)
+                    clave = ident[0] if ident else None
+                    tp = v.por_persona.get(clave)
+                    if tp is None:
+                        tp = TiempoPersona(clave, ident[1] if ident else "Sin identificar")
+                        v.por_persona[clave] = tp
+                    tp.presente_s += dt
+                    if con_tel:
+                        tp.telefono_s += dt
+
+                if algun_telefono:
                     v.telefono_s += dt
             else:
                 v.vacio_s += dt
@@ -251,6 +314,7 @@ class ContadorActividad:
     def _cerrar_ventana(self, ts: float) -> list[MuestraZona]:
         desde = self._inicio_ventana or ts
         muestras = []
+        self.ultimas_personas = []
         for zona in self.zonas:
             v = self._ventanas[zona.id]
             observado = v.observado_s
@@ -270,6 +334,18 @@ class ContadorActividad:
                     ocupacion_media=round(v.persona_segundos / observado, 2) if observado > 0 else 0.0,
                 )
             )
+            for tp in v.por_persona.values():
+                if tp.presente_s <= 0:
+                    continue
+                self.ultimas_personas.append(
+                    MuestraPersona(
+                        zona_id=v.zona_id, zona_nombre=v.zona_nombre,
+                        persona_id=tp.persona_id, nombre=tp.nombre,
+                        desde=desde, hasta=ts,
+                        presente_s=round(tp.presente_s, 2),
+                        telefono_s=round(tp.telefono_s, 2),
+                    )
+                )
             v.reiniciar()
         self._inicio_ventana = ts
         return muestras

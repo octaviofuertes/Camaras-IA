@@ -223,6 +223,38 @@ class CameraPipeline(threading.Thread):
             self.last_error = f"event-service: {exc}"
         return False
 
+    def _modulos_ordenados(self) -> list[dict]:
+        """Los módulos de esta cámara, con los dependidos primero.
+
+        Orden topológico simple: si A declara depender de B, B corre antes. Sin
+        esto, el módulo de actividad recibiría el contexto del frame ANTERIOR y
+        atribuiría el teléfono de alguien al que estaba ahí un segundo antes.
+
+        Ante un ciclo —que sería un error de manifiestos, no de configuración—
+        se conserva el orden original y se avisa, en vez de colgarse.
+        """
+        pendientes = {m["moduleKey"]: m for m in self.a.modules}
+        salida: list[dict] = []
+        visitando: set[str] = set()
+        resueltos: set[str] = set()
+
+        def visitar(clave: str) -> None:
+            if clave in resueltos or clave not in pendientes:
+                return
+            if clave in visitando:
+                log.warning("[%s] dependencia circular en %s", self.a.camera_id, clave)
+                return
+            visitando.add(clave)
+            for dep in pendientes[clave].get("requires") or []:
+                visitar(dep)
+            visitando.discard(clave)
+            resueltos.add(clave)
+            salida.append(pendientes[clave])
+
+        for m in self.a.modules:
+            visitar(m["moduleKey"])
+        return salida
+
     # ── mediciones (informes) ────────────────────────────────────────
     def _emitir_medicion(self, mod_cfg: dict, det) -> None:
         """Persiste una ventana de actividad en analytics-service.
@@ -285,12 +317,27 @@ class CameraPipeline(threading.Thread):
             )
 
             snapshot: list[dict] = []
-            for mod_cfg in self.a.modules:
+            # Lo que ya detectaron los módulos anteriores en ESTE frame. Es lo
+            # que permite que un módulo dependa de otro: el de actividad recibe
+            # acá quién es cada persona del cuadro, para atribuirle su tiempo en
+            # vez de repartirlo entre todos los que estaban presentes.
+            producido: dict[str, list] = {}
+
+            for mod_cfg in self._modulos_ordenados():
                 key = mod_cfg["moduleKey"]
                 inst = self.instances.get(key)
                 if inst is None:
                     continue
                 st = self._state.setdefault(key, _ModuleState())
+
+                requiere = mod_cfg.get("requires") or []
+                contexto = [d for k in requiere for d in producido.get(k, [])]
+                if contexto or requiere:
+                    try:
+                        inst.observar_contexto(contexto)
+                    except Exception:  # noqa: BLE001
+                        log.exception("[%s] %s falló al recibir el contexto", self.a.camera_id, key)
+
                 try:
                     res = inst.infer(frame)
                 except Exception as exc:  # un módulo que falla no frena a los demás
@@ -303,8 +350,15 @@ class CameraPipeline(threading.Thread):
                 # que se persisten como serie y nunca entran en la cola de
                 # revisión humana. Mezclarlas llenaría esa cola de datos que
                 # nadie tiene que atender, y el operador dejaría de mirarla.
+                producido[key] = res.detections
+
                 mediciones = [d for d in res.detections if d.attributes.get("kind") == "telemetry"]
-                alertas = [d for d in res.detections if d.attributes.get("kind") != "telemetry"]
+                # `identity` no es alerta ni medición: es contexto para el módulo
+                # que corre después. No se persiste ni molesta a nadie.
+                alertas = [
+                    d for d in res.detections
+                    if d.attributes.get("kind") not in ("telemetry", "identity")
+                ]
                 for m in mediciones:
                     self._emitir_medicion(mod_cfg, m)
 
