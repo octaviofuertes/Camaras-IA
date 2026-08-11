@@ -61,6 +61,13 @@ class WorkstationActivityModule(PerceptaModule):
         self._ctx: ModuleContext | None = None
         self._contador: ContadorActividad | None = None
         self._imgsz = 640
+        # Resolución a la que se mira el recorte de cada persona buscando el
+        # teléfono. Es lo que fija cuántos píxeles tiene el objeto.
+        self._phone_imgsz = 320
+        # Cuánto se ensancha el recorte a cada lado, en anchos de cuerpo. Un
+        # brazo estirado sale bastante del recuadro de la persona.
+        self._phone_crop_margin = 0.35
+        self._telefonos_vistos = 0
         self._loaded_at = 0.0
         self._muestras_emitidas = 0
         # Identidades que dejó `person-identification` en este frame.
@@ -72,6 +79,8 @@ class WorkstationActivityModule(PerceptaModule):
         self._ctx = ctx
         weights = str(ctx.config.get("weights", "yolov8n.pt"))
         self._imgsz = int(ctx.config.get("imgsz", 640))
+        self._phone_imgsz = int(ctx.config.get("phoneImgsz", 320))
+        self._phone_crop_margin = float(ctx.config.get("phoneCropMargin", 0.35))
 
         cfg = self._config_validada(ctx.config)
         self._contador = ContadorActividad(self._zonas_de(ctx), cfg)
@@ -168,16 +177,14 @@ class WorkstationActivityModule(PerceptaModule):
         resultados = self._model.predict(
             frame.image,
             imgsz=self._imgsz,
-            classes=[CLASE_PERSONA, CLASE_TELEFONO],
+            classes=[CLASE_PERSONA],
             conf=0.20,   # el filtro fino lo aplica la contabilidad, por clase
             verbose=False,
             device="cpu",
         )
-        elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
         h, w = frame.image.shape[:2]
         personas: list[Caja] = []
-        telefonos: list[Caja] = []
 
         for r in resultados:
             cajas = getattr(r, "boxes", None)
@@ -185,15 +192,13 @@ class WorkstationActivityModule(PerceptaModule):
                 continue
             for b in cajas:
                 x1, y1, x2, y2 = (float(v) for v in b.xyxy[0].tolist())
-                caja = Caja(
+                personas.append(Caja(
                     x=x1 / w, y=y1 / h, w=(x2 - x1) / w, h=(y2 - y1) / h,
                     confianza=float(b.conf.item()),
-                )
-                clase = int(b.cls.item())
-                if clase == CLASE_PERSONA:
-                    personas.append(caja)
-                elif clase == CLASE_TELEFONO:
-                    telefonos.append(caja)
+                ))
+
+        telefonos = self._buscar_telefonos(frame.image, personas)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
         muestras = self._contador.observar(
             Observacion(
@@ -235,6 +240,67 @@ class WorkstationActivityModule(PerceptaModule):
                 "phoneSeconds": f"{m.telefono_s:.2f}",
             },
         )
+
+    def _buscar_telefonos(self, imagen, personas: list[Caja]) -> list[Caja]:
+        """Busca el teléfono DENTRO del recorte de cada persona, no en el cuadro.
+
+        Un teléfono mide alrededor de una doceava parte del alto de una persona.
+        Buscándolo en el cuadro entero, su tamaño depende de a qué distancia esté
+        esa persona de la cámara: medido acá, 28 px para alguien cerca y 15 px
+        para alguien al fondo. Quince píxeles no los detecta nadie, y por eso el
+        informe decía 0 s de teléfono siempre, para todo el mundo.
+
+        Recortando a cada persona y llevando ESE recorte a `phoneImgsz`, el
+        teléfono queda en unos 33 px sin importar la distancia. Cuesta lo mismo
+        que procesar el cuadro entero al doble de resolución, que igual dejaría a
+        la persona del fondo por debajo del límite.
+
+        El recorte abarca del pecho a la cintura y se ensancha para que entren
+        los brazos: es donde está un teléfono que alguien está mirando.
+        """
+        if self._model is None:
+            return []
+
+        alto, ancho = imagen.shape[:2]
+        # NO se reusa `phoneMargin`: ese dice cuán lejos del cuerpo puede estar
+        # un teléfono para contárselo a esa persona (0.12), y es una decisión de
+        # atribución. Esto otro es cuánto hay que ensanchar el recorte para que
+        # entren los brazos estirados, que es geometría del cuerpo.
+        margen = self._phone_crop_margin
+        imgsz = self._phone_imgsz
+        salida: list[Caja] = []
+
+        for p in personas:
+            x1, y1 = int(p.x * ancho), int(p.y * alto)
+            pw, ph = int(p.w * ancho), int(p.h * alto)
+            cx1 = max(int(x1 - pw * margen), 0)
+            cx2 = min(int(x1 + pw * (1 + margen)), ancho)
+            cy1 = max(int(y1 - ph * 0.05), 0)
+            cy2 = min(int(y1 + ph * 0.80), alto)
+            if cx2 - cx1 < 16 or cy2 - cy1 < 16:
+                continue
+
+            recorte = imagen[cy1:cy2, cx1:cx2]
+            try:
+                res = self._model.predict(
+                    recorte, imgsz=imgsz, classes=[CLASE_TELEFONO],
+                    conf=0.10, verbose=False, device="cpu",
+                )
+            except Exception:  # noqa: BLE001
+                log.exception("no se pudo buscar el teléfono en un recorte")
+                continue
+
+            for r in res:
+                for b in (getattr(r, "boxes", None) or []):
+                    bx1, by1, bx2, by2 = (float(v) for v in b.xyxy[0].tolist())
+                    # De coordenadas del recorte a coordenadas del cuadro.
+                    salida.append(Caja(
+                        x=(cx1 + bx1) / ancho, y=(cy1 + by1) / alto,
+                        w=(bx2 - bx1) / ancho, h=(by2 - by1) / alto,
+                        confianza=float(b.conf.item()),
+                    ))
+        self._telefonos_vistos += len(salida)
+        return salida
 
     def _quien_es(self, persona: Caja) -> tuple[str, str] | None:
         """Empareja un cuerpo detectado acá con una identidad del módulo anterior.
@@ -285,6 +351,10 @@ class WorkstationActivityModule(PerceptaModule):
             "model": "yolov8n" if self._model is not None else None,
             "device": self._ctx.device if self._ctx else None,
             "muestrasEmitidas": self._muestras_emitidas,
+            # Sin esto, "el informe dice 0 s de teléfono" no se distingue de
+            # "el detector no ve ningún teléfono", que se arreglan distinto.
+            "telefonosDetectados": self._telefonos_vistos,
+            "resolucionDelRecorte": self._phone_imgsz,
             "enCurso": self._contador.estado() if self._contador else {},
             "loadedAt": self._loaded_at or None,
         }

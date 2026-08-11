@@ -52,6 +52,19 @@
       "maximum": 120,
       "default": 5
     },
+    "phoneCropMargin": {
+      "type": "number",
+      "title": "Cuánto se ensancha el recorte para los brazos",
+      "description": "En anchos de cuerpo, a cada lado. Un brazo estirado sostiene el teléfono bastante afuera del recuadro de la persona.",
+      "minimum": 0, "maximum": 1, "default": 0.35
+    },
+    "phoneImgsz": {
+      "type": "integer",
+      "title": "Resolución del recorte donde se busca el teléfono",
+      "description": "El teléfono se busca dentro del recorte de cada persona, no en el cuadro entero: así su tamaño en píxeles no depende de a qué distancia esté la persona. Subirlo detecta teléfonos más chicos y cuesta más tiempo.",
+      "enum": [256, 320, 448, 640],
+      "default": 320
+    },
     "imgsz": {
       "type": "integer",
       "title": "Resolución de inferencia",
