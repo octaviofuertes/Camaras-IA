@@ -324,6 +324,25 @@ def test_una_cara_descartada_no_se_recuerda_como_preguntada():
     assert r.preguntar, "al darse vuelta tiene que poder preguntarse"
 
 
+def test_olvidar_todo_permite_volver_a_preguntar():
+    """Cuando cambia quién está dado de alta, lo preguntado antes ya no vale.
+
+    Sin esto queda una zona muerta: a la persona que se borró de la galería no
+    se la reconoce —ya no está— pero tampoco se pregunta por ella, porque se
+    preguntó hace un rato. El sistema se queda callado sin razón visible.
+    """
+    ident = con_empleados()
+    v = vector(88)
+    assert ident.identificar([rostro(v)], ahora=1000.0)[0].preguntar
+    assert not ident.identificar([rostro(v)], ahora=1001.0)[0].preguntar
+
+    ident.desconocidos.olvidar_todo()
+    assert ident.desconocidos.recordados == 0
+    assert ident.identificar([rostro(v)], ahora=1002.0)[0].preguntar, (
+        "tras olvidar, tiene que poder volver a preguntar"
+    )
+
+
 if __name__ == "__main__":
     import sys
 

@@ -85,6 +85,8 @@ class PersonIdentificationModule(PerceptaModule):
         # para que un identificador de seguimiento reutilizado más tarde no
         # silencie una pregunta legítima.
         self._preguntados: dict[int, float] = {}
+        # Quiénes estaban dados de alta la última vez que se miró.
+        self._firma_actual: tuple | None = None
         self._ultima_galeria = 0.0
         self._parar = threading.Event()
 
@@ -210,9 +212,32 @@ class PersonIdentificationModule(PerceptaModule):
             if p.get("embeddings")
         ]
         if self._ident is not None:
+            # Si cambió QUIÉN está dado de alta, se olvida a quién se le
+            # preguntó. Sin esto queda una zona muerta: a la persona que se
+            # borró de la galería ya no se la reconoce, pero tampoco se vuelve a
+            # preguntar por ella —porque hace diez minutos se preguntó— y el
+            # sistema se queda callado sin razón visible. Pasa igual al dar de
+            # alta a alguien: su cara sigue en la lista de desconocidos, y ahí
+            # no tiene nada que hacer.
+            firma = self._firma_galeria(personas)
+            if firma != self._firma_actual:
+                if self._firma_actual is not None:
+                    log.info("cambió la galería: se olvida a quién se le preguntó")
+                    self._ident.desconocidos.olvidar_todo()
+                    self._preguntados.clear()
+                self._firma_actual = firma
             self._ident.galeria.actualizar(personas)
         self._ultima_galeria = time.time()
         log.info("galería de rostros: %d persona(s) dadas de alta", len(personas))
+
+    @staticmethod
+    def _firma_galeria(personas: list[Persona]) -> tuple:
+        """Identifica el contenido de la galería: quiénes y con cuántas fotos.
+
+        Cuenta las plantillas además de los ids porque sumarle un ángulo a
+        alguien también cambia a quién se reconoce.
+        """
+        return tuple(sorted((p.id, len(p.vectores)) for p in personas))
 
     # ── inferencia ──────────────────────────────────────────────────
     def infer(self, frame: Frame) -> InferenceResult:

@@ -183,6 +183,10 @@ class RegistroDesconocidos:
             self._vistos.sort(key=lambda x: x[1], reverse=True)
             del self._vistos[self.cfg.maxDesconocidos:]
 
+    def olvidar_todo(self) -> None:
+        """Descarta lo recordado. Se usa cuando cambia quién está dado de alta."""
+        self._vistos.clear()
+
     @property
     def recordados(self) -> int:
         return len(self._vistos)
