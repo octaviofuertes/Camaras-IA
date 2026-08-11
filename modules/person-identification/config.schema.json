@@ -49,13 +49,13 @@
       "type": "number",
       "title": "Giro lateral máximo de la cabeza para preguntar (grados)",
       "description": "Más allá de esto se ve un perfil o una nuca. Preguntar por eso es una alerta que nadie puede contestar, y su vector sería una mala primera plantilla de esa persona.",
-      "minimum": 10, "maximum": 90, "default": 20
+      "minimum": 10, "maximum": 90, "default": 30
     },
     "askMaxPitch": {
       "type": "number",
       "title": "Cabeceo máximo para preguntar (grados)",
-      "description": "Alguien mirando su escritorio tiene la cara de frente pero apuntando al piso: el recorte es la coronilla.",
-      "minimum": 10, "maximum": 90, "default": 25
+      "description": "Excluye la coronilla de quien mira su escritorio. Ojo: una cámara alta le da a todo el mundo un cabeceo negativo constante, así que un valor chico no deja pasar a nadie.",
+      "minimum": 10, "maximum": 90, "default": 45
     },
     "maxDesconocidos": {
       "type": "integer",

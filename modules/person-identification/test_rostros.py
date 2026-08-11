@@ -36,8 +36,14 @@ def vector(semilla: int, ruido: float = 0.0) -> list[float]:
     return [x / n for x in base]
 
 
-def rostro(v: list[float], x=0.4, y=0.1, w=0.12, h=0.16) -> Rostro:
-    return Rostro(vector=v, x=x, y=y, w=w, h=h)
+def rostro(v: list[float], x=0.4, y=0.1, w=0.12, h=0.16, yaw=0.0, pitch=0.0) -> Rostro:
+    """Una cara mirando a la cámara, salvo que se diga otra cosa.
+
+    La pose se pasa explícita porque `None` significa "no se midió" y con eso
+    no se pregunta: es el caso que dejó pasar perfiles cuando el estimador ni
+    siquiera estaba cargado.
+    """
+    return Rostro(vector=v, x=x, y=y, w=w, h=h, yaw=yaw, pitch=pitch)
 
 
 def a_parecido(v: list[float], objetivo: float, semilla: int = 999) -> list[float]:
@@ -265,7 +271,7 @@ def test_no_se_pregunta_por_una_nuca():
     """Un recorte de perfil es una pregunta que el operador no puede contestar."""
     ident = con_empleados()
     r = ident.identificar(
-        [Rostro(vector=vector(21), x=.4, y=.1, w=.12, h=.16, calidad=.9, yaw=75.0)],
+        [Rostro(vector=vector(21), x=.4, y=.1, w=.12, h=.16, calidad=.9, yaw=75.0, pitch=0.0)],
         ahora=1000.0,
     )[0]
     assert not r.preguntar and "perfil" in r.motivo, r.motivo
@@ -324,22 +330,75 @@ def test_una_cara_descartada_no_se_recuerda_como_preguntada():
     assert r.preguntar, "al darse vuelta tiene que poder preguntarse"
 
 
-def test_olvidar_todo_permite_volver_a_preguntar():
-    """Cuando cambia quién está dado de alta, lo preguntado antes ya no vale.
+def test_dar_de_alta_desbloquea_los_otros_angulos():
+    """Los dos mecanismos se anulaban y la persona quedaba a medio reconocer.
 
-    Sin esto queda una zona muerta: a la persona que se borró de la galería no
-    se la reconoce —ya no está— pero tampoco se pregunta por ella, porque se
-    preguntó hace un rato. El sistema se queda callado sin razón visible.
+    Dada de alta de frente, de perfil NO se la reconoce (0.30 contra el umbral
+    de identidad 0.42) — pero el antirrebote, que compara con 0.25, decía "ya se
+    preguntó" y se tragaba la pregunta. Nunca se podía sumar el segundo ángulo.
     """
     ident = con_empleados()
-    v = vector(88)
-    assert ident.identificar([rostro(v)], ahora=1000.0)[0].preguntar
-    assert not ident.identificar([rostro(v)], ahora=1001.0)[0].preguntar
+    de_frente = vector(60)
+    de_perfil = a_parecido(de_frente, 0.30, semilla=61)
 
-    ident.desconocidos.olvidar_todo()
-    assert ident.desconocidos.recordados == 0
-    assert ident.identificar([rostro(v)], ahora=1002.0)[0].preguntar, (
-        "tras olvidar, tiene que poder volver a preguntar"
+    # Se pregunta por ella y el operador la da de alta con la foto de frente.
+    assert ident.identificar([rostro(de_frente)], ahora=1000.0)[0].preguntar
+    ident.galeria.actualizar([Persona("p1", "Juan", [de_frente])])
+
+    # De perfil sigue sin reconocerse, pero la pregunta estaba bloqueada.
+    assert not ident.identificar([rostro(de_perfil)], ahora=1010.0)[0].preguntar
+
+    # Al darla de alta se la olvida como desconocida: la pregunta vuelve.
+    borradas = ident.desconocidos.olvidar_a_los_conocidos(ident.galeria, ident.cfg)
+    assert borradas == 1, borradas
+    r = ident.identificar([rostro(de_perfil)], ahora=1020.0)[0]
+    assert r.preguntar, "sin esto nunca se puede sumar el ángulo que falta"
+
+
+def test_olvidar_a_los_conocidos_no_toca_a_los_demas():
+    """Dar de alta a uno no puede reabrir las preguntas de todos los demás."""
+    ident = con_empleados()
+    juan, otro = vector(70), vector(71)
+    ident.identificar([rostro(juan)], ahora=1000.0)
+    ident.identificar([rostro(otro)], ahora=1001.0)
+    assert ident.desconocidos.recordados == 2
+
+    ident.galeria.actualizar([Persona("p1", "Juan", [juan])])
+    borradas = ident.desconocidos.olvidar_a_los_conocidos(ident.galeria, ident.cfg)
+    assert borradas == 1, f"borró {borradas}: se llevó puesto a alguien que sigue siendo desconocido"
+    assert not ident.identificar([rostro(otro)], ahora=1002.0)[0].preguntar, (
+        "al otro no se le tiene que volver a preguntar"
+    )
+
+
+def test_con_los_dos_angulos_ya_no_pregunta():
+    """Lo pedido: una vez reconocida de frente y de perfil, no alerta más."""
+    ident = con_empleados()
+    de_frente = vector(80)
+    de_perfil = a_parecido(de_frente, 0.30, semilla=81)
+    ident.galeria.actualizar([Persona("p1", "Juan", [de_frente, de_perfil])])
+
+    for etiqueta, v in (("de frente", de_frente), ("de perfil", de_perfil)):
+        r = ident.identificar([rostro(v)], ahora=1000.0)[0]
+        assert r.persona_id == "p1", f"no lo reconoció {etiqueta}: {r.motivo}"
+        assert not r.preguntar, f"volvió a preguntar por él {etiqueta}"
+
+
+def test_sin_medir_la_pose_no_se_pregunta():
+    """El fallo real: el modelo que estima la pose ni siquiera se cargaba.
+
+    `yaw` y `pitch` estaban por defecto en 0.0 —"de frente"— así que el filtro
+    dejaba pasar todo y la cola se llenó de perfiles y nucas. Sin el dato, la
+    respuesta correcta es no preguntar, no suponer que se ve bien.
+    """
+    ident = con_empleados()
+    r = ident.identificar(
+        [Rostro(vector=vector(31), x=.4, y=.1, w=.12, h=.16, calidad=.9)],  # sin pose
+        ahora=1000.0,
+    )[0]
+    assert not r.preguntar and "pose" in r.motivo, r.motivo
+    assert ident.desconocidos.recordados == 0, (
+        "una cara que no se preguntó no puede bloquear la pregunta de después"
     )
 
 

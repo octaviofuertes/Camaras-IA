@@ -72,13 +72,20 @@ class ConfigRostros:
     # tolera mucho menos que eso, y por eso conserva sus propios umbrales.
     askMinFaceSize: float = 0.07
     askMinScore: float = 0.65
-    # Giro de la cabeza, en grados. El corte salió de mirar 90 rostros de esta
-    # cámara ordenados por pose: hasta |yaw| 17 se le ve la cara y se puede
-    # decir quién es; desde 21 ya son perfiles y desde 30, nucas.
-    askMaxYaw: float = 20.0
-    # Cabeceo. Alguien mirando su escritorio tiene la cara de frente pero
-    # apuntando al piso, y el recorte es la coronilla.
-    askMaxPitch: float = 25.0
+    # Giro de la cabeza, en grados. El corte salió de mirar los recortes reales
+    # ordenados por pose: a +19 y +22 se le ven los dos ojos y se puede decir
+    # quién es; a +48 ya es un perfil y a +55 una nuca.
+    #
+    # No es un umbral universal: depende de dónde esté la cámara. Montada a un
+    # costado, una persona mirando su pantalla queda a 20-25° de forma
+    # permanente, y un límite más chico no la deja pasar nunca. Por eso es
+    # configurable por cámara.
+    askMaxYaw: float = 30.0
+    # Cabeceo. Ojo con esto: una cámara alta le da a TODO el mundo un cabeceo
+    # negativo constante —en esta, -30 para alguien sentado normal— y no
+    # significa que esté mirando el piso. El límite tiene que excluir la
+    # coronilla (-65 medido) sin excluir a la persona sentada.
+    askMaxPitch: float = 45.0
 
     # Consecuencia asumida de los dos: a quien nunca mira hacia la cámara no se
     # lo pregunta, y su tiempo aparece como "sin identificar" en el informe. Es
@@ -105,11 +112,16 @@ class Rostro:
     w: float
     h: float
     calidad: float = 1.0
-    # Pose de la cabeza en grados (0 = mirando a la cámara). La estima el
-    # detector: `yaw` es girar a los costados, `pitch` es levantar o bajar la
-    # vista. Deciden si el recorte se puede reconocer.
-    yaw: float = 0.0
-    pitch: float = 0.0
+    # Pose de la cabeza en grados (0 = mirando a la cámara). `yaw` es girar a
+    # los costados, `pitch` es levantar o bajar la vista.
+    #
+    # None significa "no se midió", y NO se trata como "de frente": estaban por
+    # defecto en 0.0 y el modelo que las estima ni siquiera se cargaba, así que
+    # el filtro de pose dejaba pasar todo y las alertas eran casi todas de
+    # perfil. Un valor por defecto que finge un dato que no se tiene es peor que
+    # no tener el dato.
+    yaw: float | None = None
+    pitch: float | None = None
 
 
 @dataclass
@@ -183,9 +195,32 @@ class RegistroDesconocidos:
             self._vistos.sort(key=lambda x: x[1], reverse=True)
             del self._vistos[self.cfg.maxDesconocidos:]
 
-    def olvidar_todo(self) -> None:
-        """Descarta lo recordado. Se usa cuando cambia quién está dado de alta."""
-        self._vistos.clear()
+    def olvidar_a_los_conocidos(self, galeria: Galeria, cfg: ConfigRostros) -> int:
+        """Saca de la memoria a los desconocidos que ya son alguien.
+
+        Resuelve un choque entre dos mecanismos que se anulaban. Alguien dado de
+        alta de frente NO se reconoce de perfil —0.30 contra un umbral de
+        0.42— así que vuelve a ser un desconocido; pero el antirrebote, que
+        compara con 0.25, decía "ya se preguntó por esta cara" y se tragaba la
+        pregunta. Resultado: nunca se podía sumar el segundo ángulo, y la
+        persona quedaba a medio reconocer para siempre.
+
+        Al darla de alta se la olvida como desconocida. Entonces vuelve a
+        preguntarse desde los ángulos que todavía no se reconocen —que es la
+        oportunidad de sumarlos— y deja de preguntarse cuando ya se la reconoce
+        desde todos.
+
+        Devuelve cuántas se olvidaron.
+        """
+        quedan = []
+        for v, t in self._vistos:
+            persona, parecido, _ = galeria.buscar(v, cfg)
+            if persona is not None and parecido >= cfg.repeatThreshold:
+                continue
+            quedan.append((v, t))
+        borradas = len(self._vistos) - len(quedan)
+        self._vistos = quedan
+        return borradas
 
     @property
     def recordados(self) -> int:
@@ -247,6 +282,12 @@ class Identificador:
                 continue
             if r.h < cfg.askMinFaceSize:
                 salida.append(Identificacion(r, None, None, parecido, False, "cara chica para preguntar"))
+                continue
+            if r.yaw is None or r.pitch is None:
+                # Sin medir la pose no se puede afirmar que la cara se vea. Se
+                # prefiere no preguntar antes que llenar la cola de perfiles.
+                salida.append(Identificacion(r, None, None, parecido, False,
+                                             "sin estimación de pose"))
                 continue
             if abs(r.yaw) > cfg.askMaxYaw:
                 salida.append(Identificacion(r, None, None, parecido, False,

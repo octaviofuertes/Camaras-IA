@@ -80,6 +80,8 @@ class PersonIdentificationModule(PerceptaModule):
         # cara a nadie", que desde afuera se parecen y se arreglan distinto.
         self._rostros_vistos = 0
         self._ultima_cara_alto = 0.0
+        self._poses_medidas = 0
+        self._pose = None
         # Cuerpos por los que ya se preguntó: track_id -> cuándo. Vence con el
         # mismo plazo que la memoria de caras, para que no crezca sin límite y
         # para que un identificador de seguimiento reutilizado más tarde no
@@ -127,6 +129,16 @@ class PersonIdentificationModule(PerceptaModule):
         det = int(ctx.config.get("detSize", 640))
         self._app.prepare(ctx_id=-1, det_size=(det, det))
 
+        # Estimador de pose, POR SEPARADO y no dentro del pipeline de arriba.
+        #
+        # Medido en esta máquina: incluirlo en `allowed_modules` lleva el cuadro
+        # de 663 ms a 1112 ms —un 68% más, en todos los cuadros y para todas las
+        # caras—. Suelto cuesta 114 ms y se paga sólo por las pocas caras que son
+        # candidatas a preguntar, que son un puñado por persona cada diez
+        # minutos. Da el mismo valor: se comparó cara por cara y la diferencia
+        # fue 0.00 grados.
+        self._pose = self._cargar_pose(str(ctx.config.get("faceModel", "buffalo_l")))
+
         self._refrescar_galeria()
         # Las altas ocurren mientras el sistema corre: sin esto, un empleado
         # recién dado de alta seguiría apareciendo como desconocido hasta
@@ -170,6 +182,32 @@ class PersonIdentificationModule(PerceptaModule):
         self._parar.set()
         self._app = None
         self._ident = None
+
+    @staticmethod
+    def _cargar_pose(nombre_modelo: str):
+        """Modelo de puntos 3D del rostro: es el que sabe hacia dónde mira.
+
+        Si no está, se devuelve None y NO se pregunta por nadie: sin poder medir
+        la pose no hay forma de saber si el recorte muestra una cara o una nuca,
+        y preguntar por una nuca es una alerta que nadie puede contestar.
+        """
+        try:
+            import os
+
+            from insightface.model_zoo import get_model
+            from insightface.utils import ensure_available
+
+            raiz = ensure_available("models", nombre_modelo, root="~/.insightface")
+            ruta = os.path.join(raiz, "1k3d68.onnx")
+            if not os.path.exists(ruta):
+                log.error("falta %s: sin estimación de pose no se puede preguntar", ruta)
+                return None
+            m = get_model(ruta, providers=["CPUExecutionProvider"])
+            m.prepare(ctx_id=-1)
+            return m
+        except Exception:  # noqa: BLE001
+            log.exception("no se pudo cargar el estimador de pose")
+            return None
 
     # ── galería de empleados ────────────────────────────────────────
     def _vigilar_galeria(self) -> None:
@@ -220,13 +258,19 @@ class PersonIdentificationModule(PerceptaModule):
             # alta a alguien: su cara sigue en la lista de desconocidos, y ahí
             # no tiene nada que hacer.
             firma = self._firma_galeria(personas)
+            self._ident.galeria.actualizar(personas)
             if firma != self._firma_actual:
                 if self._firma_actual is not None:
-                    log.info("cambió la galería: se olvida a quién se le preguntó")
-                    self._ident.desconocidos.olvidar_todo()
+                    # Sólo se olvida a quien ya ES alguien. Olvidar a todos haría
+                    # que dar de alta a una persona reabriera las preguntas de
+                    # todas las demás que estaban en el cuadro.
+                    n = self._ident.desconocidos.olvidar_a_los_conocidos(
+                        self._ident.galeria, self._ident.cfg
+                    )
+                    if n:
+                        log.info("%d cara(s) dejaron de ser desconocidas: ya están dadas de alta", n)
                     self._preguntados.clear()
                 self._firma_actual = firma
-            self._ident.galeria.actualizar(personas)
         self._ultima_galeria = time.time()
         log.info("galería de rostros: %d persona(s) dadas de alta", len(personas))
 
@@ -266,25 +310,23 @@ class PersonIdentificationModule(PerceptaModule):
 
         # 2. Caras visibles en este frame.
         rostros: list[Rostro] = []
+        crudos: list = []
         for c in self._app.get(frame.image):
+            crudos.append(c)
             x1, y1, x2, y2 = (float(v) for v in c.bbox)
             emb = np.asarray(c.normed_embedding, dtype=np.float32)
-            # pose = (pitch, yaw, roll). El yaw es lo que decide si la cara se
-            # ve o si se está viendo un perfil.
-            pose = getattr(c, "pose", None)
             rostros.append(
                 Rostro(
                     vector=emb.tolist(),
                     x=max(x1 / w, 0.0), y=max(y1 / h, 0.0),
                     w=(x2 - x1) / w, h=(y2 - y1) / h,
                     calidad=float(getattr(c, "det_score", 1.0)),
-                    yaw=float(pose[1]) if pose is not None and len(pose) > 1 else 0.0,
-                    pitch=float(pose[0]) if pose is not None and len(pose) > 0 else 0.0,
                 )
             )
         self._rostros_vistos += len(rostros)
         if rostros:
             self._ultima_cara_alto = max(r.h for r in rostros)
+        self._medir_pose_de_candidatas(frame.image, rostros, crudos)
         identificaciones = self._ident.identificar(rostros, ahora=frame.captured_at)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -373,6 +415,29 @@ class PersonIdentificationModule(PerceptaModule):
 
         return InferenceResult(detections=detecciones, inference_ms=elapsed_ms)
 
+    def _medir_pose_de_candidatas(self, imagen, rostros: list[Rostro], crudos: list) -> None:
+        """Estima la pose sólo de las caras que podrían generar una pregunta.
+
+        El filtro barato va primero —tamaño y nitidez—: descarta la mayoría sin
+        gastar nada. Lo que queda son las pocas caras que un operador podría
+        llegar a ver, y ahí sí vale pagar los 114 ms.
+        """
+        if self._pose is None or self._ident is None:
+            return
+        cfg = self._ident.cfg
+        for r, c in zip(rostros, crudos):
+            if r.calidad < cfg.askMinScore or r.h < cfg.askMinFaceSize:
+                continue
+            try:
+                self._pose.get(imagen, c)
+                pose = getattr(c, "pose", None)
+                if pose is not None and len(pose) > 1:
+                    r.pitch = float(pose[0])
+                    r.yaw = float(pose[1])
+                    self._poses_medidas += 1
+            except Exception:  # noqa: BLE001
+                log.exception("no se pudo estimar la pose de un rostro")
+
     def _identidad(
         self, caja: tuple[float, float, float, float],
         persona_id: str, nombre: str, via: str, confianza: float,
@@ -450,6 +515,8 @@ class PersonIdentificationModule(PerceptaModule):
             # Si queda por debajo de `minFaceSize`, la persona está demasiado
             # lejos de la cámara y no hay nada que el software pueda arreglar.
             "ultimaCaraAlto": round(self._ultima_cara_alto, 4),
+            "estimadorDePose": self._pose is not None,
+            "posesMedidas": self._poses_medidas,
             "minFaceSize": self._ident.cfg.minFaceSize if self._ident else None,
             "desconocidosEnMemoria": self._ident.desconocidos.recordados if self._ident else 0,
             "cuerposYaPreguntados": len(self._preguntados),
