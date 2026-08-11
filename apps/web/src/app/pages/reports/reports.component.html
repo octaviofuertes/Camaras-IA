@@ -138,7 +138,9 @@
                   <span class="mute" *ngIf="!p.identificado">—</span>
                 </td>
                 <td class="mute chico">
-                  <span *ngIf="!p.identificado">no se pudo atribuir a nadie</span>
+                  <span *ngIf="!p.identificado">
+                    suma de todos los no identificados, no una persona
+                  </span>
                 </td>
               </tr>
             </tbody>

@@ -173,7 +173,9 @@ function advertir(personas: FilaNominal[], sinIdentificar: number): string[] {
     avisos.push(
       `${pct}% del tiempo observado no se pudo atribuir a nadie. Ese tiempo NO se ` +
         'reparte entre las personas identificadas: hacerlo les sumaría minutos que ' +
-        'pueden haber sido de un visitante.',
+        'pueden haber sido de un visitante. Es la suma de todos los no ' +
+        'identificados a la vez, así que puede superar la duración del período: ' +
+        'tres personas durante una hora son tres horas.',
     );
   }
 

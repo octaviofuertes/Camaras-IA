@@ -364,7 +364,11 @@ class CameraPipeline(threading.Thread):
                 self.last_error = None
                 return
             self.last_error = f"analytics-service {r.status_code}: {r.text[:120]}"
-            log.warning("[%s] muestra por persona rechazada: %s", self.a.camera_id, self.last_error)
+            # Con el payload: un 500 repetido sin saber qué se mandó no se puede
+            # diagnosticar, y esta muestra es la única fuente del informe por
+            # persona — si se rechaza, ese informe queda vacío para siempre.
+            log.warning("[%s] muestra por persona rechazada: %s — payload: %s",
+                        self.a.camera_id, self.last_error, payload)
         except requests.RequestException as exc:
             self.last_error = f"analytics-service: {exc}"
             log.warning("[%s] no se pudo guardar la muestra por persona: %s", self.a.camera_id, exc)

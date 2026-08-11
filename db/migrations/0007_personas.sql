@@ -94,8 +94,26 @@ CREATE TABLE IF NOT EXISTS person_activity_samples (
     ),
     -- No se puede usar el teléfono sin estar presente.
     CONSTRAINT person_activity_tel_chk CHECK (phone_seconds <= present_seconds + 0.01),
-    CONSTRAINT person_activity_ventana_chk CHECK (present_seconds <= window_seconds + 1.0)
+    -- Una PERSONA no puede estar presente más tiempo del que duró la ventana.
+    -- La fila sin identificar es la excepción y no un descuido: agrupa a todos
+    -- los presentes que no se pudieron atribuir, así que sus segundos son
+    -- persona-segundos y tres personas durante un minuto son tres minutos.
+    -- Sin esta excepción, la restricción rechazaba TODAS las muestras del
+    -- pipeline en cuanto había más de una persona sin identificar en el cuadro,
+    -- y el informe por persona no se llenaba nunca.
+    CONSTRAINT person_activity_ventana_chk CHECK (
+        person_id IS NULL OR present_seconds <= window_seconds + 1.0
+    )
 );
+
+-- Para las bases que ya tenían la versión anterior de la restricción.
+DO $$
+BEGIN
+    ALTER TABLE person_activity_samples DROP CONSTRAINT IF EXISTS person_activity_ventana_chk;
+    ALTER TABLE person_activity_samples ADD CONSTRAINT person_activity_ventana_chk CHECK (
+        person_id IS NULL OR present_seconds <= window_seconds + 1.0
+    );
+END $$;
 
 SELECT create_hypertable('person_activity_samples', 'occurred_at', if_not_exists => TRUE);
 
