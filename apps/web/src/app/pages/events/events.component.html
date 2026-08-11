@@ -256,7 +256,7 @@
 <div class="modal-backdrop" *ngIf="reconociendo as rec" (click)="cerrarReconocimiento()">
   <div class="modal panel" (click)="$event.stopPropagation()">
     <div class="panel-head">
-      <h2 class="panel-title">Dar de alta a esta persona</h2>
+      <h2 class="panel-title">¿Quién es esta persona?</h2>
       <button class="icon-x" (click)="cerrarReconocimiento()">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M18 6 6 18M6 6l12 12" />
@@ -267,18 +267,51 @@
     <div class="modal-body">
       <img class="cara-modal" *ngIf="rec.faceThumbnail" [src]="urlMiniatura(rec)" alt="Rostro" />
 
-      <p class="modal-intro aviso">
+      <!-- La cara ya es de alguien: se dice antes de crear un duplicado -->
+      <div class="parecido" *ngIf="avisoParecido as av">
+        <p>{{ av.mensaje }}</p>
+        <div class="parecido-acciones">
+          <button class="btn btn-primary" (click)="sumarAlParecido()">
+            Sí, es {{ av.yaExiste?.displayName }}
+          </button>
+          <button class="btn" (click)="insistirConAlta()">No, es otra persona</button>
+        </div>
+      </div>
+
+      <!-- Sumarle este ángulo a alguien ya cargado. Es el camino habitual: así
+           el sistema la reconoce cada vez mejor en vez de duplicarla. -->
+      <div class="ya-cargadas" *ngIf="!avisoParecido && personasCargadas.length">
+        <div class="yc-titulo">¿Es alguien que ya está dado de alta?</div>
+        <p class="yc-ayuda">
+          Sumale esta foto y se la va a reconocer también desde este ángulo. Darla de alta
+          otra vez la parte en dos personas distintas en el informe.
+        </p>
+        <div class="yc-lista">
+          <button
+            class="yc-persona"
+            *ngFor="let p of personasCargadas"
+            [disabled]="guardandoPersona"
+            (click)="sumarAPersona(p)"
+          >
+            <span class="yc-nombre">{{ p.displayName }}</span>
+            <span class="yc-fotos">{{ p.facesCount }} foto(s)</span>
+          </button>
+        </div>
+        <div class="yc-sep"><span>o dala de alta como alguien nuevo</span></div>
+      </div>
+
+      <p class="modal-intro aviso" *ngIf="!avisoParecido">
         Vas a guardar el <strong>dato biométrico</strong> de esta persona. En Argentina es un
         dato sensible: requiere su consentimiento expreso e informado. Registrá abajo cómo se
         documentó — queda asociado a tu usuario.
       </p>
 
-      <label class="field">
+      <label class="field" *ngIf="!avisoParecido">
         <span>Nombre y apellido</span>
         <input type="text" [(ngModel)]="nombrePersona" placeholder="Ej: Juan Rodríguez" />
       </label>
 
-      <label class="field">
+      <label class="field" *ngIf="!avisoParecido">
         <span>Cómo se documentó el consentimiento</span>
         <input
           type="text"
@@ -289,7 +322,7 @@
       </label>
     </div>
 
-    <div class="modal-foot">
+    <div class="modal-foot" *ngIf="!avisoParecido">
       <button class="btn" (click)="cerrarReconocimiento()">Cancelar</button>
       <button
         class="btn btn-primary"

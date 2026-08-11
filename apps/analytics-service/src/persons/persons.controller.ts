@@ -52,7 +52,13 @@ export class PersonsController {
   @RequirePermissions('persons:write')
   async alta(
     @Req() req: Request,
-    @Body() body: { displayName?: string; consentBasis?: string; embedding?: number[]; notes?: string },
+    @Body() body: {
+      displayName?: string;
+      consentBasis?: string;
+      embedding?: number[];
+      notes?: string;
+      forzarNueva?: boolean;
+    },
   ) {
     if (!body?.displayName || !body?.consentBasis) {
       throw new BadRequestException('Faltan campos: displayName, consentBasis');
@@ -62,6 +68,7 @@ export class PersonsController {
       consentBasis: body.consentBasis,
       embedding: body.embedding,
       notes: body.notes,
+      forzarNueva: body.forzarNueva === true,
     });
   }
 

@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { DatabaseService } from '../db/database.service';
 import { PersonsRepository, type PersonaDto } from './persons.repository';
 import type { AuthContext } from '../auth/auth.types';
@@ -9,6 +15,8 @@ export interface AltaConRostro {
   /** Vector facial de 512 dimensiones que venía con la alerta. */
   embedding?: number[];
   notes?: string;
+  /** El operador ya vio el aviso de parecido y afirma que es otra persona. */
+  forzarNueva?: boolean;
 }
 
 export interface FilaNominal {
@@ -29,6 +37,34 @@ export interface InformeNominal {
 }
 
 const DIM_EMBEDDING = 512;
+
+/**
+ * Parecido a partir del cual esta cara probablemente ya está dada de alta.
+ *
+ * Deliberadamente MÁS BAJO que el umbral de identificación (0.42). No es una
+ * casualidad: si la cara superara ese umbral, el módulo la habría reconocido y
+ * no habría preguntado nada. Las altas duplicadas nacen justo en la franja de
+ * abajo — la misma persona de perfil contra su plantilla de frente da 0.30— y
+ * ahí es donde hay que avisar.
+ *
+ * Avisar no es bloquear: dos hermanos existen. Se le devuelve al operador quién
+ * cree el sistema que es, y decide él.
+ */
+const PARECIDO_SOSPECHOSO = 0.25;
+
+function coseno(a: number[], b: number[]): number {
+  if (a.length !== b.length || a.length === 0) return -1;
+  let num = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    num += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  if (na <= 0 || nb <= 0) return -1;
+  return num / (Math.sqrt(na) * Math.sqrt(nb));
+}
 
 @Injectable()
 export class PersonsService {
@@ -61,6 +97,24 @@ export class PersonsService {
     }
 
     return this.db.withTenant(auth.organizationId, async (c) => {
+      // Antes de crear a nadie: ¿esta cara ya es de alguien dado de alta?
+      //
+      // Sin esta comprobación, la misma persona vista de otro ángulo se daba de
+      // alta otra vez, y el informe le partía las horas entre dos filas con el
+      // mismo nombre. El operador no tiene forma de saberlo mirando un recorte.
+      if (datos.embedding?.length && !datos.forzarNueva) {
+        const parecida = await this.buscarParecida(c, datos.embedding);
+        if (parecida) {
+          throw new ConflictException({
+            message:
+              `Esta cara se parece a ${parecida.displayName}, que ya está dada de alta. ` +
+              'Si es la misma persona, sumale esta foto en vez de darla de alta otra vez: ' +
+              'con varios ángulos se la reconoce mejor.',
+            parecidaA: parecida,
+          });
+        }
+      }
+
       const id = await this.repo.alta(c, {
         organizationId: auth.organizationId,
         displayName: nombre,
@@ -74,6 +128,29 @@ export class PersonsService {
       this.logger.log(`alta de persona ${id} — consentimiento registrado por ${auth.userId}`);
       return { id };
     });
+  }
+
+  /**
+   * La persona dada de alta cuya cara más se parece a esta, si alguna.
+   *
+   * Se compara contra TODAS las plantillas de cada una y se toma la mejor, igual
+   * que hace el módulo: alguien con varias fotos se reconoce en más posiciones.
+   */
+  private async buscarParecida(
+    c: Parameters<Parameters<DatabaseService['withTenant']>[1]>[0],
+    embedding: number[],
+  ): Promise<{ id: string; displayName: string; parecido: number } | null> {
+    const galeria = await this.repo.galeria(c);
+    let mejor: { id: string; displayName: string; parecido: number } | null = null;
+    for (const p of galeria) {
+      for (const v of p.embeddings) {
+        const s = coseno(embedding, v);
+        if (s >= PARECIDO_SOSPECHOSO && (!mejor || s > mejor.parecido)) {
+          mejor = { id: p.id, displayName: p.displayName, parecido: Math.round(s * 1000) / 1000 };
+        }
+      }
+    }
+    return mejor;
   }
 
   /** Suma otra foto a una persona ya dada de alta (de perfil, con anteojos…). */

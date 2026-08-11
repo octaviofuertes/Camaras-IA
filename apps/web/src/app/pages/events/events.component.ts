@@ -3,7 +3,13 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { PageHeaderComponent } from '../../shared/page-header.component';
 import { ModuleIconComponent } from '../../shared/module-icon.component';
-import { EventsService, type EvidenceItem, type TrainingStats } from '../../core/events.service';
+import {
+  EventsService,
+  type EvidenceItem,
+  type PersonaCargada,
+  type ResultadoAlta,
+  type TrainingStats,
+} from '../../core/events.service';
 import { AI_MODULES } from '../../core/catalog';
 import {
   SEVERITY_CLASS,
@@ -75,6 +81,11 @@ export class EventsComponent implements OnInit, OnDestroy {
   nombrePersona = '';
   baseConsentimiento = '';
   guardandoPersona = false;
+  /** Las personas ya dadas de alta, para sumarle un ángulo a una existente. */
+  personasCargadas: PersonaCargada[] = [];
+  /** El servidor detectó que esta cara ya es de alguien. */
+  avisoParecido: ResultadoAlta | null = null;
+  forzarNueva = false;
 
   evidencias: EvidenceItem[] = [];
   cargandoEvidencias = false;
@@ -129,15 +140,59 @@ export class EventsComponent implements OnInit, OnDestroy {
     return e.eventType === 'person.unknown';
   }
 
-  /** Abre el diálogo para ponerle nombre a la persona de la alerta. */
+  /** Abre el diálogo para responder quién es la persona de la alerta. */
   abrirReconocimiento(e: EventItem): void {
     this.reconociendo = e;
     this.nombrePersona = '';
     this.baseConsentimiento = '';
+    this.avisoParecido = null;
+    this.forzarNueva = false;
+    // Las ya cargadas se ofrecen primero: sumarle este ángulo a quien ya está
+    // es casi siempre lo correcto, y es lo que hace que se la reconozca mejor
+    // la próxima vez. Darla de alta de nuevo la parte en dos en el informe.
+    this.api.personas().subscribe((ps) => (this.personasCargadas = ps));
+  }
+
+  /** "Es esta persona": suma el ángulo a alguien ya dado de alta. */
+  sumarAPersona(p: PersonaCargada): void {
+    const e = this.reconociendo;
+    if (!e) return;
+    const vector = desempaquetar(e.faceEmbedding);
+    if (!vector) return;
+
+    this.guardandoPersona = true;
+    this.api.sumarRostro(p.id, vector).subscribe((ok) => {
+      this.guardandoPersona = false;
+      this.reconociendo = null;
+      if (!ok) return;
+      this.busy = e.id;
+      this.api
+        .resolve(e.id, 'confirmed', `Otro ángulo de ${p.displayName}`)
+        .subscribe(() => {
+          this.busy = null;
+          this.load();
+        });
+    });
   }
 
   cerrarReconocimiento(): void {
     this.reconociendo = null;
+    this.avisoParecido = null;
+  }
+
+  /** "Es esta persona" desde el aviso de parecido. */
+  sumarAlParecido(): void {
+    const p = this.avisoParecido?.yaExiste;
+    if (!p) return;
+    this.avisoParecido = null;
+    this.sumarAPersona({ id: p.id, displayName: p.displayName, facesCount: 0 });
+  }
+
+  /** "No, es otra persona": se insiste con el alta. */
+  insistirConAlta(): void {
+    this.forzarNueva = true;
+    this.avisoParecido = null;
+    this.confirmarPersona();
   }
 
   /**
@@ -159,11 +214,22 @@ export class EventsComponent implements OnInit, OnDestroy {
         displayName: nombre,
         consentBasis: base,
         embedding: desempaquetar(e.faceEmbedding),
+        forzarNueva: this.forzarNueva,
       })
       .subscribe((res) => {
         this.guardandoPersona = false;
+        if (!res) {
+          this.reconociendo = null;
+          return;
+        }
+        // El servidor cree que esta cara ya es de alguien. Se muestra y se
+        // decide: sumarle el ángulo, o afirmar que es otra persona.
+        if (res.yaExiste) {
+          this.avisoParecido = res;
+          return;
+        }
         this.reconociendo = null;
-        if (!res) return;
+        if (!res.id) return;
         // La alerta se resuelve como confirmada: la pregunta fue respondida.
         this.busy = e.id;
         this.api.resolve(e.id, 'confirmed', `Dado de alta como ${nombre}`).subscribe(() => {

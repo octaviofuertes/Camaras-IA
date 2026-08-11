@@ -245,3 +245,39 @@ code {
   padding: 10px 12px;
   border-radius: var(--radius-sm);
 }
+
+/* ─── Sumarle un ángulo a alguien ya cargado ────────────────── */
+.ya-cargadas { display: flex; flex-direction: column; gap: 8px; }
+.yc-titulo { font-size: 13px; font-weight: 600; }
+.yc-ayuda { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--text-mute); }
+.yc-lista { display: flex; flex-direction: column; gap: 6px; max-height: 190px; overflow-y: auto; }
+
+.yc-persona {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 9px 12px; text-align: left; cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text); font: inherit; font-size: 12.5px;
+
+  &:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+  &:disabled { opacity: .5; cursor: not-allowed; }
+}
+.yc-nombre { font-weight: 600; }
+.yc-fotos { font-size: 11px; color: var(--text-mute); }
+
+.yc-sep {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 11px; color: var(--text-mute); margin: 2px 0;
+
+  &::before, &::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+}
+
+/* El aviso de que esa cara ya es de alguien: reemplaza al formulario, no
+   convive con él — son dos decisiones distintas y mezclarlas confunde. */
+.parecido {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 13px 14px; border-radius: var(--radius-sm);
+  background: rgba(251, 191, 36, .07); border: 1px solid rgba(251, 191, 36, .3);
+
+  p { margin: 0; font-size: 12.5px; line-height: 1.55; color: #fcd34d; }
+}
+.parecido-acciones { display: flex; gap: 8px; flex-wrap: wrap; }

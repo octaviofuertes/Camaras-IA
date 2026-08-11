@@ -47,6 +47,21 @@ export interface AltaPersona {
   displayName: string;
   consentBasis: string;
   embedding?: number[];
+  /** El operador ya vio el aviso de parecido y afirma que es otra persona. */
+  forzarNueva?: boolean;
+}
+
+export interface PersonaCargada {
+  id: string;
+  displayName: string;
+  facesCount: number;
+}
+
+/** Resultado del alta: creada, o rechazada porque esa cara ya es de alguien. */
+export interface ResultadoAlta {
+  id?: string;
+  yaExiste?: { id: string; displayName: string; parecido: number };
+  mensaje?: string;
 }
 
 export interface TrainingStats {
@@ -137,10 +152,40 @@ export class EventsService {
    * `consentBasis` es obligatorio y la base lo hace cumplir: sin él no se puede
    * guardar el dato biométrico de nadie.
    */
-  altaPersona(p: AltaPersona): Observable<{ id: string } | null> {
+  altaPersona(p: AltaPersona): Observable<ResultadoAlta | null> {
+    return this.http.post<{ id: string }>('/analytics/api/v1/persons', p).pipe(
+      map((r) => ({ id: r.id } as ResultadoAlta)),
+      catchError((err: HttpErrorResponse) => {
+        // 409: la cara se parece a alguien ya dado de alta. No es un error que
+        // haya que esconder — es justamente lo que evita partir a una persona
+        // en dos filas del informe.
+        if (err.status === 409) {
+          const cuerpo = err.error ?? {};
+          return of({ yaExiste: cuerpo.parecidaA, mensaje: cuerpo.message } as ResultadoAlta);
+        }
+        return of(null);
+      }),
+    );
+  }
+
+  /** Las personas ya dadas de alta, para poder sumarle una foto a una existente. */
+  personas(): Observable<PersonaCargada[]> {
     return this.http
-      .post<{ id: string }>('/analytics/api/v1/persons', p)
-      .pipe(catchError(() => of(null)));
+      .get<{ items: PersonaCargada[] }>('/analytics/api/v1/persons')
+      .pipe(map((r) => r.items ?? []), catchError(() => of([])));
+  }
+
+  /**
+   * Suma este ángulo a alguien ya dado de alta.
+   *
+   * Es lo que hace que el reconocimiento mejore con el uso: el módulo compara
+   * contra TODAS las plantillas de cada persona y se queda con la mejor, así que
+   * de frente, de perfil y con anteojos se reconocen todas.
+   */
+  sumarRostro(personId: string, embedding: number[]): Observable<boolean> {
+    return this.http
+      .post(`/analytics/api/v1/persons/${personId}/faces`, { embedding })
+      .pipe(map(() => true), catchError(() => of(false)));
   }
 
   /** URL de descarga del clip. El archivo lo sirve media-service. */
