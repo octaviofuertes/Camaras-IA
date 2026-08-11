@@ -194,6 +194,152 @@ def test_la_memoria_no_crece_sin_limite():
     )
 
 
+# ── el puesto como identidad, y lo que impide que se herede ────────
+
+def test_el_puesto_lo_identifica_aunque_la_ropa_ya_no_sirva():
+    """Lo que se le pide al sistema: verle la cara UNA vez y saber que es él ahí.
+
+    Se le ve la cara al llegar, se sienta de espaldas y —cambio de luz, se saca
+    el saco, se tapa el torso con el escritorio— la apariencia deja de servir.
+    El escritorio sigue siendo el suyo mientras no se haya ido.
+    """
+    ident = IdentidadSostenida()
+    ident.anclar_por_rostro(1, "p-juan", "Juan", apariencia(1), (0.35, 0.62), ahora=0.0)
+
+    t = 0.0
+    vias = set()
+    for i in range(1, 400):          # ~13 minutos a 2 s por frame
+        t = i * 2.0
+        # Track nuevo en cada frame (el peor caso: el tracker no ayuda nada) y
+        # una apariencia que no se parece a la que se registró.
+        r = ident.resolver(1000 + i, apariencia(777), (0.35, 0.62), ahora=t)
+        assert r.persona_id == "p-juan", f"lo perdió en el minuto {t/60:.1f} ({r.via})"
+        vias.add(r.via)
+
+    assert vias == {"puesto"}, vias
+
+
+def test_si_se_fue_el_puesto_ya_no_lo_identifica():
+    """La contracara: el escritorio vacío un rato deja de ser de nadie.
+
+    Es el error caro de esta vía. Juan se fue, se sienta otro en su lugar, y sin
+    esto le quedaría el nombre de Juan y su tiempo con el teléfono.
+    """
+    ident = IdentidadSostenida()
+    ident.anclar_por_rostro(1, "p-juan", "Juan", apariencia(1), (0.35, 0.62), ahora=0.0)
+    assert ident.resolver(50, apariencia(777), (0.35, 0.62), ahora=10.0).persona_id == "p-juan"
+
+    # Nadie en ese puesto durante un minuto. Después llega otro.
+    r = ident.resolver(51, apariencia(777), (0.35, 0.62), ahora=80.0)
+    assert r.persona_id is None, f"le heredó la identidad de Juan a quien se sentó después ({r.via})"
+
+
+def test_un_escritorio_compartido_no_identifica_a_ninguno():
+    """Dos personas con la cara vista en el mismo lugar: no se puede elegir."""
+    ident = IdentidadSostenida()
+    ident.anclar_por_rostro(1, "p-a", "Ana", apariencia(2), (0.40, 0.60), ahora=0.0)
+    ident.anclar_por_rostro(2, "p-b", "Beto", apariencia(3), (0.42, 0.61), ahora=0.0)
+
+    r = ident.resolver(60, apariencia(999), (0.41, 0.60), ahora=10.0)
+    assert r.persona_id is None, f"eligió a {r.nombre} en un escritorio compartido"
+
+
+def test_un_cuerpo_lejos_del_puesto_no_es_esa_persona():
+    """El puesto identifica a quien está EN el puesto, no a cualquiera del cuadro.
+
+    Sin la distancia, el escritorio de Juan le pondría su nombre a todo el que
+    aparezca mientras él sigue sentado ahí.
+    """
+    ident = IdentidadSostenida()
+    ident.anclar_por_rostro(1, "p-juan", "Juan", apariencia(1), (0.35, 0.62), ahora=0.0)
+
+    # Otro cuerpo, al otro lado del cuadro, sin ropa reconocible.
+    r = ident.resolver(80, apariencia(777), (0.85, 0.62), ahora=10.0)
+    assert r.persona_id is None, f"identificó como Juan a alguien lejos de su puesto ({r.via})"
+
+
+def test_el_puesto_caduca_aunque_la_persona_no_se_haya_movido():
+    """Presente sin interrupción todo el día, con la cara vista sólo a la mañana.
+
+    El puesto no puede valer para siempre por el solo hecho de que haya un
+    cuerpo ahí: pasadas las horas de una jornada hay que volver a verle la cara.
+    De lo contrario, el turno siguiente hereda el nombre del anterior sin que el
+    escritorio haya estado vacío un segundo.
+    """
+    cfg = ConfigContinuidad(puestoHoras=8.0)
+    ident = IdentidadSostenida(cfg)
+    ident.anclar_por_rostro(1, "p-juan", "Juan", apariencia(1), (0.35, 0.62), ahora=0.0)
+
+    # Presente cada 10 s durante nueve horas, sin volver a mostrar la cara ni
+    # una ropa reconocible: sólo lo sostiene el puesto.
+    t = 0.0
+    identificado_hasta = 0.0
+    while t < 9 * 3600.0:
+        t += 10.0
+        r = ident.resolver(int(t), apariencia(777), (0.35, 0.62), ahora=t)
+        if r.persona_id == "p-juan":
+            identificado_hasta = t
+        else:
+            break
+
+    assert identificado_hasta > 7 * 3600.0, (
+        f"lo perdió demasiado pronto: a las {identificado_hasta/3600:.1f} h"
+    )
+    assert identificado_hasta < 8.5 * 3600.0, (
+        f"lo siguió identificando por puesto {identificado_hasta/3600:.1f} h después "
+        "de verle la cara: el turno siguiente heredaría su nombre"
+    )
+
+
+def test_perder_el_seguimiento_unos_segundos_no_hereda_identidad():
+    """La ventana corta: entre la gracia del track y su purga.
+
+    Cinco segundos después de perderlo, ese número de seguimiento ya no
+    garantiza que sea la misma persona — y el tracker los reutiliza.
+    """
+    cfg = ConfigContinuidad(trackGraciaSegundos=5.0)
+    ident = IdentidadSostenida(cfg)
+    ident.anclar_por_rostro(7, "p-juan", "Juan", apariencia(1), (0.30, 0.62), ahora=100.0)
+
+    # A los 10 s: la entrada del track todavía existe, pero ya venció su gracia.
+    # Otra persona, otra ropa, otro lugar.
+    r = ident.resolver(7, apariencia(999), (0.80, 0.62), ahora=110.0)
+    assert r.persona_id is None, (
+        f"a los 10 s de perder el seguimiento le pasó la identidad de Juan a otro ({r.via})"
+    )
+
+
+def test_el_puesto_no_sobrevive_a_la_jornada():
+    """Mañana ese escritorio puede ser de otro: hay que volver a verle la cara."""
+    cfg = ConfigContinuidad(puestoHoras=8.0)
+    ident = IdentidadSostenida(cfg)
+    ident.anclar_por_rostro(1, "p-juan", "Juan", apariencia(1), (0.35, 0.62), ahora=0.0)
+
+    al_dia_siguiente = 20 * 3600.0
+    r = ident.resolver(90, apariencia(1), (0.35, 0.62), ahora=al_dia_siguiente)
+    assert r.persona_id is None, "el puesto de ayer no puede identificar a nadie hoy"
+
+
+def test_caminar_por_la_oficina_no_le_mueve_el_puesto():
+    """El puesto es donde se le vio la CARA, no donde estaba el último cuerpo.
+
+    Antes lo pisaba cualquier resolución: quien se levantaba a la impresora
+    dejaba su "puesto" allá, y volver a su escritorio ya no lo reconocía.
+    """
+    ident = IdentidadSostenida()
+    ropa = apariencia(1)
+    ident.anclar_por_rostro(1, "p-juan", "Juan", ropa, (0.35, 0.62), ahora=0.0)
+
+    # Se levanta y camina: se lo sigue reconociendo por la ropa, lejos del puesto.
+    for i, x in enumerate([0.45, 0.55, 0.70, 0.85], start=1):
+        r = ident.resolver(1, ropa, (x, 0.62), ahora=i * 2.0)
+        assert r.persona_id == "p-juan"
+
+    # Vuelve a sentarse. Ahora sin ropa reconocible: sólo puede salvarlo el puesto.
+    r = ident.resolver(200, apariencia(777), (0.35, 0.62), ahora=12.0)
+    assert r.persona_id == "p-juan", f"se le movió el puesto al caminar ({r.via})"
+
+
 if __name__ == "__main__":
     import sys
 

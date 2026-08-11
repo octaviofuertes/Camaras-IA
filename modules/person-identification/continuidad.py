@@ -58,9 +58,25 @@ class ConfigContinuidad:
     # por delante— sin heredarle la identidad al próximo que ocupe ese id.
     trackGraciaSegundos: float = 5.0
 
-    # Distancia máxima (en anchos de imagen) para considerar que alguien volvió
-    # "al mismo puesto". Es una señal de apoyo, nunca decide sola.
+    # Distancia máxima (en anchos de imagen) para considerar que alguien está
+    # "en el mismo puesto" donde se le vio la cara.
     puestoRadio: float = 0.12
+    # Cuánto vale un puesto sin volver a verle la cara a nadie ahí. Cubre una
+    # jornada: quien se sentó a la mañana sigue siendo el de ese escritorio a
+    # la tarde. Al día siguiente hay que volver a verle la cara.
+    puestoHoras: float = 8.0
+    # Confianza de una identificación resuelta SÓLO por puesto. Baja a
+    # propósito: es la vía más débil y el informe la muestra.
+    puestoConfianza: float = 0.62
+    # Cuánto puede desaparecer alguien del cuadro sin que el puesto deje de
+    # valer para identificarlo.
+    #
+    # Es LA salvaguarda de esta vía. Sostiene el caso real —se sentó, se le vio
+    # la cara, se dio vuelta y sigue ahí— y corta el caso peligroso: Juan se fue,
+    # el escritorio quedó vacío un rato y se sentó otro. Lo que los distingue no
+    # es la posición, que es idéntica, sino el hueco. Sin esto, cualquiera que se
+    # siente en el puesto de Juan hereda su nombre y su tiempo con el teléfono.
+    puestoContinuidadSegundos: float = 30.0
 
 
 @dataclass
@@ -71,7 +87,14 @@ class Anclaje:
     # Firmas de apariencia vistas hoy para esta persona. Varias porque alguien
     # se saca el saco a media mañana y sigue siendo la misma persona.
     apariencias: list[tuple[list[float], float]] = field(default_factory=list)
-    ultimo_puesto: tuple[float, float] | None = None
+    # Dónde se le vio la CARA por última vez: su puesto de trabajo.
+    #
+    # Sólo lo mueve `anclar_por_rostro`. Antes lo pisaba cualquier resolución,
+    # así que alguien que se levantaba a buscar algo dejaba su "puesto" junto a
+    # la impresora y volver a su escritorio ya no lo reconocía. El puesto es
+    # dónde se sabe que estuvo esa persona, no dónde estaba el último cuerpo.
+    puesto: tuple[float, float] | None = None
+    puesto_visto: float = 0.0
     visto_por_rostro: float = 0.0
     ultima_vez: float = 0.0
 
@@ -116,7 +139,8 @@ class IdentidadSostenida:
         a.visto_por_rostro = ahora
         a.ultima_vez = ahora
         if posicion is not None:
-            a.ultimo_puesto = posicion
+            a.puesto = posicion
+            a.puesto_visto = ahora
         if apariencia:
             a.apariencias.append((apariencia, ahora))
             # Se conservan unas pocas firmas recientes: alcanzan para cubrir un
@@ -145,8 +169,6 @@ class IdentidadSostenida:
                 if a is not None:
                     self._por_track[track_id] = (persona_id, ahora)
                     a.ultima_vez = ahora
-                    if posicion is not None:
-                        a.ultimo_puesto = posicion
                     return Resolucion(persona_id, a.nombre, "seguimiento", 0.95)
             else:
                 # El id se reutiliza: sin esto, el próximo que reciba este
@@ -166,16 +188,36 @@ class IdentidadSostenida:
                 # levantarse a buscar algo y volver.
                 via = "apariencia"
                 confianza = min(parecido, 0.90)
-                if posicion is not None and mejor.ultimo_puesto is not None:
-                    if _cerca(posicion, mejor.ultimo_puesto, cfg.puestoRadio):
+                if posicion is not None and mejor.puesto is not None:
+                    if _cerca(posicion, mejor.puesto, cfg.puestoRadio):
                         via = "puesto"
                         confianza = min(parecido + 0.05, 0.92)
 
                 self._por_track[track_id] = (mejor.persona_id, ahora)
                 mejor.ultima_vez = ahora
-                if posicion is not None:
-                    mejor.ultimo_puesto = posicion
                 return Resolucion(mejor.persona_id, mejor.nombre, via, confianza)
+
+        # 3. El puesto, solo. Es la vía que cubre a quien se sentó de espaldas y
+        #    ya no se le va a ver la cara ni la ropa igual que cuando llegó:
+        #    basta con haberle visto la cara UNA vez en ese escritorio.
+        #
+        #    Sólo resuelve si hay UN candidato en ese lugar. Dos personas pueden
+        #    compartir escritorio, y ahí atribuirle el tiempo a cualquiera de las
+        #    dos sería inventar — se prefiere "sin identificar", que es visible.
+        if posicion is not None:
+            cerca = [
+                a for a in self._anclajes.values()
+                if a.puesto is not None   # `_olvidar_vencidos` ya anuló los de ayer
+                # Sin interrupción: si desapareció del cuadro, ya no se puede
+                # afirmar que el cuerpo que hay ahora en ese puesto sea el suyo.
+                and ahora - a.ultima_vez <= cfg.puestoContinuidadSegundos
+                and _cerca(posicion, a.puesto, cfg.puestoRadio)
+            ]
+            if len(cerca) == 1:
+                a = cerca[0]
+                self._por_track[track_id] = (a.persona_id, ahora)
+                a.ultima_vez = ahora
+                return Resolucion(a.persona_id, a.nombre, "puesto", cfg.puestoConfianza)
 
         return Resolucion(None, None, "ninguna", 0.0)
 
@@ -199,10 +241,16 @@ class IdentidadSostenida:
         Es lo que impide que la ropa de ayer identifique a alguien hoy.
         """
         limite = self.cfg.aparienciaHoras * 3600.0
+        limite_puesto = self.cfg.puestoHoras * 3600.0
         vacios = []
         for pid, a in self._anclajes.items():
             a.apariencias = [(v, t) for v, t in a.apariencias if ahora - t <= limite]
-            if not a.apariencias and ahora - a.ultima_vez > limite:
+            # El puesto vence por su cuenta: mañana el escritorio puede ser de
+            # otro, y heredarle la identidad al que se siente ahí sería el peor
+            # error posible de este módulo.
+            if a.puesto is not None and ahora - a.puesto_visto > limite_puesto:
+                a.puesto = None
+            if not a.apariencias and a.puesto is None and ahora - a.ultima_vez > limite:
                 vacios.append(pid)
         for pid in vacios:
             del self._anclajes[pid]
@@ -218,6 +266,7 @@ class IdentidadSostenida:
             "identidadesSostenidas": len(self._anclajes),
             "seguimientosAnclados": len(self._por_track),
             "firmasDeApariencia": sum(len(a.apariencias) for a in self._anclajes.values()),
+            "puestosConocidos": sum(1 for a in self._anclajes.values() if a.puesto is not None),
         }
 
 

@@ -453,6 +453,10 @@ class PersonIdentificationModule(PerceptaModule):
             "minFaceSize": self._ident.cfg.minFaceSize if self._ident else None,
             "desconocidosEnMemoria": self._ident.desconocidos.recordados if self._ident else 0,
             "cuerposYaPreguntados": len(self._preguntados),
+            # Lo que sostiene la identidad cuando la cara no se ve: a cuánta
+            # gente se le conoce el puesto es la respuesta a "¿va a seguir
+            # sabiendo quién es cuando se dé vuelta?".
+            **(self._sostenida.estado() if self._sostenida else {}),
             "galeriaActualizadaHace": (
                 round(time.time() - self._ultima_galeria, 1) if self._ultima_galeria else None
             ),
