@@ -55,6 +55,12 @@ from rostros import (  # noqa: E402
     Identificador,
     Persona,
     Rostro,
+    asociar_a_cuerpo,
+)
+from continuidad import (  # noqa: E402
+    ConfigContinuidad,
+    IdentidadSostenida,
+    firma_apariencia,
 )
 
 log = logging.getLogger(__name__)
@@ -63,8 +69,10 @@ log = logging.getLogger(__name__)
 class PersonIdentificationModule(PerceptaModule):
     def __init__(self) -> None:
         self._app: Any = None
+        self._yolo: Any = None
         self._ctx: ModuleContext | None = None
         self._ident: Identificador | None = None
+        self._sostenida: IdentidadSostenida | None = None
         self._loaded_at = 0.0
         self._identificados = 0
         self._preguntas = 0
@@ -75,8 +83,27 @@ class PersonIdentificationModule(PerceptaModule):
     def load(self, ctx: ModuleContext) -> None:
         from insightface.app import FaceAnalysis  # import perezoso
 
+        from ultralytics import YOLO
+
         self._ctx = ctx
         self._ident = Identificador(self._config_validada(ctx.config))
+
+        # La cara es el ancla, pero en una oficina la gente pasa el día sentada
+        # y de espaldas. Sin seguir cuerpos, la identidad se perdería apenas la
+        # persona se da vuelta y el informe diría "sin identificar" casi
+        # siempre. Ver `continuidad.py`.
+        cfg_cont = ConfigContinuidad()
+        for campo in ("aparienciaThreshold", "aparienciaMargin", "aparienciaHoras",
+                      "trackGraciaSegundos", "puestoRadio"):
+            if campo in (ctx.config or {}):
+                try:
+                    setattr(cfg_cont, campo, float(ctx.config[campo]))
+                except (TypeError, ValueError):
+                    log.warning("config: %s inválido, se usa el valor por omisión", campo)
+        self._sostenida = IdentidadSostenida(cfg_cont)
+
+        self._yolo = YOLO(str(ctx.config.get("personWeights", "yolov8n.pt")))
+        self._yolo.to("cpu" if ctx.device.startswith("cpu") else ctx.device)
 
         # Sólo detección y reconocimiento. `buffalo_l` trae además estimación de
         # edad, género y puntos faciales: cuesta tiempo de CPU y produce
@@ -175,16 +202,32 @@ class PersonIdentificationModule(PerceptaModule):
 
     # ── inferencia ──────────────────────────────────────────────────
     def infer(self, frame: Frame) -> InferenceResult:
-        if self._app is None or self._ident is None:
+        if self._app is None or self._ident is None or self._sostenida is None:
             raise RuntimeError("el módulo no fue cargado (falta load())")
 
         t0 = time.perf_counter()
-        caras = self._app.get(frame.image)
-        elapsed_ms = (time.perf_counter() - t0) * 1000.0
-
         h, w = frame.image.shape[:2]
+
+        # 1. Cuerpos con identidad de seguimiento. Es lo que permite sostener
+        #    quién es alguien cuando se da vuelta.
+        cuerpos: list[tuple[int, tuple[float, float, float, float]]] = []
+        for r in self._yolo.track(
+            frame.image, classes=[0], conf=0.35, persist=True,
+            tracker="bytetrack.yaml", verbose=False, device="cpu",
+        ):
+            cajas = getattr(r, "boxes", None)
+            if cajas is None:
+                continue
+            for b in cajas:
+                tid = int(b.id.item()) if getattr(b, "id", None) is not None else -1
+                if tid < 0:
+                    continue
+                x1, y1, x2, y2 = (float(v) for v in b.xyxy[0].tolist())
+                cuerpos.append((tid, (x1 / w, y1 / h, (x2 - x1) / w, (y2 - y1) / h)))
+
+        # 2. Caras visibles en este frame.
         rostros: list[Rostro] = []
-        for c in caras:
+        for c in self._app.get(frame.image):
             x1, y1, x2, y2 = (float(v) for v in c.bbox)
             emb = np.asarray(c.normed_embedding, dtype=np.float32)
             rostros.append(
@@ -195,29 +238,31 @@ class PersonIdentificationModule(PerceptaModule):
                     calidad=float(getattr(c, "det_score", 1.0)),
                 )
             )
+        identificaciones = self._ident.identificar(rostros, ahora=frame.captured_at)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
-        resultados = self._ident.identificar(rostros, ahora=frame.captured_at)
+        cajas_cuerpo = [c for _, c in cuerpos]
         detecciones: list[Detection] = []
+        anclados: set[int] = set()
 
-        for res in resultados:
-            r = res.rostro
-            bbox = (r.x, r.y, r.w, r.h)
+        # 3. Las caras reconocidas ANCLAN su identidad al cuerpo que las lleva.
+        for res in identificaciones:
+            idx = asociar_a_cuerpo(res.rostro, cajas_cuerpo)
 
-            if res.persona_id:
+            if res.persona_id and idx is not None:
+                tid, caja = cuerpos[idx]
+                self._sostenida.anclar_por_rostro(
+                    track_id=tid,
+                    persona_id=res.persona_id,
+                    nombre=res.nombre or "",
+                    apariencia=self._apariencia(frame.image, caja),
+                    posicion=(caja[0] + caja[2] / 2, caja[1] + caja[3]),
+                    ahora=frame.captured_at,
+                )
+                anclados.add(tid)
                 self._identificados += 1
                 detecciones.append(
-                    Detection(
-                        class_label="person.identified",
-                        class_id=0,
-                        confidence=round(res.parecido, 4),
-                        bbox=bbox,
-                        attributes={
-                            "kind": "identity",
-                            "personId": res.persona_id,
-                            "personName": res.nombre or "",
-                            "similarity": f"{res.parecido:.4f}",
-                        },
-                    )
+                    self._identidad(caja, res.persona_id, res.nombre or "", "rostro", res.parecido)
                 )
                 continue
 
@@ -225,35 +270,90 @@ class PersonIdentificationModule(PerceptaModule):
                 self._preguntas += 1
                 detecciones.append(
                     Detection(
-                        class_label="person.unknown",
-                        class_id=0,
-                        confidence=float(r.calidad),
-                        bbox=bbox,
+                        class_label="person.unknown", class_id=0,
+                        confidence=float(res.rostro.calidad),
+                        bbox=(res.rostro.x, res.rostro.y, res.rostro.w, res.rostro.h),
                         attributes={
-                            # Alerta: es una pregunta para una persona, no una
-                            # medición. Va a la cola de revisión.
                             "kind": "alert",
-                            "confirmed": "true",   # no necesita persistencia extra
-                            "faceThumbnail": self._recorte(frame.image, r),
-                            "embedding": _empaquetar(r.vector),
+                            "confirmed": "true",
+                            "faceThumbnail": self._recorte(frame.image, res.rostro),
+                            "embedding": _empaquetar(res.rostro.vector),
                             "reason": "rostro no reconocido",
                         },
                     )
                 )
-                continue
 
-            # Presente pero sin identificar (ambiguo, chico, ya preguntado).
-            detecciones.append(
-                Detection(
-                    class_label="person.unidentified",
-                    class_id=0,
-                    confidence=0.0,
-                    bbox=bbox,
-                    attributes={"kind": "identity", "personId": "", "reason": res.motivo},
-                )
+        # 4. Los cuerpos sin cara reconocida en este frame: se resuelve por
+        #    continuidad de seguimiento, apariencia o puesto. Es la vía que
+        #    cubre a quien está sentado de espaldas, o sea casi toda la jornada.
+        for tid, caja in cuerpos:
+            if tid in anclados:
+                continue
+            r = self._sostenida.resolver(
+                track_id=tid,
+                apariencia=self._apariencia(frame.image, caja),
+                posicion=(caja[0] + caja[2] / 2, caja[1] + caja[3]),
+                ahora=frame.captured_at,
             )
+            if r.persona_id:
+                self._identificados += 1
+                detecciones.append(
+                    self._identidad(caja, r.persona_id, r.nombre or "", r.via, r.confianza)
+                )
+            else:
+                detecciones.append(
+                    Detection(
+                        class_label="person.unidentified", class_id=0, confidence=0.0,
+                        bbox=caja,
+                        attributes={"kind": "identity", "personId": "", "via": "ninguna"},
+                    )
+                )
 
         return InferenceResult(detections=detecciones, inference_ms=elapsed_ms)
+
+    def _identidad(
+        self, caja: tuple[float, float, float, float],
+        persona_id: str, nombre: str, via: str, confianza: float,
+    ) -> Detection:
+        """Identidad de un cuerpo, con la vía por la que se supo.
+
+        `via` viaja hasta el informe a propósito: mostrar "Juan: 6 h" sin decir
+        que cuatro de esas horas salen de continuidad y no de haberle visto la
+        cara sería esconder de dónde sale el propio número.
+        """
+        return Detection(
+            class_label="person.identified", class_id=0,
+            confidence=round(float(confianza), 4), bbox=caja,
+            attributes={
+                "kind": "identity",
+                "personId": persona_id,
+                "personName": nombre,
+                "via": via,
+            },
+        )
+
+    def _apariencia(self, imagen: np.ndarray, caja: tuple[float, float, float, float]) -> list[float]:
+        """Firma de apariencia del torso: colores de la ropa.
+
+        Histograma HSV grueso de la franja superior del cuerpo. No es
+        reconocimiento de personas: sirve sólo para volver a enganchar a alguien
+        DENTRO del mismo día, y por eso vence (ver `continuidad.py`). Mañana la
+        misma persona con otra ropa da otra firma, y eso es correcto.
+        """
+        h, w = imagen.shape[:2]
+        x, y, bw, bh = caja
+        # Franja del torso: se saltea la cabeza y no se llega a las piernas,
+        # que quedan tapadas por el escritorio en la mitad de los casos.
+        x1 = max(int((x + bw * 0.15) * w), 0)
+        x2 = min(int((x + bw * 0.85) * w), w)
+        y1 = max(int((y + bh * 0.18) * h), 0)
+        y2 = min(int((y + bh * 0.55) * h), h)
+        if x2 - x1 < 4 or y2 - y1 < 4:
+            return []
+
+        torso = cv2.cvtColor(imagen[y1:y2, x1:x2], cv2.COLOR_BGR2HSV)
+        hist = cv2.calcHist([torso], [0, 1], None, [12, 4], [0, 180, 0, 256])
+        return firma_apariencia(hist.flatten().tolist())
 
     def _recorte(self, imagen: np.ndarray, r: Rostro) -> str:
         """Recorte del rostro para que el operador pueda responder la pregunta.

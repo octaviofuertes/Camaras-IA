@@ -63,6 +63,8 @@ class WorkstationActivityModule(PerceptaModule):
         self._imgsz = 640
         self._loaded_at = 0.0
         self._muestras_emitidas = 0
+        # Identidades que dejó `person-identification` en este frame.
+        self._identidades_frame: list = []
 
     def load(self, ctx: ModuleContext) -> None:
         from ultralytics import YOLO  # import perezoso
@@ -81,6 +83,19 @@ class WorkstationActivityModule(PerceptaModule):
         self._model = YOLO(weights)
         self._model.to("cpu" if ctx.device.startswith("cpu") else ctx.device)
         self._loaded_at = time.time()
+
+    def observar_contexto(self, detecciones: list) -> None:
+        """Recibe quién es cada persona, del módulo de identificación.
+
+        Sin esto el informe repartiría el tiempo de teléfono entre todos los
+        presentes, y quien no lo usó quedaría igual de mal que quien sí. El
+        manifiesto declara esa dependencia con `requires`, así que el pipeline
+        garantiza que este contexto llegó antes de llamar a `infer`.
+        """
+        self._identidades_frame = [
+            d for d in detecciones
+            if d.attributes.get("kind") == "identity" and d.attributes.get("personId")
+        ]
 
     def _zonas_de(self, ctx: ModuleContext) -> list[Zona]:
         """Traduce las zonas de la cámara a puestos de trabajo.
@@ -181,7 +196,12 @@ class WorkstationActivityModule(PerceptaModule):
                     telefonos.append(caja)
 
         muestras = self._contador.observar(
-            Observacion(ts=frame.captured_at, personas=personas, telefonos=telefonos)
+            Observacion(
+                ts=frame.captured_at,
+                personas=personas,
+                telefonos=telefonos,
+                identidades=[self._quien_es(p) for p in personas],
+            )
         )
         self._muestras_emitidas += len(muestras)
 
@@ -189,6 +209,23 @@ class WorkstationActivityModule(PerceptaModule):
             detections=[self._a_deteccion(m) for m in muestras],
             inference_ms=elapsed_ms,
         )
+
+    def _quien_es(self, persona: Caja) -> tuple[str, str] | None:
+        """Empareja un cuerpo detectado acá con una identidad del módulo anterior.
+
+        Se emparejan por superposición de recuadros: los dos módulos miran el
+        mismo frame pero corren su propio detector, así que las cajas son
+        parecidas y no idénticas. Se exige una superposición alta para no
+        atribuirle a alguien la identidad de quien tiene al lado.
+        """
+        mejor, mejor_iou = None, 0.0
+        for d in self._identidades_frame:
+            iou = _superposicion((persona.x, persona.y, persona.w, persona.h), d.bbox)
+            if iou > mejor_iou:
+                mejor, mejor_iou = d, iou
+        if mejor is None or mejor_iou < 0.45:
+            return None
+        return (mejor.attributes["personId"], mejor.attributes.get("personName", ""))
 
     def _a_deteccion(self, m: MuestraZona) -> Detection:
         """Traduce una ventana cerrada al contrato de detección.
@@ -235,6 +272,19 @@ class WorkstationActivityModule(PerceptaModule):
                 log.info("se cierran %d muestra(s) pendientes al liberar", len(pendientes))
         self._model = None
         self._contador = None
+
+
+def _superposicion(a: tuple, b: tuple) -> float:
+    """Intersección sobre unión de dos recuadros normalizados."""
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    x1, y1 = max(ax, bx), max(ay, by)
+    x2, y2 = min(ax + aw, bx + bw), min(ay + ah, by + bh)
+    if x2 <= x1 or y2 <= y1:
+        return 0.0
+    inter = (x2 - x1) * (y2 - y1)
+    union = aw * ah + bw * bh - inter
+    return inter / union if union > 0 else 0.0
 
 
 MODULE_CLASS = WorkstationActivityModule
