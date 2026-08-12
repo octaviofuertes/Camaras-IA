@@ -80,6 +80,14 @@ export class EventsComponent implements OnInit, OnDestroy {
   reconociendo: EventItem | null = null;
   nombrePersona = '';
   baseConsentimiento = '';
+  /**
+   * Si esta persona tiene acceso al lugar que mira la cámara.
+   *
+   * Arranca sin responder —no en "sí"— porque de esto depende que suene una
+   * alerta urgente cuando aparezca, y un valor por defecto haría que esa
+   * decisión la tome el formulario en vez de una persona.
+   */
+  accesoPersona: boolean | null = null;
   guardandoPersona = false;
   /** Las personas ya dadas de alta, para sumarle un ángulo a una existente. */
   personasCargadas: PersonaCargada[] = [];
@@ -140,11 +148,17 @@ export class EventsComponent implements OnInit, OnDestroy {
     return e.eventType === 'person.unknown';
   }
 
+  /** Alguien a quien se le negó el acceso está adentro. */
+  esAccesoDenegado(e: EventItem): boolean {
+    return e.eventType === 'access.denied';
+  }
+
   /** Abre el diálogo para responder quién es la persona de la alerta. */
   abrirReconocimiento(e: EventItem): void {
     this.reconociendo = e;
     this.nombrePersona = '';
     this.baseConsentimiento = '';
+    this.accesoPersona = null;
     this.avisoParecido = null;
     this.forzarNueva = false;
     // Las ya cargadas se ofrecen primero: sumarle este ángulo a quien ya está
@@ -154,7 +168,7 @@ export class EventsComponent implements OnInit, OnDestroy {
   }
 
   /** "Es esta persona": suma el ángulo a alguien ya dado de alta. */
-  sumarAPersona(p: PersonaCargada): void {
+  sumarAPersona(p: { id: string; displayName: string }): void {
     const e = this.reconociendo;
     if (!e) return;
     const vector = desempaquetar(e.faceEmbedding);
@@ -185,7 +199,7 @@ export class EventsComponent implements OnInit, OnDestroy {
     const p = this.avisoParecido?.yaExiste;
     if (!p) return;
     this.avisoParecido = null;
-    this.sumarAPersona({ id: p.id, displayName: p.displayName, facesCount: 0 });
+    this.sumarAPersona({ id: p.id, displayName: p.displayName });
   }
 
   /** "No, es otra persona": se insiste con el alta. */
@@ -199,19 +213,20 @@ export class EventsComponent implements OnInit, OnDestroy {
    * "Sí, trabaja acá": da de alta a la persona con su consentimiento registrado.
    *
    * El vector facial de la alerta se convierte en su primera plantilla. A partir
-   * de acá el sistema la reconoce y su tiempo aparece con nombre en Informes.
+   * de acá el sistema la reconoce y sus entradas quedan en el registro de accesos.
    */
   confirmarPersona(): void {
     const e = this.reconociendo;
     if (!e) return;
     const nombre = this.nombrePersona.trim();
     const base = this.baseConsentimiento.trim();
-    if (nombre.length < 2 || base.length < 3) return;
+    if (nombre.length < 2 || base.length < 3 || this.accesoPersona === null) return;
 
     this.guardandoPersona = true;
     this.api
       .altaPersona({
         displayName: nombre,
+        hasAccess: this.accesoPersona === true,
         consentBasis: base,
         embedding: desempaquetar(e.faceEmbedding),
         forzarNueva: this.forzarNueva,
@@ -232,7 +247,10 @@ export class EventsComponent implements OnInit, OnDestroy {
         if (!res.id) return;
         // La alerta se resuelve como confirmada: la pregunta fue respondida.
         this.busy = e.id;
-        this.api.resolve(e.id, 'confirmed', `Dado de alta como ${nombre}`).subscribe(() => {
+        const nota = this.accesoPersona
+          ? `Dado de alta como ${nombre} (con acceso)`
+          : `Dado de alta como ${nombre} — SIN ACCESO a este lugar`;
+        this.api.resolve(e.id, 'confirmed', nota).subscribe(() => {
           this.busy = null;
           this.load();
         });

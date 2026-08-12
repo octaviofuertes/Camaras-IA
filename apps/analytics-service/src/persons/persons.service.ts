@@ -11,6 +11,14 @@ import type { AuthContext } from '../auth/auth.types';
 
 export interface AltaConRostro {
   displayName: string;
+  /**
+   * Si tiene permitido estar donde mira esta cámara.
+   *
+   * Se responde al dar de alta, junto con el nombre. No hay valor "no sé": si
+   * alguien está dado de alta, alguien decidió esto, y de esa decisión depende
+   * que suene o no una alerta urgente.
+   */
+  hasAccess: boolean;
   consentBasis: string;
   /** Vector facial de 512 dimensiones que venía con la alerta. */
   embedding?: number[];
@@ -19,20 +27,36 @@ export interface AltaConRostro {
   forzarNueva?: boolean;
 }
 
-export interface FilaNominal {
-  personId: string | null;
+export interface Paso {
+  id: string;
+  personId: string;
   displayName: string;
-  presenteSegundos: number;
-  telefonoSegundos: number;
-  telefonoPct: number;
-  identificado: boolean;
-}
-
-export interface InformeNominal {
   desde: string;
   hasta: string;
-  personas: FilaNominal[];
-  sinIdentificarSegundos: number;
+  minutos: number;
+  /** Mejor parecido facial del paso: 0 = nunca se le vio la cara. */
+  bestScore: number;
+  seenByFace: boolean;
+  hadAccess: boolean;
+  cameraId: string;
+}
+
+export interface Presente {
+  personId: string;
+  displayName: string;
+  hasAccess: boolean;
+  desde: string;
+  ultimaVez: string;
+  seenByFace: boolean;
+  cameraId: string;
+}
+
+export interface RegistroAccesos {
+  desde: string;
+  hasta: string;
+  pasos: Paso[];
+  personasDistintas: number;
+  sinAcceso: number;
   advertencias: string[];
 }
 
@@ -118,6 +142,7 @@ export class PersonsService {
       const id = await this.repo.alta(c, {
         organizationId: auth.organizationId,
         displayName: nombre,
+        hasAccess: datos.hasAccess !== false,
         consentRecordedBy: auth.userId,
         consentBasis: base,
         notes: datos.notes,
@@ -178,28 +203,62 @@ export class PersonsService {
     this.logger.log(`baja de persona ${personId} solicitada por ${auth.userId}`);
   }
 
-  async ingestarMuestra(
+  /** Alta de un paso que reportó el pipeline. */
+  async registrarPaso(
     auth: AuthContext,
     m: {
-      siteId: string; cameraId: string; zoneId?: string | null; zoneName: string;
-      personId?: string | null; from: number; to: number;
-      presentSeconds: number; phoneSeconds: number;
+      siteId: string; cameraId: string; personId: string;
+      from: number; to: number; bestScore: number;
+      seenByFace: boolean; hadAccess: boolean;
     },
-  ): Promise<string | null> {
-    if (!(m.to > m.from)) {
-      throw new BadRequestException('la ventana medida debe terminar después de empezar');
+  ): Promise<{ id: string; nuevo: boolean }> {
+    if (!(m.to >= m.from)) {
+      throw new BadRequestException('El paso termina antes de empezar');
     }
     return this.db.withTenant(auth.organizationId, (c) =>
-      this.repo.insertarMuestraPersona(c, { ...m, organizationId: auth.organizationId }),
+      this.repo.registrarPaso(c, { ...m, organizationId: auth.organizationId }),
     );
   }
 
-  async informe(
+  /**
+   * Quién está siendo detectado en este momento.
+   *
+   * La tolerancia es la misma con la que el módulo cierra un paso: si no se lo
+   * ve hace más de eso, ya no está. Un número más chico haría parpadear la
+   * lista cada vez que alguien se da vuelta.
+   */
+  async presentes(auth: AuthContext, toleranciaSegundos = 90): Promise<{ presentes: Presente[] }> {
+    const presentes = await this.db.withTenant(auth.organizationId, (c) =>
+      this.repo.presentesAhora(c, toleranciaSegundos),
+    );
+    return { presentes };
+  }
+
+  /** Cambia si una persona tiene acceso. Queda registrado quién lo decidió. */
+  async cambiarAcceso(
+    auth: AuthContext,
+    personId: string,
+    hasAccess: boolean,
+    note?: string,
+  ): Promise<void> {
+    const ok = await this.db.withTenant(auth.organizationId, (c) =>
+      this.repo.cambiarAcceso(c, personId, hasAccess, auth.userId, note),
+    );
+    if (!ok) throw new NotFoundException('Persona no encontrada');
+    this.logger.log(
+      `acceso de ${personId} -> ${hasAccess ? 'permitido' : 'DENEGADO'} por ${auth.userId}`,
+    );
+  }
+
+  /**
+   * Registro de accesos del período: quién pasó y a qué hora.
+   */
+  async registro(
     auth: AuthContext,
     desde: string,
     hasta: string,
     cameraId?: string,
-  ): Promise<InformeNominal> {
+  ): Promise<RegistroAccesos> {
     const d = new Date(desde);
     const h = new Date(hasta);
     if (Number.isNaN(d.getTime()) || Number.isNaN(h.getTime()) || d >= h) {
@@ -207,69 +266,58 @@ export class PersonsService {
     }
 
     const filas = await this.db.withTenant(auth.organizationId, (c) =>
-      this.repo.informeNominal(c, d.toISOString(), h.toISOString(), cameraId),
+      this.repo.registroDeAccesos(c, d.toISOString(), h.toISOString(), cameraId),
     );
 
-    const personas: FilaNominal[] = filas.map((f) => ({
-      personId: f.personId,
-      displayName: f.displayName,
-      presenteSegundos: Math.round(f.presentSeconds),
-      telefonoSegundos: Math.round(f.phoneSeconds),
-      telefonoPct:
-        f.presentSeconds > 0 ? Math.round((f.phoneSeconds / f.presentSeconds) * 1000) / 10 : 0,
-      identificado: f.personId !== null,
+    const pasos: Paso[] = filas.map((f) => ({
+      ...f,
+      minutos: Math.round(((new Date(f.hasta).getTime() - new Date(f.desde).getTime()) / 60000) * 10) / 10,
     }));
-
-    const sinIdentificar = personas
-      .filter((p) => !p.identificado)
-      .reduce((a, p) => a + p.presenteSegundos, 0);
 
     return {
       desde: d.toISOString(),
       hasta: h.toISOString(),
-      personas,
-      sinIdentificarSegundos: sinIdentificar,
-      advertencias: advertir(personas, sinIdentificar),
+      pasos,
+      personasDistintas: new Set(pasos.map((p) => p.personId)).size,
+      sinAcceso: pasos.filter((p) => !p.hadAccess).length,
+      advertencias: advertir(pasos),
     };
   }
 }
 
 /**
- * Las advertencias viajan con el informe.
+ * Las advertencias viajan con el registro.
  *
- * Este informe atribuye conducta a personas con nombre y apellido. Presentarlo
- * sin decir cuánto se puede confiar en cada número es invitar a que alguien tome
- * una decisión sobre un trabajador con un dato que no aguanta ese peso.
+ * Un control de accesos se lee para decidir sobre personas. Presentarlo sin
+ * decir de dónde sale cada identificación es invitar a que alguien tome una
+ * decisión con un dato que no aguanta ese peso.
  */
-function advertir(personas: FilaNominal[], sinIdentificar: number): string[] {
+function advertir(pasos: Paso[]): string[] {
   const avisos: string[] = [];
-  const total = personas.reduce((a, p) => a + p.presenteSegundos, 0);
+  if (!pasos.length) return avisos;
 
-  if (sinIdentificar > 0 && total > 0) {
-    const pct = Math.round((sinIdentificar / total) * 1000) / 10;
+  const deducidos = pasos.filter((p) => !p.seenByFace).length;
+  if (deducidos) {
+    const pct = Math.round((deducidos / pasos.length) * 1000) / 10;
     avisos.push(
-      `${pct}% del tiempo observado no se pudo atribuir a nadie. Ese tiempo NO se ` +
-        'reparte entre las personas identificadas: hacerlo les sumaría minutos que ' +
-        'pueden haber sido de un visitante. Es la suma de todos los no ' +
-        'identificados a la vez, así que puede superar la duración del período: ' +
-        'tres personas durante una hora son tres horas.',
+      `En el ${pct}% de los pasos NO se le vio la cara a la persona: se dedujo quién era ` +
+        'por continuidad del seguimiento o por el puesto donde estaba. Están marcados ' +
+        'en la columna "cómo se supo". Ante cualquier decisión sobre alguien, contrastá ' +
+        'con el video.',
     );
   }
 
-  if (personas.some((p) => p.telefonoSegundos > 0)) {
+  if (pasos.some((p) => !p.hadAccess)) {
     avisos.push(
-      'El tiempo de teléfono es una COTA INFERIOR: sólo se cuenta cuando el teléfono ' +
-        'se ve. Tapado por el cuerpo o de espaldas no se detecta, así que el valor ' +
-        'real es mayor y no se sabe cuánto. Sirve para comparar, no como medida ' +
-        'absoluta ni como prueba.',
+      'Hay pasos de personas sin acceso. Cada uno generó su alerta en Eventos ' +
+        'cuando ocurrió; acá figuran para poder reconstruir qué pasó después.',
     );
   }
 
   avisos.push(
-    'La identidad se sostiene por rostro cuando la persona mira a la cámara y por ' +
-      'continuidad el resto del tiempo. Una identificación equivocada le atribuiría ' +
-      'a alguien la conducta de otro: ante cualquier decisión sobre una persona, ' +
-      'contrastá con el video.',
+    'Sólo aparecen las personas dadas de alta con su consentimiento registrado. ' +
+      'De quien no está dado de alta no se guarda ningún dato, así que no deja rastro ' +
+      'en este registro: no es una lista completa de quién estuvo.',
   );
   return avisos;
 }

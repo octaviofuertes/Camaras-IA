@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════════════════
--- Identificación de personas y actividad nominal
+-- Identificación de personas (control de accesos)
 --
 -- ESTO ES DATO BIOMÉTRICO. En Argentina la Ley 25.326 lo clasifica como dato
 -- sensible: exige consentimiento expreso, informado y por escrito del titular,
@@ -71,62 +71,13 @@ CREATE INDEX IF NOT EXISTS person_faces_org_idx ON person_faces (organization_id
 -- `person_id` nulo significa "había alguien y no se pudo identificar". Ese
 -- tiempo se reporta aparte y NO se reparte entre los identificados: repartirlo
 -- le sumaría a un empleado minutos que quizá fueron de un visitante.
-CREATE TABLE IF NOT EXISTS person_activity_samples (
-    id                 uuid        NOT NULL DEFAULT uuidv7(),
-    occurred_at        timestamptz NOT NULL,
-    organization_id    uuid        NOT NULL,
-    site_id            uuid        NOT NULL,
-    camera_id          uuid        NOT NULL,
-    zone_id            uuid,
-    zone_name          text        NOT NULL,
-
-    person_id          uuid        REFERENCES persons(id) ON DELETE CASCADE,
-
-    window_seconds     numeric(10,2) NOT NULL,
-    present_seconds    numeric(10,2) NOT NULL DEFAULT 0,
-    phone_seconds      numeric(10,2) NOT NULL DEFAULT 0,
-
-    created_at         timestamptz NOT NULL DEFAULT now(),
-
-    CONSTRAINT person_activity_pkey PRIMARY KEY (id, occurred_at),
-    CONSTRAINT person_activity_no_neg_chk CHECK (
-        window_seconds >= 0 AND present_seconds >= 0 AND phone_seconds >= 0
-    ),
-    -- No se puede usar el teléfono sin estar presente.
-    CONSTRAINT person_activity_tel_chk CHECK (phone_seconds <= present_seconds + 0.01),
-    -- Una PERSONA no puede estar presente más tiempo del que duró la ventana.
-    -- La fila sin identificar es la excepción y no un descuido: agrupa a todos
-    -- los presentes que no se pudieron atribuir, así que sus segundos son
-    -- persona-segundos y tres personas durante un minuto son tres minutos.
-    -- Sin esta excepción, la restricción rechazaba TODAS las muestras del
-    -- pipeline en cuanto había más de una persona sin identificar en el cuadro,
-    -- y el informe por persona no se llenaba nunca.
-    CONSTRAINT person_activity_ventana_chk CHECK (
-        person_id IS NULL OR present_seconds <= window_seconds + 1.0
-    )
-);
-
--- Para las bases que ya tenían la versión anterior de la restricción.
-DO $$
-BEGIN
-    ALTER TABLE person_activity_samples DROP CONSTRAINT IF EXISTS person_activity_ventana_chk;
-    ALTER TABLE person_activity_samples ADD CONSTRAINT person_activity_ventana_chk CHECK (
-        person_id IS NULL OR present_seconds <= window_seconds + 1.0
-    );
-END $$;
-
-SELECT create_hypertable('person_activity_samples', 'occurred_at', if_not_exists => TRUE);
-
 CREATE INDEX IF NOT EXISTS person_activity_persona_idx
-    ON person_activity_samples (person_id, occurred_at DESC);
 CREATE INDEX IF NOT EXISTS person_activity_org_idx
-    ON person_activity_samples (organization_id, occurred_at DESC);
 
 -- ── Aislamiento entre empresas ─────────────────────────────────────────────
 DO $$
 DECLARE t text;
 BEGIN
-    FOREACH t IN ARRAY ARRAY['persons', 'person_faces', 'person_activity_samples'] LOOP
         EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
         EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
         EXECUTE format('DROP POLICY IF EXISTS %I_select ON %I', t, t);
@@ -155,12 +106,10 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON persons TO percepta_app;
 -- (ni conviene) poder borrarlas sueltas dejando a la persona sin biometría
 -- pero registrada como identificable.
 GRANT SELECT, INSERT ON person_faces TO percepta_app;
-GRANT SELECT, INSERT ON person_activity_samples TO percepta_app;
 
 -- Al dar de baja a una persona se van sus plantillas por cascada. Sus tiempos
 -- también: no tiene sentido conservar "cuánto trabajó" de alguien a quien ya no
 -- se puede nombrar, y conservarlo sería guardar el dato sin su titular.
-SELECT add_retention_policy('person_activity_samples', INTERVAL '90 days', if_not_exists => TRUE);
 
 -- ── Catálogo ───────────────────────────────────────────────────────────────
 INSERT INTO ai_modules (id, organization_id, module_key, name, description, category, version,

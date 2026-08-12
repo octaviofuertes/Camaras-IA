@@ -47,6 +47,8 @@ export interface EventItem {
   reviewTitle?: string;
   /** Sólo en alertas de reconocimiento. Se va con el evento al resolverlo. */
   faceThumbnail?: string;
+  /** De quién habla la alerta, cuando el módulo lo sabe. */
+  personName?: string;
   faceEmbedding?: string;
 }
 

@@ -8,73 +8,101 @@
       "type": "number",
       "title": "Parecido mínimo para afirmar una identidad",
       "description": "Subirlo hace que se identifique menos pero que casi nunca se confunda a una persona con otra. Bajarlo identifica más y arriesga atribuirle a alguien el tiempo de otro, que es el error que nadie detecta.",
-      "minimum": 0.2, "maximum": 0.8, "default": 0.42
+      "minimum": 0.2,
+      "maximum": 0.8,
+      "default": 0.42
     },
     "matchMargin": {
       "type": "number",
       "title": "Ventaja mínima sobre el segundo candidato",
       "description": "Si dos empleados se parecen, sin este margen se turnarían el nombre según el ruido de cada frame. Con él, ante la duda no se identifica a ninguno.",
-      "minimum": 0, "maximum": 0.4, "default": 0.06
+      "minimum": 0,
+      "maximum": 0.4,
+      "default": 0.06
     },
     "minFaceSize": {
       "type": "number",
       "title": "Tamaño mínimo de la cara",
       "description": "Fracción del alto de la imagen. Más chica que esto no alcanza ni para identificar ni para preguntarle al operador.",
-      "minimum": 0.01, "maximum": 0.5, "default": 0.05
+      "minimum": 0.01,
+      "maximum": 0.5,
+      "default": 0.05
     },
     "askCooldownMinutes": {
       "type": "number",
       "title": "No volver a preguntar durante (min)",
       "description": "Se cuenta desde la última vez que se vio a esa persona. Vive sólo en memoria del proceso: al reiniciar se olvida, porque de quien no está dado de alta no se guarda nada.",
-      "minimum": 1, "maximum": 240, "default": 10
+      "minimum": 1,
+      "maximum": 240,
+      "default": 10
     },
     "repeatThreshold": {
       "type": "number",
       "title": "Parecido para considerar que ya se preguntó",
       "description": "Más bajo que el de identidad, a propósito: acá equivocarse cuesta al revés. Con el umbral de identidad, la misma persona girando la cabeza parecía alguien nuevo y se preguntaba una y otra vez.",
-      "minimum": 0.1, "maximum": 0.6, "default": 0.25
+      "minimum": 0.1,
+      "maximum": 0.6,
+      "default": 0.25
     },
     "askMinFaceSize": {
       "type": "number",
       "title": "Tamaño mínimo de la cara para preguntar",
       "description": "Más exigente que el de identificar: este recorte se lo tiene que poder mirar una persona y decir quién es.",
-      "minimum": 0.02, "maximum": 0.5, "default": 0.07
+      "minimum": 0.02,
+      "maximum": 0.5,
+      "default": 0.07
     },
     "askMinScore": {
       "type": "number",
       "title": "Nitidez mínima de la cara para preguntar",
-      "minimum": 0.1, "maximum": 1, "default": 0.65
+      "minimum": 0.1,
+      "maximum": 1,
+      "default": 0.65
     },
     "askMaxYaw": {
       "type": "number",
       "title": "Giro lateral máximo de la cabeza para preguntar (grados)",
       "description": "Más allá de esto se ve un perfil o una nuca. Preguntar por eso es una alerta que nadie puede contestar, y su vector sería una mala primera plantilla de esa persona.",
-      "minimum": 10, "maximum": 90, "default": 30
+      "minimum": 10,
+      "maximum": 90,
+      "default": 30
     },
     "askMaxPitch": {
       "type": "number",
       "title": "Cabeceo máximo para preguntar (grados)",
       "description": "Excluye la coronilla de quien mira su escritorio. Ojo: una cámara alta le da a todo el mundo un cabeceo negativo constante, así que un valor chico no deja pasar a nadie.",
-      "minimum": 10, "maximum": 90, "default": 45
+      "minimum": 10,
+      "maximum": 90,
+      "default": 45
     },
     "maxDesconocidos": {
       "type": "integer",
       "title": "Cuántos desconocidos recordar a la vez",
-      "minimum": 10, "maximum": 2000, "default": 200
+      "minimum": 10,
+      "maximum": 2000,
+      "default": 200
     },
     "detSize": {
       "type": "integer",
       "title": "Resolución de detección de rostros",
-      "enum": [320, 480, 640],
+      "enum": [
+        320,
+        480,
+        640
+      ],
       "default": 640
     },
-
     "classes": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "title": "Qué detecciones llegan a Eventos",
-      "description": "Sólo la pregunta por un desconocido. Las identificaciones logradas son contexto para el informe y no molestan a nadie.",
-      "default": ["person.unknown"]
+      "description": "Las dos alertas del módulo: la pregunta por un desconocido y el aviso de que entró alguien sin acceso. Las identificaciones logradas y los pasos registrados no son alertas y no llegan a Eventos.",
+      "default": [
+        "person.unknown",
+        "access.denied"
+      ]
     },
     "eventType": {
       "type": "string",
@@ -83,7 +111,13 @@
     },
     "severity": {
       "type": "string",
-      "enum": ["info", "low", "medium", "high", "critical"],
+      "enum": [
+        "info",
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
       "title": "Severidad",
       "description": "Baja: es una pregunta administrativa, no una emergencia. No debe competir con una caída por la atención del operador.",
       "default": "low"
@@ -92,19 +126,25 @@
       "type": "number",
       "title": "Calidad mínima de la cara para preguntar",
       "description": "Por debajo de esto el recorte se ve mal y la pregunta es incontestable.",
-      "minimum": 0.1, "maximum": 1, "default": 0.45
+      "minimum": 0.1,
+      "maximum": 1,
+      "default": 0.45
     },
     "minPersistenceFrames": {
       "type": "integer",
       "title": "Frames seguidos antes de preguntar",
       "description": "Uno: el módulo pregunta por cada cara desconocida UNA sola vez y después la recuerda para no repetir. Exigirle dos frames haría que no preguntara nunca.",
-      "minimum": 1, "maximum": 10, "default": 1
+      "minimum": 1,
+      "maximum": 10,
+      "default": 1
     },
     "cooldownSeconds": {
       "type": "number",
       "title": "Espera entre preguntas (s)",
       "description": "Corto a propósito. Que no se repita la pregunta por la MISMA persona ya lo garantiza el módulo; este enfriamiento sólo evita duplicar el mismo instante, y si entran tres desconocidos seguidos las tres preguntas tienen que llegar.",
-      "minimum": 1, "maximum": 600, "default": 3
+      "minimum": 1,
+      "maximum": 600,
+      "default": 3
     }
   },
   "additionalProperties": false

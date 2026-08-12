@@ -169,6 +169,32 @@ class CameraPipeline(threading.Thread):
 
         return True, strong
 
+    def _por_tipo(self, mod_cfg: dict, alertas: list) -> list[tuple[dict, list]]:
+        """Agrupa las detecciones por el tipo de evento que le corresponde a cada una.
+
+        El manifiesto declara los tipos que el módulo emite. Una detección cuya
+        clase coincide con uno de ellos va con ESE tipo y ESA severidad; el
+        resto queda en el tipo principal, que es como se comportaba antes.
+        """
+        tipos = {t["type"]: t for t in (mod_cfg.get("eventTypes") or [])}
+        grupos: dict[str, list] = {}
+        for d in alertas:
+            propio = d.class_label if d.class_label in tipos else mod_cfg["eventType"]
+            grupos.setdefault(propio, []).append(d)
+
+        salida = []
+        for tipo, dets in grupos.items():
+            decl = tipos.get(tipo, {})
+            cfg = dict(mod_cfg)
+            cfg["eventType"] = tipo
+            # La severidad configurada para la cámara manda sobre el manifiesto
+            # sólo para el tipo principal: pisar con ella la de un acceso
+            # denegado lo bajaría al nivel de una consulta administrativa.
+            if tipo != mod_cfg["eventType"] and decl.get("defaultSeverity"):
+                cfg["severity"] = decl["defaultSeverity"]
+            salida.append((cfg, dets))
+        return salida
+
     # ── alta del evento ──────────────────────────────────────────────
     def _emit(self, mod_cfg: dict, dets: list, now: float) -> bool:
         top = max(dets, key=lambda d: d.confidence)
@@ -212,6 +238,15 @@ class CameraPipeline(threading.Thread):
                     {"faceEmbedding": top.attributes["embedding"]}
                     if top.attributes.get("embedding") else {}
                 ),
+                # Datos que el módulo puso en la detección y que la pantalla
+                # necesita para que la alerta signifique algo. Una alerta de
+                # acceso denegado sin el nombre de quien entró obliga al
+                # operador a mirar el video para saber de quién le hablan.
+                **{
+                    k: str(top.attributes[k])
+                    for k in ("personId", "personName", "reason", "vistoPorRostro")
+                    if top.attributes.get(k)
+                },
                 "all": [
                     {"classLabel": d.class_label, "confidence": round(float(d.confidence), 3)}
                     for d in dets[:10]
@@ -333,28 +368,27 @@ class CameraPipeline(threading.Thread):
             self.last_error = f"analytics-service: {exc}"
             log.warning("[%s] no se pudo guardar la muestra: %s", self.a.camera_id, exc)
 
-    def _emitir_medicion_persona(self, mod_cfg: dict, det) -> None:
-        """Persiste el tiempo atribuido a una persona.
+    def _emitir_paso(self, det) -> None:
+        """Persiste un paso: quién estuvo frente a esta cámara y entre qué horas.
 
-        Va a un endpoint distinto del de puestos porque son datos de distinta
-        naturaleza y distinta sensibilidad: éste lleva nombre y apellido, y su
-        lectura está detrás de un permiso que un operador no tiene.
+        Es el registro de accesos. Va a su propio endpoint y lleva nombre
+        propio, así que su lectura está detrás de un permiso que un operador
+        común no tiene.
         """
         a = det.attributes
         payload = {
             "cameraId": self.a.camera_id,
             "siteId": self.a.site_id,
-            "zoneId": a.get("zoneId") or None,
-            "zoneName": a.get("zoneName") or "Toda la cámara",
             "personId": a.get("personId") or None,
             "from": float(a.get("from", 0.0)),
             "to": float(a.get("to", 0.0)),
-            "presentSeconds": float(a.get("presentSeconds", 0.0)),
-            "phoneSeconds": float(a.get("phoneSeconds", 0.0)),
+            "bestScore": float(a.get("bestScore", 0.0)),
+            "seenByFace": a.get("seenByFace") == "true",
+            "hadAccess": a.get("hadAccess") != "false",
         }
         try:
             r = requests.post(
-                f"{self.analytics_url}/api/v1/persons/activity",
+                f"{self.analytics_url}/api/v1/persons/sightings",
                 json=payload,
                 headers={"Authorization": f"Bearer {self.token}"},
                 timeout=6,
@@ -365,13 +399,13 @@ class CameraPipeline(threading.Thread):
                 return
             self.last_error = f"analytics-service {r.status_code}: {r.text[:120]}"
             # Con el payload: un 500 repetido sin saber qué se mandó no se puede
-            # diagnosticar, y esta muestra es la única fuente del informe por
-            # persona — si se rechaza, ese informe queda vacío para siempre.
-            log.warning("[%s] muestra por persona rechazada: %s — payload: %s",
+            # diagnosticar, y este paso es la única fuente del registro de
+            # accesos — si se rechaza, ese registro queda vacío para siempre.
+            log.warning("[%s] paso rechazado: %s — payload: %s",
                         self.a.camera_id, self.last_error, payload)
         except requests.RequestException as exc:
             self.last_error = f"analytics-service: {exc}"
-            log.warning("[%s] no se pudo guardar la muestra por persona: %s", self.a.camera_id, exc)
+            log.warning("[%s] no se pudo guardar el paso: %s", self.a.camera_id, exc)
 
     # ── lazo principal ───────────────────────────────────────────────
     def run(self) -> None:
@@ -436,24 +470,33 @@ class CameraPipeline(threading.Thread):
                     if d.attributes.get("kind") not in ("telemetry", "identity")
                 ]
                 for m in mediciones:
-                    if m.attributes.get('serie') == 'person':
-                        self._emitir_medicion_persona(mod_cfg, m)
+                    if m.attributes.get('serie') == 'sighting':
+                        self._emitir_paso(m)
                     else:
                         self._emitir_medicion(mod_cfg, m)
 
-                fire, strong = self._evaluate(mod_cfg, alertas, st, t0)
-                snapshot.extend(
-                    {
-                        "moduleKey": key,
-                        "classLabel": d.class_label,
-                        "confidence": round(float(d.confidence), 3),
-                        "bbox": [round(v, 4) for v in d.bbox],
-                    }
-                    for d in strong
-                )
-                if fire and self._emit(mod_cfg, strong, t0):
-                    st.last_event_ts = t0
-                    st.consecutive = 0
+                # Un módulo puede emitir alertas de distinto tipo —el de
+                # accesos avisa de un desconocido y de alguien sin permiso— y
+                # cada una es un evento distinto, con su severidad y su propio
+                # enfriamiento. Evaluarlas juntas hacía que la primera tapara a
+                # la segunda durante todo el enfriamiento, y que las dos
+                # llegaran con el mismo tipo de evento.
+                for cfg_tipo, del_tipo in self._por_tipo(mod_cfg, alertas):
+                    clave_estado = f"{key}|{cfg_tipo['eventType']}"
+                    st_tipo = self._state.setdefault(clave_estado, _ModuleState())
+                    fire, strong = self._evaluate(cfg_tipo, del_tipo, st_tipo, t0)
+                    snapshot.extend(
+                        {
+                            "moduleKey": key,
+                            "classLabel": d.class_label,
+                            "confidence": round(float(d.confidence), 3),
+                            "bbox": [round(v, 4) for v in d.bbox],
+                        }
+                        for d in strong
+                    )
+                    if fire and self._emit(cfg_tipo, strong, t0):
+                        st_tipo.last_event_ts = t0
+                        st_tipo.consecutive = 0
 
             self.last_detections = snapshot
 

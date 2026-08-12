@@ -66,6 +66,12 @@ class ModuleContext:
     analytics_url: str = ""
     service_token: str = ""
 
+    # A qué cámara sirve esta instancia. Hay una instancia por cámara, y un
+    # módulo que persiste algo por su cuenta —el control de accesos cierra sus
+    # pasos al apagarse— necesita poder decir de dónde vino.
+    camera_id: str = ""
+    site_id: str = ""
+
 
 class PerceptaModule(ABC):
     """Contrato único que todo módulo de IA implementa."""

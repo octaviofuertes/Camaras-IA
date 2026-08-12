@@ -45,6 +45,12 @@ def _descubierto(module_key: str):
     return next((d for d in _discovery.loaded if d.module_key == module_key), None)
 
 
+def _tipos_declarados(module_key: str) -> list[dict]:
+    """Todos los tipos de evento que declara el manifiesto del módulo."""
+    d = _descubierto(module_key)
+    return list((d.manifest.get("eventTypes") if d else None) or [])
+
+
 def _tipo_declarado(module_key: str, campo: str, si_falta: str) -> str:
     """Lo que el manifiesto dice del primer tipo de evento del módulo."""
     d = _descubierto(module_key)
@@ -75,6 +81,10 @@ def preparar_modulo(a: dict) -> dict:
         "moduleVersion": a.get("moduleVersion", "1.0.0"),
         "eventType": cfg.get("eventType") or _tipo_declarado(clave, "type", f"{clave}.detected"),
         "severity": cfg.get("severity") or _tipo_declarado(clave, "defaultSeverity", "medium"),
+        # Todos los tipos que este módulo declara: cada detección se emite con
+        # el suyo. Un módulo con dos alertas distintas no puede mandarlas a
+        # ambas con el mismo tipo de evento.
+        "eventTypes": _tipos_declarados(clave),
         "config": cfg,
     }
 
@@ -240,6 +250,8 @@ def _arrancar_pipelines() -> None:
                 zones={},
                 analytics_url=ANALYTICS_URL,
                 service_token=SERVICE_TOKEN,
+                camera_id=a.camera_id,
+                site_id=a.site_id,
             )
             inst = disc.module_class()
             try:

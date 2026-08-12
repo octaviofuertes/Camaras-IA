@@ -1,24 +1,15 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { PageHeaderComponent } from '../../shared/page-header.component';
 import {
   ReportsService,
-  type Informe,
-  type FilaNominal,
-  type InformeNominal,
-  type PuntoSerie,
-  type ResumenPuesto,
+  type Paso,
+  type Presente,
+  type RegistroAccesos,
 } from '../../core/reports.service';
 
 type Rango = 'hoy' | 'ayer' | 'semana' | 'mes';
-
-interface BarraHora {
-  etiqueta: string;
-  ocupadoPct: number;
-  telefonoPct: number;
-  sinDatos: boolean;
-}
 
 @Component({
   selector: 'px-reports',
@@ -27,13 +18,17 @@ interface BarraHora {
   templateUrl: './reports.component.html',
   styleUrls: ['./reports.component.scss'],
 })
-export class ReportsComponent implements OnInit {
+export class ReportsComponent implements OnInit, OnDestroy {
   private readonly api = inject(ReportsService);
 
-  informe: Informe | null = null;
-  nominal: InformeNominal | null = null;
+  registro: RegistroAccesos | null = null;
+  /** Quién está en el cuadro ahora mismo. */
+  presentes: Presente[] = [];
+  private timer?: ReturnType<typeof setInterval>;
   cargando = true;
   rango: Rango = 'hoy';
+  /** Mostrar sólo los pasos de gente sin acceso. */
+  soloSinAcceso = false;
 
   readonly rangos: { key: Rango; label: string }[] = [
     { key: 'hoy', label: 'Hoy' },
@@ -44,6 +39,24 @@ export class ReportsComponent implements OnInit {
 
   ngOnInit(): void {
     this.cargar();
+    this.refrescarVivo();
+    // El registro del día cambia poco; quién está adentro, todo el tiempo.
+    this.timer = setInterval(() => this.refrescarVivo(), 4000);
+  }
+
+  ngOnDestroy(): void {
+    if (this.timer) clearInterval(this.timer);
+  }
+
+  refrescarVivo(): void {
+    this.api.enVivo().subscribe((p) => (this.presentes = p));
+  }
+
+  /** Hace cuánto que está. */
+  desdeHace(p: Presente): string {
+    const min = (Date.now() - new Date(p.desde).getTime()) / 60000;
+    if (min < 1) return 'recién';
+    return `hace ${this.duracion(min)}`;
   }
 
   setRango(r: Rango): void {
@@ -53,17 +66,14 @@ export class ReportsComponent implements OnInit {
 
   cargar(): void {
     this.cargando = true;
-    const { desde, hasta, bucket } = this.ventana();
-    this.api.actividad({ desde, hasta, bucket }).subscribe((i) => {
-      this.informe = i;
+    const { desde, hasta } = this.ventana();
+    this.api.accesos({ desde, hasta }).subscribe((r) => {
+      this.registro = r;
       this.cargando = false;
     });
-    // El informe con nombres va por su propio endpoint y su propio permiso: si
-    // el usuario no lo tiene, esa sección explica por qué en vez de faltar.
-    this.api.porPersona({ desde, hasta }).subscribe((n) => (this.nominal = n));
   }
 
-  private ventana(): { desde: string; hasta: string; bucket: 'hour' | 'day' } {
+  private ventana(): { desde: string; hasta: string } {
     const ahora = new Date();
     const inicioDe = (d: Date): Date => {
       const x = new Date(d);
@@ -75,111 +85,62 @@ export class ReportsComponent implements OnInit {
       case 'ayer': {
         const ayer = new Date(ahora);
         ayer.setDate(ayer.getDate() - 1);
-        return {
-          desde: inicioDe(ayer).toISOString(),
-          hasta: inicioDe(ahora).toISOString(),
-          bucket: 'hour',
-        };
+        return { desde: inicioDe(ayer).toISOString(), hasta: inicioDe(ahora).toISOString() };
       }
       case 'semana': {
         const desde = new Date(ahora);
         desde.setDate(desde.getDate() - 7);
-        return { desde: inicioDe(desde).toISOString(), hasta: ahora.toISOString(), bucket: 'day' };
+        return { desde: inicioDe(desde).toISOString(), hasta: ahora.toISOString() };
       }
       case 'mes': {
         const desde = new Date(ahora);
         desde.setDate(desde.getDate() - 30);
-        return { desde: inicioDe(desde).toISOString(), hasta: ahora.toISOString(), bucket: 'day' };
+        return { desde: inicioDe(desde).toISOString(), hasta: ahora.toISOString() };
       }
       default:
-        return { desde: inicioDe(ahora).toISOString(), hasta: ahora.toISOString(), bucket: 'hour' };
+        return { desde: inicioDe(ahora).toISOString(), hasta: ahora.toISOString() };
     }
   }
 
   // ── presentación ───────────────────────────────────────────────────
-  /** Duración legible. Los informes se leen, no se calculan mentalmente. */
-  duracion(segundos: number): string {
-    const s = Math.max(Math.round(segundos), 0);
-    if (s < 60) return `${s} s`;
-    const h = Math.floor(s / 3600);
-    const m = Math.round((s % 3600) / 60);
-    if (h === 0) return `${m} min`;
+  pasos(): Paso[] {
+    const todos = this.registro?.pasos ?? [];
+    return this.soloSinAcceso ? todos.filter((p) => !p.hadAccess) : todos;
+  }
+
+  hora(iso: string): string {
+    const d = new Date(iso);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+
+  /** El día sólo se muestra cuando el rango abarca más de uno. */
+  dia(iso: string): string {
+    if (this.rango === 'hoy' || this.rango === 'ayer') return '';
+    return new Date(iso).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' });
+  }
+
+  duracion(minutos: number): string {
+    if (minutos < 1) return 'menos de 1 min';
+    if (minutos < 60) return `${Math.round(minutos)} min`;
+    const h = Math.floor(minutos / 60);
+    const m = Math.round(minutos % 60);
     return m === 0 ? `${h} h` : `${h} h ${m} min`;
   }
 
   /**
-   * Desglose por franja horaria del puesto que más se usó.
+   * Cómo se supo quién era.
    *
-   * Se muestra uno solo y se dice cuál: superponer varios puestos en un gráfico
-   * chico se lee mal y termina sin comunicar nada.
+   * Se muestra en cada fila a propósito: no es lo mismo haberle visto la cara
+   * que haber deducido que era él porque seguía en el mismo lugar. Quien lee
+   * este registro para tomar una decisión sobre alguien tiene que ver la
+   * diferencia sin buscarla.
    */
-  barras(): BarraHora[] {
-    const inf = this.informe;
-    if (!inf || !inf.serie.length) return [];
-
-    const principal = inf.puestos[0];
-    if (!principal) return [];
-
-    const suyos = inf.serie.filter(
-      (p) => p.cameraId === principal.cameraId && (p.zoneId ?? '') === (principal.zoneId ?? ''),
-    );
-    return suyos.map((p) => this.aBarra(p));
+  comoSeSupo(p: Paso): string {
+    if (p.seenByFace) return `Se le vio la cara (${Math.round(p.bestScore * 100)}%)`;
+    return 'Deducido por continuidad';
   }
 
-  private aBarra(p: PuntoSerie): BarraHora {
-    const observado = p.occupiedSeconds + p.emptySeconds;
-    const fecha = new Date(p.periodo);
-    const etiqueta =
-      this.rango === 'semana' || this.rango === 'mes'
-        ? fecha.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })
-        : `${String(fecha.getHours()).padStart(2, '0')}h`;
-
-    return {
-      etiqueta,
-      ocupadoPct: observado > 0 ? Math.round((p.occupiedSeconds / observado) * 100) : 0,
-      telefonoPct: observado > 0 ? Math.round((p.phoneSeconds / observado) * 100) : 0,
-      sinDatos: observado <= 0,
-    };
-  }
-
-  nombrePuestoPrincipal(): string {
-    return this.informe?.puestos[0]?.zoneName ?? '';
-  }
-
-  /** Una cobertura baja invalida la lectura del número de al lado. */
-  coberturaFloja(p: ResumenPuesto): boolean {
-    return p.coberturaPct < 80;
-  }
-
-  trackPuesto(_: number, p: ResumenPuesto): string {
-    return `${p.cameraId}|${p.zoneId ?? ''}`;
-  }
-
-  /**
-   * Las advertencias de los dos informes, sin repetir.
-   *
-   * Van juntas a propósito: quien lee "Juan: 1 h con el teléfono" tiene que ver
-   * en la misma pantalla que ese número es una cota inferior y que la identidad
-   * se sostiene por continuidad la mayor parte del tiempo.
-   */
-  avisos(): string[] {
-    // Los dos informes advierten sobre lo mismo con palabras distintas (la cota
-    // inferior del teléfono, por ejemplo). Mostrar las dos versiones seguidas
-    // hace que se lean como ruido y se dejen de leer. Se agrupan por su primera
-    // cláusula y gana la del informe nominal, que es la más estricta.
-    const clave = (a: string): string => a.split(':')[0].trim().toLowerCase();
-    const porClave = new Map<string, string>();
-    for (const a of [...(this.informe?.advertencias ?? []), ...(this.nominal?.advertencias ?? [])]) {
-      porClave.set(clave(a), a);
-    }
-    return [...porClave.values()];
-  }
-
-  trackPersona(_: number, p: FilaNominal): string {
-    return p.personId ?? 'sin-identificar';
-  }
-
-  trackBarra(i: number): number {
-    return i;
+  trackPaso(_: number, p: Paso): string {
+    return p.id;
   }
 }

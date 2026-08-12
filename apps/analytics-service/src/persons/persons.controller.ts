@@ -14,7 +14,7 @@ import {
 import type { Request } from 'express';
 import { JwtGuard } from '../auth/jwt.guard';
 import { PermissionsGuard, RequirePermissions } from '../auth/permissions.guard';
-import { PersonsService, type InformeNominal } from './persons.service';
+import { PersonsService } from './persons.service';
 import type { AuthContext } from '../auth/auth.types';
 
 @Controller('persons')
@@ -58,13 +58,21 @@ export class PersonsController {
       embedding?: number[];
       notes?: string;
       forzarNueva?: boolean;
+      hasAccess?: boolean;
     },
   ) {
     if (!body?.displayName || !body?.consentBasis) {
       throw new BadRequestException('Faltan campos: displayName, consentBasis');
     }
+    if (typeof body.hasAccess !== 'boolean') {
+      throw new BadRequestException(
+        'Falta indicar si esta persona tiene acceso a este lugar: de eso depende que ' +
+          'suene una alerta cuando aparezca',
+      );
+    }
     return this.persons.alta(req.auth as AuthContext, {
       displayName: body.displayName,
+      hasAccess: body.hasAccess,
       consentBasis: body.consentBasis,
       embedding: body.embedding,
       notes: body.notes,
@@ -98,55 +106,88 @@ export class PersonsController {
     return { ok: true };
   }
 
-  /** Alta de una ventana de actividad atribuida (desde el pipeline). */
-  @Post('activity')
+  /** Alta de un paso, desde el pipeline. */
+  @Post('sightings')
   @RequirePermissions('events:ingest')
-  async ingestar(
+  async paso(
     @Req() req: Request,
     @Body() body: Record<string, unknown>,
-  ): Promise<{ id: string | null }> {
-    for (const k of ['siteId', 'cameraId', 'from', 'to']) {
+  ): Promise<{ id: string; nuevo: boolean }> {
+    for (const k of ['siteId', 'cameraId', 'personId', 'from', 'to']) {
       if (body?.[k] === undefined || body[k] === null) {
         throw new BadRequestException(`Falta el campo ${k}`);
       }
     }
-    const id = await this.persons.ingestarMuestra(req.auth as AuthContext, {
+    return this.persons.registrarPaso(req.auth as AuthContext, {
       siteId: String(body.siteId),
       cameraId: String(body.cameraId),
-      zoneId: (body.zoneId as string) || null,
-      zoneName: String(body.zoneName || 'Toda la cámara'),
-      personId: (body.personId as string) || null,
+      personId: String(body.personId),
       from: Number(body.from),
       to: Number(body.to),
-      presentSeconds: Number(body.presentSeconds ?? 0),
-      phoneSeconds: Number(body.phoneSeconds ?? 0),
+      bestScore: Number(body.bestScore ?? 0),
+      seenByFace: body.seenByFace === true,
+      hadAccess: body.hadAccess !== false,
     });
-    return { id };
   }
 
   /**
-   * Informe con nombre y apellido.
+   * Dar o quitar el acceso a una persona ya dada de alta.
    *
-   * Detrás de su propio permiso: un operador que revisa alertas de seguridad no
-   * necesita saber cuánto tiempo pasó cada empleado con el teléfono, y cuanta
-   * menos gente alcance ese dato, mejor.
+   * Detrás de `persons:write` y no de un permiso de lectura: de esto depende
+   * que suene o no una alerta urgente cuando esa persona aparezca.
    */
-  @Get('report/activity')
+  @Post(':id/access')
+  @RequirePermissions('persons:write')
+  async acceso(
+    @Req() req: Request,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: { hasAccess?: boolean; note?: string },
+  ) {
+    if (typeof body?.hasAccess !== 'boolean') {
+      throw new BadRequestException('Falta el campo hasAccess (true o false)');
+    }
+    await this.persons.cambiarAcceso(req.auth as AuthContext, id, body.hasAccess, body.note);
+    return { ok: true };
+  }
+
+  /**
+   * Quién está siendo detectado ahora mismo.
+   *
+   * Mismo permiso que el registro: es el mismo dato, sólo que del presente.
+   */
+  @Get('live')
   @RequirePermissions('reports:identified')
-  async informe(
+  async live(@Req() req: Request, @Query('segundos') segundos?: string) {
+    const t = Number(segundos);
+    return this.persons.presentes(
+      req.auth as AuthContext,
+      Number.isFinite(t) && t > 0 ? t : 90,
+    );
+  }
+
+  /**
+   * Registro de accesos: quién pasó y a qué hora.
+   *
+   * Detrás de su propio permiso. Saber a qué hora entró y salió cada persona
+   * todos los días es un dato sobre su vida, no sobre la seguridad del lugar,
+   * y cuanta menos gente lo alcance, mejor.
+   */
+  @Get('report/access')
+  @RequirePermissions('reports:identified')
+  async registro(
     @Req() req: Request,
     @Query('desde') desde?: string,
     @Query('hasta') hasta?: string,
     @Query('cameraId') cameraId?: string,
-  ): Promise<InformeNominal> {
+  ) {
     const ahora = new Date();
     const inicio = new Date(ahora);
     inicio.setHours(0, 0, 0, 0);
-    return this.persons.informe(
+    return this.persons.registro(
       req.auth as AuthContext,
       desde || inicio.toISOString(),
       hasta || ahora.toISOString(),
-      cameraId || undefined,
+      cameraId,
     );
   }
 }

@@ -4,6 +4,8 @@ import type { PoolClient } from 'pg';
 export interface AltaPersona {
   organizationId: string;
   displayName: string;
+  /** Si tiene permitido estar donde mira la cámara. */
+  hasAccess: boolean;
   /** Quién documentó el consentimiento y con qué base legal. Obligatorio. */
   consentRecordedBy: string;
   consentBasis: string;
@@ -14,11 +16,22 @@ export interface PersonaDto {
   id: string;
   displayName: string;
   active: boolean;
+  hasAccess: boolean;
   consentBasis: string;
   consentAt: string;
   facesCount: number;
   createdAt: string;
 }
+
+/**
+ * Cuánto puede faltar entre dos apariciones de la misma persona para que sigan
+ * siendo la misma visita.
+ *
+ * Cinco minutos: alguien que se levanta al baño y vuelve estuvo todo ese rato
+ * en el lugar, y contarlo como dos entradas no lo hace más exacto, lo hace más
+ * difícil de leer. Una ausencia más larga sí es otra visita.
+ */
+const TOLERANCIA_UNIR_SEGUNDOS = 300;
 
 @Injectable()
 export class PersonsRepository {
@@ -32,10 +45,13 @@ export class PersonsRepository {
    */
   async alta(client: PoolClient, p: AltaPersona): Promise<string> {
     const { rows } = await client.query<{ id: string }>(
-      `INSERT INTO persons (organization_id, display_name, consent_recorded_by, consent_basis, notes)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO persons
+         (organization_id, display_name, consent_recorded_by, consent_basis, notes,
+          has_access, access_decided_by, access_decided_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $3, now())
        RETURNING id`,
-      [p.organizationId, p.displayName.trim(), p.consentRecordedBy, p.consentBasis.trim(), p.notes ?? null],
+      [p.organizationId, p.displayName.trim(), p.consentRecordedBy, p.consentBasis.trim(),
+       p.notes ?? null, p.hasAccess],
     );
     return rows[0].id;
   }
@@ -57,29 +73,38 @@ export class PersonsRepository {
   }
 
   /** Galería que consume el módulo de identificación. */
-  async galeria(client: PoolClient): Promise<{ id: string; displayName: string; embeddings: number[][] }[]> {
+  async galeria(
+    client: PoolClient,
+  ): Promise<{ id: string; displayName: string; hasAccess: boolean; embeddings: number[][] }[]> {
     const { rows } = await client.query<{
       id: string;
       display_name: string;
+      has_access: boolean;
       embeddings: number[][] | null;
     }>(
-      `SELECT p.id, p.display_name,
+      `SELECT p.id, p.display_name, p.has_access,
               array_agg(f.embedding) FILTER (WHERE f.id IS NOT NULL) AS embeddings
          FROM persons p
          LEFT JOIN person_faces f ON f.person_id = p.id
         WHERE p.active
-        GROUP BY p.id, p.display_name`,
+        GROUP BY p.id, p.display_name, p.has_access`,
     );
     return rows.map((r) => ({
       id: r.id,
       displayName: r.display_name,
+      // Viaja con la galería porque la decisión de alertar se toma en el
+      // módulo, en el mismo frame en que se reconoce a la persona. Preguntarlo
+      // por HTTP en ese momento pondría una llamada de red en el camino de una
+      // alerta urgente.
+      hasAccess: r.has_access,
       embeddings: (r.embeddings ?? []).map((e) => (e as unknown as string[]).map(Number)),
     }));
   }
 
   async listar(client: PoolClient): Promise<PersonaDto[]> {
     const { rows } = await client.query(
-      `SELECT p.id, p.display_name, p.active, p.consent_basis, p.consent_at, p.created_at,
+      `SELECT p.id, p.display_name, p.active, p.has_access,
+              p.consent_basis, p.consent_at, p.created_at,
               count(f.id) AS faces
          FROM persons p
          LEFT JOIN person_faces f ON f.person_id = p.id
@@ -90,6 +115,7 @@ export class PersonsRepository {
       id: String(r.id),
       displayName: String(r.display_name),
       active: Boolean(r.active),
+      hasAccess: Boolean(r.has_access),
       consentBasis: String(r.consent_basis),
       consentAt: r.consent_at?.toISOString?.() ?? String(r.consent_at),
       facesCount: Number(r.faces ?? 0),
@@ -107,74 +133,189 @@ export class PersonsRepository {
     return (r.rowCount ?? 0) > 0;
   }
 
-  /** Una ventana de actividad atribuida a una persona (o a nadie). */
-  async insertarMuestraPersona(
+  /**
+   * Registra un paso: quién estuvo frente a esta cámara y entre qué horas.
+   *
+   * Si el paso ya venía abierto —la persona sigue ahí— se extiende en vez de
+   * crear otra fila. Un control de accesos con una fila por frame es ilegible,
+   * y la diferencia entre "entró una vez y se quedó" y "entró cuarenta veces"
+   * es justamente el dato que se consulta.
+   */
+  async registrarPaso(
     client: PoolClient,
     m: {
       organizationId: string;
       siteId: string;
       cameraId: string;
-      zoneId?: string | null;
-      zoneName: string;
-      personId?: string | null;
+      personId: string;
       from: number;
       to: number;
-      presentSeconds: number;
-      phoneSeconds: number;
+      bestScore: number;
+      seenByFace: boolean;
+      hadAccess: boolean;
     },
-  ): Promise<string | null> {
-    const { rows } = await client.query<{ id: string }>(
-      `INSERT INTO person_activity_samples
-         (occurred_at, organization_id, site_id, camera_id, zone_id, zone_name,
-          person_id, window_seconds, present_seconds, phone_seconds)
-       VALUES (to_timestamp($1), $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       RETURNING id`,
-      [
-        m.to, m.organizationId, m.siteId, m.cameraId, m.zoneId ?? null, m.zoneName,
-        m.personId ?? null, Math.max(m.to - m.from, 0), m.presentSeconds, m.phoneSeconds,
-      ],
+  ): Promise<{ id: string; nuevo: boolean }> {
+    const desde = new Date(m.from * 1000).toISOString();
+    const hasta = new Date(m.to * 1000).toISOString();
+
+    // Se extiende el paso anterior de esta persona en esta cámara si el que
+    // llega arranca poco después de que aquél terminara: es la misma visita.
+    //
+    // La tolerancia importa y no es cosmética. Identificar a alguien falla por
+    // ratos —se da vuelta, se tapa, sale del cuadro— y sin margen una sola
+    // visita quedaba partida en cinco entradas de "menos de 1 min" separadas
+    // por dos minutos cada una. Eso no son idas y vueltas: son huecos de
+    // detección, y un registro que los muestra como entradas y salidas está
+    // afirmando algo que no pasó.
+    //
+    // La decisión se toma acá y no en el módulo porque acá también cubre el
+    // caso de que el worker se reinicie en medio de una visita.
+    const { rows: abiertos } = await client.query<{ id: string; started_at: string }>(
+      `SELECT id, started_at FROM person_sightings
+        WHERE camera_id = $1 AND person_id = $2
+          AND ended_at >= $3::timestamptz - ($4 || ' seconds')::interval
+        ORDER BY started_at DESC LIMIT 1`,
+      [m.cameraId, m.personId, desde, String(TOLERANCIA_UNIR_SEGUNDOS)],
     );
-    return rows[0]?.id ?? null;
+
+    if (abiertos.length) {
+      await client.query(
+        `UPDATE person_sightings
+            SET ended_at = GREATEST(ended_at, $3::timestamptz),
+                best_score = GREATEST(best_score, $4),
+                seen_by_face = seen_by_face OR $5
+          WHERE id = $1 AND started_at = $2`,
+        [abiertos[0].id, abiertos[0].started_at, hasta, m.bestScore, m.seenByFace],
+      );
+      return { id: abiertos[0].id, nuevo: false };
+    }
+
+    const { rows } = await client.query<{ id: string }>(
+      `INSERT INTO person_sightings
+         (started_at, organization_id, site_id, camera_id, person_id,
+          ended_at, best_score, seen_by_face, had_access)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING id`,
+      [desde, m.organizationId, m.siteId, m.cameraId, m.personId,
+       hasta, m.bestScore, m.seenByFace, m.hadAccess],
+    );
+    return { id: rows[0].id, nuevo: true };
   }
 
   /**
-   * Informe con nombres.
+   * Registro de accesos: quién pasó, a qué hora, y si podía estar acá.
    *
-   * El tiempo sin identificar se devuelve como una fila con `personId` nulo, no
-   * repartido entre los identificados: repartirlo le atribuiría a un empleado
-   * minutos que quizá fueron de un visitante.
+   * Una fila por paso y no un resumen por persona: lo que se le pregunta a un
+   * control de accesos es "¿quién entró a las tres de la tarde?", no "¿cuántas
+   * horas estuvo Juan este mes?". Lo segundo sale de lo primero; al revés, no.
    */
-  async informeNominal(
+  async registroDeAccesos(
     client: PoolClient,
     desde: string,
     hasta: string,
     cameraId?: string,
   ): Promise<
-    { personId: string | null; displayName: string; presentSeconds: number; phoneSeconds: number }[]
+    {
+      id: string;
+      personId: string;
+      displayName: string;
+      desde: string;
+      hasta: string;
+      bestScore: number;
+      seenByFace: boolean;
+      hadAccess: boolean;
+      cameraId: string;
+    }[]
   > {
     const params: unknown[] = [desde, hasta];
     let filtro = '';
     if (cameraId) {
       params.push(cameraId);
-      filtro = ` AND s.camera_id = $${params.length}`;
+      filtro = `AND s.camera_id = $${params.length}`;
     }
     const { rows } = await client.query(
-      `SELECT s.person_id,
-              COALESCE(p.display_name, 'Sin identificar') AS display_name,
-              sum(s.present_seconds) AS present_seconds,
-              sum(s.phone_seconds)   AS phone_seconds
-         FROM person_activity_samples s
-         LEFT JOIN persons p ON p.id = s.person_id
-        WHERE s.occurred_at >= $1 AND s.occurred_at < $2 ${filtro}
-        GROUP BY s.person_id, p.display_name
-        ORDER BY sum(s.present_seconds) DESC`,
+      `SELECT s.id, s.person_id, p.display_name, s.started_at, s.ended_at,
+              s.best_score, s.seen_by_face, s.had_access, s.camera_id
+         FROM person_sightings s
+         JOIN persons p ON p.id = s.person_id
+        WHERE s.started_at >= $1 AND s.started_at < $2 ${filtro}
+        ORDER BY s.started_at DESC
+        LIMIT 500`,
       params,
     );
-    return rows.map((r) => ({
-      personId: (r.person_id as string | null) ?? null,
-      displayName: String(r.display_name),
-      presentSeconds: Number(r.present_seconds ?? 0),
-      phoneSeconds: Number(r.phone_seconds ?? 0),
+    return rows.map((f: Record<string, unknown>) => ({
+      id: String(f.id),
+      personId: String(f.person_id),
+      displayName: String(f.display_name),
+      desde: new Date(f.started_at as string).toISOString(),
+      hasta: new Date(f.ended_at as string).toISOString(),
+      bestScore: Number(f.best_score ?? 0),
+      seenByFace: Boolean(f.seen_by_face),
+      hadAccess: Boolean(f.had_access),
+      cameraId: String(f.camera_id),
     }));
+  }
+
+  /**
+   * Quién está siendo detectado AHORA.
+   *
+   * Sale de los mismos pasos que el registro: un paso cuyo `ended_at` es de
+   * hace segundos es alguien que la cámara está viendo en este momento. No hay
+   * una segunda fuente de verdad que pueda desincronizarse de la primera.
+   */
+  async presentesAhora(
+    client: PoolClient,
+    toleranciaSegundos: number,
+  ): Promise<
+    {
+      personId: string;
+      displayName: string;
+      hasAccess: boolean;
+      desde: string;
+      ultimaVez: string;
+      seenByFace: boolean;
+      cameraId: string;
+    }[]
+  > {
+    const { rows } = await client.query(
+      `SELECT DISTINCT ON (s.person_id)
+              s.person_id, p.display_name, p.has_access,
+              s.started_at, s.ended_at, s.seen_by_face, s.camera_id
+         FROM person_sightings s
+         JOIN persons p ON p.id = s.person_id
+        WHERE s.ended_at >= now() - ($1 || ' seconds')::interval
+        ORDER BY s.person_id, s.ended_at DESC`,
+      [String(Math.max(Math.round(toleranciaSegundos), 1))],
+    );
+    return rows.map((f: Record<string, unknown>) => ({
+      personId: String(f.person_id),
+      displayName: String(f.display_name),
+      // El acceso de AHORA, no el que tenía al entrar: esta vista es para mirar
+      // el presente, y si se le revocó el permiso hace un minuto eso es
+      // justamente lo que hay que ver.
+      hasAccess: Boolean(f.has_access),
+      desde: new Date(f.started_at as string).toISOString(),
+      ultimaVez: new Date(f.ended_at as string).toISOString(),
+      seenByFace: Boolean(f.seen_by_face),
+      cameraId: String(f.camera_id),
+    }));
+  }
+
+  /** Cambia si una persona tiene acceso, dejando registro de quién lo decidió. */
+  async cambiarAcceso(
+    client: PoolClient,
+    personId: string,
+    hasAccess: boolean,
+    decidedBy: string,
+    note?: string,
+  ): Promise<boolean> {
+    const r = await client.query(
+      `UPDATE persons
+          SET has_access = $2, access_decided_by = $3, access_decided_at = now(),
+              access_note = COALESCE($4, access_note), updated_at = now()
+        WHERE id = $1`,
+      [personId, hasAccess, decidedBy, note ?? null],
+    );
+    return (r.rowCount ?? 0) > 0;
   }
 }

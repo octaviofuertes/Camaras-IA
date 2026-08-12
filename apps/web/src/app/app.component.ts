@@ -46,12 +46,12 @@ import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
             </svg>
             <span>Eventos</span>
           </a>
-          <a class="nav-item" routerLink="/informes" routerLinkActive="active">
+          <a class="nav-item" routerLink="/accesos" routerLinkActive="active">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M3 3v18h18" />
               <path d="M7 15l3.5-4 3 3L20 7" />
             </svg>
-            <span>Informes</span>
+            <span>Accesos</span>
           </a>
           <a class="nav-item" routerLink="/usuarios" routerLinkActive="active">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">

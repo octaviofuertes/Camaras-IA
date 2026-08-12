@@ -45,6 +45,8 @@ export interface EvidenceItem {
 /** Alta de una persona a partir de una alerta de reconocimiento. */
 export interface AltaPersona {
   displayName: string;
+  /** Si tiene permitido estar donde mira esta cámara. */
+  hasAccess: boolean;
   consentBasis: string;
   embedding?: number[];
   /** El operador ya vio el aviso de parecido y afirma que es otra persona. */
@@ -55,6 +57,7 @@ export interface PersonaCargada {
   id: string;
   displayName: string;
   facesCount: number;
+  hasAccess: boolean;
 }
 
 /** Resultado del alta: creada, o rechazada porque esa cara ya es de alguien. */
@@ -86,6 +89,7 @@ const TITLES: Record<string, string> = {
   'person.loitering': 'Merodeo detectado',
   'person.fall': 'Caída detectada',
   'person.unknown': '¿Reconocés a esta persona?',
+  'access.denied': 'ACCESO DENEGADO',
 };
 
 @Injectable({ providedIn: 'root' })
@@ -217,6 +221,7 @@ export class EventsService {
       // que el operador vea de quién se habla, y el vector para poder dar
       // de alta si la respuesta es que sí.
       faceThumbnail: (e.detection?.['faceThumbnail'] as string) ?? undefined,
+      personName: (e.detection?.['personName'] as string) ?? undefined,
       faceEmbedding: (e.detection?.['faceEmbedding'] as string) ?? undefined,
     };
   }

@@ -50,6 +50,7 @@ from percepta_contracts import (
 )
 
 sys.path.insert(0, str(Path(__file__).parent))
+from accesos import RegistroDePasos  # noqa: E402
 from rostros import (  # noqa: E402
     ConfigRostros,
     Identificador,
@@ -82,6 +83,13 @@ class PersonIdentificationModule(PerceptaModule):
         self._ultima_cara_alto = 0.0
         self._poses_medidas = 0
         self._pose = None
+        self._pasos = RegistroDePasos()
+        # persona -> si tiene acceso. Se refresca con la galería.
+        self._acceso_de: dict[str, bool] = {}
+        self._alertas_acceso = 0
+        # Para poder cerrar los pasos por su cuenta al soltar la cámara.
+        self._camera_id = ""
+        self._site_id = ""
         # Cuerpos por los que ya se preguntó: track_id -> cuándo. Vence con el
         # mismo plazo que la memoria de caras, para que no crezca sin límite y
         # para que un identificador de seguimiento reutilizado más tarde no
@@ -99,6 +107,8 @@ class PersonIdentificationModule(PerceptaModule):
         from ultralytics import YOLO
 
         self._ctx = ctx
+        self._camera_id = getattr(ctx, "camera_id", "") or ""
+        self._site_id = getattr(ctx, "site_id", "") or ""
         self._ident = Identificador(self._config_validada(ctx.config))
 
         # La cara es el ancla, pero en una oficina la gente pasa el día sentada
@@ -179,9 +189,54 @@ class PersonIdentificationModule(PerceptaModule):
             self._app.get(np.zeros((480, 640, 3), dtype=np.uint8))
 
     def release(self) -> None:
+        # Lo que estaba pasando cuando se apagó el módulo igual pasó. Sin esto,
+        # a quien estaba adentro le quedaba la hora de salida del último reporte
+        # —hasta medio minuto antes— o directamente no quedaba registrado si su
+        # paso nunca se había reportado.
+        self._cerrar_pasos_pendientes()
         self._parar.set()
         self._app = None
         self._ident = None
+
+    def _cerrar_pasos_pendientes(self) -> None:
+        """Persiste los pasos abiertos al soltar la cámara.
+
+        Se manda desde acá y no por el pipeline porque el pipeline ya no va a
+        llamar a `infer` nunca más: si la última palabra la tuviera él, estos
+        pasos no llegarían a ninguna parte.
+        """
+        pasos = self._pasos.cerrar_todo()
+        if not pasos or self._ctx is None:
+            return
+
+        base = (getattr(self._ctx, "analytics_url", "") or "").rstrip("/")
+        token = getattr(self._ctx, "service_token", "")
+        if not base or not token:
+            log.warning("no se pudieron cerrar %d paso(s): falta la credencial", len(pasos))
+            return
+
+        for paso in pasos:
+            try:
+                r = requests.post(
+                    f"{base}/api/v1/persons/sightings",
+                    json={
+                        "siteId": self._site_id,
+                        "cameraId": self._camera_id,
+                        "personId": paso.persona_id,
+                        "from": paso.desde,
+                        "to": paso.hasta,
+                        "bestScore": paso.mejor_parecido,
+                        "seenByFace": paso.visto_por_rostro,
+                        "hadAccess": paso.tenia_acceso,
+                    },
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=5,
+                )
+                if r.status_code not in (200, 201):
+                    log.warning("cierre de paso rechazado: %s %s", r.status_code, r.text[:120])
+            except requests.RequestException as exc:
+                log.warning("no se pudo cerrar el paso de %s: %s", paso.nombre, exc)
+        log.info("se cerraron %d paso(s) al soltar la cámara", len(pasos))
 
     @staticmethod
     def _cargar_pose(nombre_modelo: str):
@@ -245,10 +300,14 @@ class PersonIdentificationModule(PerceptaModule):
             return
 
         personas = [
-            Persona(id=p["id"], nombre=p.get("displayName", ""), vectores=p.get("embeddings", []))
+            Persona(
+                id=p["id"], nombre=p.get("displayName", ""), vectores=p.get("embeddings", []),
+                tiene_acceso=bool(p.get("hasAccess", True)),
+            )
             for p in datos
             if p.get("embeddings")
         ]
+        self._acceso_de = {p.id: p.tiene_acceso for p in personas}
         if self._ident is not None:
             # Si cambió QUIÉN está dado de alta, se olvida a quién se le
             # preguntó. Sin esto queda una zona muerta: a la persona que se
@@ -350,6 +409,10 @@ class PersonIdentificationModule(PerceptaModule):
                 )
                 anclados.add(tid)
                 self._identificados += 1
+                detecciones += self._registrar_paso(
+                    res.persona_id, res.nombre or "", caja,
+                    ahora=frame.captured_at, parecido=res.parecido, por_rostro=True,
+                )
                 detecciones.append(
                     self._identidad(caja, res.persona_id, res.nombre or "", "rostro", res.parecido)
                 )
@@ -401,6 +464,10 @@ class PersonIdentificationModule(PerceptaModule):
             )
             if r.persona_id:
                 self._identificados += 1
+                detecciones += self._registrar_paso(
+                    r.persona_id, r.nombre or "", caja,
+                    ahora=frame.captured_at, parecido=0.0, por_rostro=False,
+                )
                 detecciones.append(
                     self._identidad(caja, r.persona_id, r.nombre or "", r.via, r.confianza)
                 )
@@ -412,6 +479,10 @@ class PersonIdentificationModule(PerceptaModule):
                         attributes={"kind": "identity", "personId": "", "via": "ninguna"},
                     )
                 )
+
+        # Los pasos que terminaron se emiten para que queden registrados.
+        for paso in self._pasos.cerrar_vencidos(frame.captured_at):
+            detecciones.append(self._a_deteccion_paso(paso))
 
         return InferenceResult(detections=detecciones, inference_ms=elapsed_ms)
 
@@ -437,6 +508,70 @@ class PersonIdentificationModule(PerceptaModule):
                     self._poses_medidas += 1
             except Exception:  # noqa: BLE001
                 log.exception("no se pudo estimar la pose de un rostro")
+
+    # ── control de accesos ──────────────────────────────────────────
+    def _registrar_paso(
+        self, persona_id: str, nombre: str, caja: tuple[float, float, float, float],
+        ahora: float, parecido: float, por_rostro: bool,
+    ) -> list[Detection]:
+        """Anota que se vio a esta persona y alerta si no tiene acceso."""
+        acceso = self._acceso_de.get(persona_id, True)
+        paso = self._pasos.ver(
+            persona_id=persona_id, nombre=nombre, ahora=ahora,
+            parecido=parecido, por_rostro=por_rostro, tiene_acceso=acceso,
+        )
+
+        salida: list[Detection] = []
+        # El paso se persiste mientras ocurre: así el registro muestra quién
+        # está adentro ahora, no sólo quién estuvo.
+        if self._pasos.toca_reportar(paso, ahora):
+            salida.append(self._a_deteccion_paso(paso))
+
+        if not self._pasos.debe_alertar(paso, ahora, tiene_acceso=acceso):
+            return salida
+
+        self._alertas_acceso += 1
+        log.warning("ACCESO DENEGADO: %s está en el cuadro y no tiene acceso", nombre)
+        salida.append(Detection(
+            class_label="access.denied", class_id=0,
+            confidence=max(paso.mejor_parecido, 0.5), bbox=caja,
+            attributes={
+                "kind": "alert",
+                # El módulo ya decidió: no se le pide persistencia extra ni se
+                # la retiene por confianza. Una alerta de acceso denegado que
+                # llega tarde no sirve para nada.
+                "confirmed": "true",
+                "personId": persona_id,
+                "personName": nombre,
+                "reason": "la persona no tiene acceso a este lugar",
+                "vistoPorRostro": "true" if paso.visto_por_rostro else "false",
+            },
+        ))
+        return salida
+
+    def _a_deteccion_paso(self, paso) -> Detection:
+        """Un paso terminado, listo para el registro de accesos.
+
+        Es telemetría y no alerta: saber que Juan entró a las nueve no tiene por
+        qué ocupar a un operador. Lo que sí entra en su cola es el acceso
+        denegado, y es una sola alerta por visita.
+        """
+        return Detection(
+            class_label="access.sighting", class_id=0, confidence=1.0,
+            bbox=(0.0, 0.0, 1.0, 1.0),
+            attributes={
+                "kind": "telemetry",
+                "serie": "sighting",
+                "personId": paso.persona_id,
+                "personName": paso.nombre,
+                "from": f"{paso.desde:.3f}",
+                "to": f"{paso.hasta:.3f}",
+                "bestScore": f"{paso.mejor_parecido:.3f}",
+                "seenByFace": "true" if paso.visto_por_rostro else "false",
+                "hadAccess": "true" if paso.tenia_acceso else "false",
+            },
+        )
+
 
     def _identidad(
         self, caja: tuple[float, float, float, float],
@@ -520,6 +655,8 @@ class PersonIdentificationModule(PerceptaModule):
             "minFaceSize": self._ident.cfg.minFaceSize if self._ident else None,
             "desconocidosEnMemoria": self._ident.desconocidos.recordados if self._ident else 0,
             "cuerposYaPreguntados": len(self._preguntados),
+            "alertasDeAccesoDenegado": self._alertas_acceso,
+            **self._pasos.estado(),
             # Lo que sostiene la identidad cuando la cara no se ve: a cuánta
             # gente se le conoce el puesto es la respuesta a "¿va a seguir
             # sabiendo quién es cuando se dé vuelta?".

@@ -163,7 +163,9 @@ def test_los_defaults_del_schema_se_aplican():
     from ai_worker.main import _defaults_del_modulo
 
     d = _defaults_del_modulo("person-identification")
-    assert d.get("classes") == ["person.unknown"], d
+    # Las dos alertas del módulo: la pregunta por un desconocido y el aviso de
+    # que entró alguien sin acceso.
+    assert d.get("classes") == ["person.unknown", "access.denied"], d
     assert d.get("minPersistenceFrames") == 1
     assert _defaults_del_modulo("fall-detection").get("classes") == ["fall"]
 
@@ -175,7 +177,7 @@ def test_una_asignacion_con_config_vacia_queda_usable():
     m = preparar_modulo({"moduleKey": "person-identification", "aiModuleId": "id-1", "config": {}})
     assert m["eventType"] == "person.unknown", m["eventType"]
     assert m["severity"] == "low"
-    assert m["config"]["classes"] == ["person.unknown"]
+    assert m["config"]["classes"] == ["person.unknown", "access.denied"]
 
     # Y con esa configuración, la pregunta efectivamente dispara.
     dispara, _ = pipeline()._evaluate(m, [deteccion("person.unknown", 0.88)], _ModuleState(), 1000.0)
@@ -211,6 +213,99 @@ def test_lo_que_configuro_la_camara_le_gana_al_modulo():
     assert m["severity"] == "high"
     assert m["config"]["minConfidence"] == 0.9
     assert m["config"]["matchThreshold"] == 0.42, "lo que la cámara no dice lo pone el módulo"
+
+
+# ── un módulo con más de una alerta ────────────────────────────────
+
+def test_cada_alerta_va_con_su_propio_tipo_de_evento():
+    """El control de accesos emite dos cosas distintas.
+
+    Mandarlas con el mismo tipo hace que la pantalla no sepa tratarlas y que la
+    severidad de un acceso denegado quede en la de una consulta administrativa.
+    """
+    from ai_worker.main import preparar_modulo
+
+    m = preparar_modulo({"moduleKey": "person-identification", "aiModuleId": "id-1", "config": {}})
+    grupos = pipeline()._por_tipo(m, [deteccion("person.unknown"), deteccion("access.denied")])
+    por_tipo = {cfg["eventType"]: (cfg, dets) for cfg, dets in grupos}
+
+    assert set(por_tipo) == {"person.unknown", "access.denied"}, por_tipo.keys()
+    assert por_tipo["access.denied"][0]["severity"] == "high", (
+        "el acceso denegado salió con la severidad de la otra alerta"
+    )
+    assert por_tipo["person.unknown"][0]["severity"] == "low"
+
+
+def test_una_alerta_no_bloquea_a_la_otra_por_enfriamiento():
+    """Cada tipo tiene su enfriamiento: si no, la primera tapa a la segunda."""
+    from ai_worker.main import preparar_modulo
+
+    p = pipeline()
+    m = preparar_modulo({"moduleKey": "person-identification", "aiModuleId": "id-1", "config": {}})
+    estados = {}
+    disparos = []
+    for cfg, dets in p._por_tipo(m, [deteccion("person.unknown"), deteccion("access.denied")]):
+        st = estados.setdefault(cfg["eventType"], _ModuleState())
+        if p._evaluate(cfg, dets, st, 1000.0)[0]:
+            disparos.append(cfg["eventType"])
+    assert sorted(disparos) == ["access.denied", "person.unknown"], disparos
+
+
+def test_el_evento_lleva_de_quien_habla():
+    """Una alerta de acceso denegado sin el nombre no le sirve a nadie.
+
+    El operador tendría que abrir el video para saber de quién le están
+    hablando, que es justo lo que la alerta viene a evitar.
+    """
+    p = pipeline()
+    det = Detection(
+        class_label="access.denied", class_id=0, confidence=0.8, bbox=(0.1, 0.1, 0.2, 0.4),
+        attributes={
+            "kind": "alert", "confirmed": "true",
+            "personId": "p-1", "personName": "Tomás Rodríguez",
+            "reason": "la persona no tiene acceso a este lugar",
+        },
+    )
+    payload = _armar_payload(p, det)
+    assert payload["detection"]["personName"] == "Tomás Rodríguez", payload["detection"]
+    assert "no tiene acceso" in payload["detection"]["reason"]
+
+
+def _armar_payload(p, det):
+    """Reproduce el payload que arma `_emit` sin salir a la red."""
+    capturado: dict = {}
+    import ai_worker.pipeline as mod
+
+    class RespuestaFalsa:
+        status_code = 201
+        text = "{}"
+
+        @staticmethod
+        def json():
+            return {"created": True, "event": {"id": "x"}}
+
+    def post_falso(url, json=None, headers=None, timeout=None):
+        capturado.update(json or {})
+        return RespuestaFalsa()
+
+    real = mod.requests.post
+    mod.requests.post = post_falso
+    try:
+        p._emit({"moduleKey": "person-identification", "aiModuleId": "id", "eventType":
+                 "access.denied", "severity": "high", "config": {}}, [det], 1000.0)
+    finally:
+        mod.requests.post = real
+    return capturado
+
+
+def test_una_clase_no_declarada_usa_el_tipo_principal():
+    """Comportamiento de siempre para los módulos de una sola alerta."""
+    from ai_worker.main import preparar_modulo
+
+    m = preparar_modulo({"moduleKey": "fall-detection", "aiModuleId": "id-3", "config": {}})
+    grupos = pipeline()._por_tipo(m, [deteccion("fall")])
+    assert len(grupos) == 1
+    assert grupos[0][0]["eventType"] == "person.fall"
 
 
 if __name__ == "__main__":

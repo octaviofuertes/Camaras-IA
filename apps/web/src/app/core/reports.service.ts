@@ -1,131 +1,93 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, catchError, of } from 'rxjs';
+import { Observable, catchError, map, of } from 'rxjs';
 
-export interface ResumenPuesto {
-  cameraId: string;
-  zoneId: string | null;
-  zoneName: string;
-  observadoSegundos: number;
-  ocupadoSegundos: number;
-  telefonoSegundos: number;
-  vacioSegundos: number;
-  sinCoberturaSegundos: number;
-  ocupacionPct: number;
-  telefonoPct: number;
-  coberturaPct: number;
-  ocupacionMedia: number;
-  maxPersonas: number;
-}
-
-export interface PuntoSerie {
-  periodo: string;
-  cameraId: string;
-  zoneId: string | null;
-  zoneName: string;
-  windowSeconds: number;
-  occupiedSeconds: number;
-  phoneSeconds: number;
-  emptySeconds: number;
-  uncoveredSeconds: number;
-  maxPeople: number;
-  meanOccupancy: number;
-}
-
-export interface Informe {
+/** Un paso: una persona frente a una cámara entre dos horas. */
+export interface Paso {
+  id: string;
+  personId: string;
+  displayName: string;
   desde: string;
   hasta: string;
-  puestos: ResumenPuesto[];
-  serie: PuntoSerie[];
-  total: ResumenPuesto | null;
-  advertencias: string[];
+  minutos: number;
+  /** Mejor parecido facial del paso. 0 = nunca se le vio la cara. */
+  bestScore: number;
+  seenByFace: boolean;
+  hadAccess: boolean;
+  cameraId: string;
 }
 
-/** Informe vacío: la pantalla necesita algo coherente cuando no hay datos. */
-const VACIO: Informe = {
+export interface RegistroAccesos {
+  desde: string;
+  hasta: string;
+  pasos: Paso[];
+  personasDistintas: number;
+  sinAcceso: number;
+  advertencias: string[];
+  /** true si el usuario no tiene permiso para ver el registro. */
+  sinPermiso?: boolean;
+}
+
+const VACIO: RegistroAccesos = {
   desde: '',
   hasta: '',
-  puestos: [],
-  serie: [],
-  total: null,
+  pasos: [],
+  personasDistintas: 0,
+  sinAcceso: 0,
   advertencias: [],
 };
 
-export interface FilaNominal {
-  personId: string | null;
+/** Alguien a quien la cámara está viendo en este momento. */
+export interface Presente {
+  personId: string;
   displayName: string;
-  presenteSegundos: number;
-  telefonoSegundos: number;
-  telefonoPct: number;
-  identificado: boolean;
-}
-
-export interface InformeNominal {
+  hasAccess: boolean;
   desde: string;
-  hasta: string;
-  personas: FilaNominal[];
-  sinIdentificarSegundos: number;
-  advertencias: string[];
-  /** true si el usuario no tiene permiso para ver nombres. */
-  sinPermiso?: boolean;
+  ultimaVez: string;
+  seenByFace: boolean;
+  cameraId: string;
 }
 
 @Injectable({ providedIn: 'root' })
 export class ReportsService {
   private readonly http = inject(HttpClient);
-  // Va por su propio prefijo: analytics-service es un servicio aparte de
-  // eventos, y mezclarlos en /api haría que un informe caído se viera como si
-  // los eventos estuvieran caídos.
-  private readonly base = '/analytics/api/v1/analytics';
 
-  actividad(params: {
-    desde: string;
-    hasta: string;
-    cameraId?: string;
-    bucket?: 'hour' | 'day';
-  }): Observable<Informe> {
-    const qs = new URLSearchParams({
-      desde: params.desde,
-      hasta: params.hasta,
-      bucket: params.bucket ?? 'hour',
-    });
-    if (params.cameraId) qs.set('cameraId', params.cameraId);
-
-    return this.http.get<Informe>(`${this.base}/activity?${qs.toString()}`).pipe(
-      catchError((err) => {
-        console.warn('[informes] analytics-service no respondió:', err.status);
-        return of({ ...VACIO, desde: params.desde, hasta: params.hasta });
-      }),
-    );
+  /**
+   * Quién está siendo detectado ahora.
+   *
+   * Sale de los mismos pasos que el registro, no de una segunda fuente: lo que
+   * se ve en vivo y lo que queda escrito no pueden discrepar.
+   */
+  enVivo(): Observable<Presente[]> {
+    return this.http
+      .get<{ presentes: Presente[] }>('/analytics/api/v1/persons/live')
+      .pipe(
+        map((r) => r.presentes ?? []),
+        catchError(() => of([])),
+      );
   }
 
   /**
-   * Informe con nombre y apellido.
+   * Registro de accesos: quién pasó y a qué hora.
    *
-   * Requiere `reports:identified`, que sólo tienen los administradores. Un 403
-   * no es un error a esconder: se devuelve marcado para que la pantalla explique
-   * por qué no se ve, en vez de mostrar una sección vacía sin motivo.
+   * Requiere `reports:identified`, que sólo tienen los administradores. Saber a
+   * qué hora entra y sale cada persona todos los días es un dato sobre su vida,
+   * no sobre la seguridad del lugar. Un 403 no se esconde: se devuelve marcado
+   * para que la pantalla explique por qué no se ve.
    */
-  porPersona(params: { desde: string; hasta: string; cameraId?: string }): Observable<InformeNominal> {
+  accesos(params: { desde: string; hasta: string; cameraId?: string }): Observable<RegistroAccesos> {
     const qs = new URLSearchParams({ desde: params.desde, hasta: params.hasta });
     if (params.cameraId) qs.set('cameraId', params.cameraId);
 
     return this.http
-      .get<InformeNominal>(`/analytics/api/v1/persons/report/activity?${qs.toString()}`)
+      .get<RegistroAccesos>(`/analytics/api/v1/persons/report/access?${qs.toString()}`)
       .pipe(
         catchError((err) => {
           const sinPermiso = err?.status === 403;
           if (!sinPermiso) {
-            console.warn('[informes] no se pudo traer el informe por persona:', err?.status);
+            console.warn('[accesos] no se pudo traer el registro:', err?.status);
           }
-          return of({
-            desde: params.desde,
-            hasta: params.hasta,
-            personas: [],
-            sinIdentificarSegundos: 0,
-            advertencias: [],
-            sinPermiso,
-          });
+          return of({ ...VACIO, desde: params.desde, hasta: params.hasta, sinPermiso });
         }),
       );
   }

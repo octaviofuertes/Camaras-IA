@@ -1,22 +1,9 @@
 <px-page-header
-  title="Informes"
-  subtitle="Uso de los puestos de trabajo"
+  title="Registro de accesos"
+  subtitle="Quién pasó y a qué hora"
 />
 
 <div class="page">
-  <!-- Qué mide esto, dicho antes que cualquier número -->
-  <div class="notice">
-    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2">
-      <circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8v.01" />
-    </svg>
-    <span>
-      Los porcentajes son sobre el tiempo que la cámara <strong>efectivamente observó</strong>,
-      no sobre el rango completo. Si además está activa la identificación de personas, el
-      tiempo se atribuye a cada empleado dado de alta con su consentimiento; de quien no
-      está dado de alta no se guarda ningún dato.
-    </span>
-  </div>
-
   <div class="filtros">
     <button
       class="chip"
@@ -26,120 +13,126 @@
     >
       {{ r.label }}
     </button>
+
+    <button
+      class="chip alerta"
+      *ngIf="registro && registro.sinAcceso > 0"
+      [class.active]="soloSinAcceso"
+      (click)="soloSinAcceso = !soloSinAcceso"
+    >
+      Sin acceso ({{ registro.sinAcceso }})
+    </button>
   </div>
 
-  <div class="loading" *ngIf="cargando"><span class="spinner"></span> Armando el informe…</div>
-
-  <ng-container *ngIf="!cargando && informe as inf">
-    <!-- Sin datos: se explica por qué, en vez de mostrar ceros -->
-    <div class="panel vacio" *ngIf="!inf.puestos.length">
-      <h3>Todavía no hay mediciones en este rango</h3>
-      <p>
-        El informe se alimenta del módulo <strong>Actividad por puesto</strong>. Para que
-        aparezcan datos, asignalo a una cámara desde la sección Cámaras arrastrándolo sobre
-        ella. Las primeras muestras aparecen al minuto de haberlo asignado.
-      </p>
+  <!-- En vivo: quién está siendo detectado en este momento -->
+  <section class="panel vivo">
+    <div class="vivo-head">
+      <span class="punto"></span>
+      <h2>En el cuadro ahora</h2>
+      <span class="vivo-n">{{ presentes.length }}</span>
     </div>
 
-    <ng-container *ngIf="inf.puestos.length">
-      <!-- Totales -->
-      <section class="kpis" *ngIf="inf.total as t">
-        <div class="panel kpi">
-          <div class="kpi-label">Tiempo observado</div>
-          <div class="kpi-value">{{ duracion(t.observadoSegundos) }}</div>
-          <div class="kpi-sub">de {{ inf.puestos.length }} puesto(s)</div>
-        </div>
-        <div class="panel kpi">
-          <div class="kpi-label">Puestos ocupados</div>
-          <div class="kpi-value">{{ t.ocupacionPct }}<span class="u">%</span></div>
-          <div class="kpi-sub">{{ duracion(t.ocupadoSegundos) }} en total</div>
-        </div>
-        <div class="panel kpi">
-          <div class="kpi-label">Con teléfono a la vista</div>
-          <div class="kpi-value">{{ t.telefonoPct }}<span class="u">%</span></div>
-          <div class="kpi-sub">del tiempo ocupado · cota inferior</div>
-        </div>
-        <div class="panel kpi">
-          <div class="kpi-label">Cobertura de cámara</div>
-          <div class="kpi-value" [class.flojo]="t.coberturaPct < 80">
-            {{ t.coberturaPct }}<span class="u">%</span>
-          </div>
-          <div class="kpi-sub">del rango consultado</div>
-        </div>
-      </section>
+    <div class="vivo-nadie" *ngIf="!presentes.length">
+      No hay nadie identificado frente a la cámara en este momento.
+    </div>
 
-      <!-- Desglose por franja -->
-      <section class="panel grafico" *ngIf="barras().length">
-        <div class="panel-head">
-          <h2 class="panel-title">
-            {{ nombrePuestoPrincipal() }}
-            <span class="mute">· ocupación por franja</span>
-          </h2>
-          <div class="leyenda">
-            <span class="ll ocupado"></span> ocupado
-            <span class="ll telefono"></span> con teléfono
-          </div>
+    <div class="vivo-lista" *ngIf="presentes.length">
+      <div class="vivo-persona" *ngFor="let p of presentes" [class.sin-acceso]="!p.hasAccess">
+        <div class="vp-nombre">
+          {{ p.displayName }}
+          <span class="vp-alerta" *ngIf="!p.hasAccess">SIN ACCESO</span>
         </div>
-
-        <div class="barras">
-          <div class="barra" *ngFor="let b of barras(); trackBy: trackBarra">
-            <div class="col" [title]="b.sinDatos ? 'sin datos' : b.ocupadoPct + '% ocupado'">
-              <i class="ocupado" [style.height.%]="b.ocupadoPct"></i>
-              <i class="telefono" [style.height.%]="b.telefonoPct"></i>
-              <span class="nodata" *ngIf="b.sinDatos"></span>
-            </div>
-            <span class="eje">{{ b.etiqueta }}</span>
-          </div>
-        </div>
-      </section>
-
-      <!-- Por persona: sólo para quien tiene el permiso -->
-      <section class="panel" *ngIf="nominal as nom">
-        <div class="panel-head">
-          <h2 class="panel-title">Por persona</h2>
-        </div>
-
-        <div class="sin-permiso" *ngIf="nom.sinPermiso">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="4" y="10" width="16" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" />
-          </svg>
-          <span>
-            Tu usuario no tiene permiso para ver los informes con nombre y apellido.
-            Es deliberado: cuanta menos gente accede a este dato, mejor. Pedíselo a
-            un administrador si lo necesitás para tu tarea.
+        <div class="vp-detalle">
+          {{ desdeHace(p) }}
+          <span class="vp-via" [class.deducido]="!p.seenByFace">
+            · {{ p.seenByFace ? 'se le vio la cara' : 'deducido por continuidad' }}
           </span>
         </div>
+      </div>
+    </div>
+  </section>
 
-        <div class="empty" *ngIf="!nom.sinPermiso && !nom.personas.length">
-          Todavía no hay tiempo atribuido a personas. Hace falta que el módulo
-          <strong>Identificación de personas</strong> esté asignado a la cámara y que
-          las personas estén dadas de alta desde Eventos.
+  <div class="loading" *ngIf="cargando"><span class="spinner"></span> Buscando…</div>
+
+  <ng-container *ngIf="!cargando && registro as reg">
+    <!-- Sin permiso: se explica, no se esconde -->
+    <div class="panel sin-permiso" *ngIf="reg.sinPermiso">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="4" y="10" width="16" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" />
+      </svg>
+      <span>
+        Tu usuario no tiene permiso para ver el registro de accesos. Es deliberado: saber a
+        qué hora entra y sale cada persona todos los días es un dato sobre su vida, y cuanta
+        menos gente lo alcance, mejor. Pedíselo a un administrador si lo necesitás para tu tarea.
+      </span>
+    </div>
+
+    <ng-container *ngIf="!reg.sinPermiso">
+      <!-- Aviso urgente arriba de todo -->
+      <div class="urgente" *ngIf="reg.sinAcceso > 0">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 3 2 20h20L12 3Z" /><path d="M12 10v4M12 17.5v.5" />
+        </svg>
+        <div>
+          <strong>{{ reg.sinAcceso }} paso(s) de personas sin acceso</strong> en este período.
+          Cada uno generó su alerta en Eventos cuando ocurrió.
         </div>
+      </div>
 
-        <div class="tabla-wrap" *ngIf="!nom.sinPermiso && nom.personas.length">
+      <section class="kpis">
+        <div class="panel kpi">
+          <div class="kpi-label">Pasos registrados</div>
+          <div class="kpi-value">{{ reg.pasos.length }}</div>
+          <div class="kpi-sub">entradas al cuadro de la cámara</div>
+        </div>
+        <div class="panel kpi">
+          <div class="kpi-label">Personas distintas</div>
+          <div class="kpi-value">{{ reg.personasDistintas }}</div>
+          <div class="kpi-sub">de las dadas de alta</div>
+        </div>
+        <div class="panel kpi">
+          <div class="kpi-label">Sin acceso</div>
+          <div class="kpi-value" [class.mal]="reg.sinAcceso > 0">{{ reg.sinAcceso }}</div>
+          <div class="kpi-sub">pasos de gente que no debía estar</div>
+        </div>
+      </section>
+
+      <!-- Sin datos: se explica por qué -->
+      <div class="panel vacio" *ngIf="!reg.pasos.length">
+        <h3>No hay pasos registrados en este rango</h3>
+        <p>
+          El registro se llena con el módulo <strong>Control de accesos</strong>. Para que
+          aparezcan datos, asignalo a una cámara desde la sección Cámaras y dá de alta a las
+          personas respondiendo las preguntas que aparecen en Eventos.
+        </p>
+      </div>
+
+      <section class="panel" *ngIf="reg.pasos.length">
+        <div class="tabla-wrap">
           <table class="tbl">
             <thead>
               <tr>
                 <th>Persona</th>
-                <th>En su puesto</th>
-                <th>Con teléfono</th>
-                <th></th>
+                <th>Entró</th>
+                <th>Salió</th>
+                <th>Estuvo</th>
+                <th>Cómo se supo</th>
+                <th>Acceso</th>
               </tr>
             </thead>
             <tbody>
-              <tr *ngFor="let p of nom.personas; trackBy: trackPersona" [class.anonima]="!p.identificado">
+              <tr *ngFor="let p of pasos(); trackBy: trackPaso" [class.negado]="!p.hadAccess">
                 <td class="nombre">{{ p.displayName }}</td>
-                <td class="mute">{{ duracion(p.presenteSegundos) }}</td>
-                <td>
-                  <ng-container *ngIf="p.identificado">
-                    <span class="tel">{{ p.telefonoPct }}%</span>
-                    <div class="mute chico">{{ duracion(p.telefonoSegundos) }}</div>
-                  </ng-container>
-                  <span class="mute" *ngIf="!p.identificado">—</span>
+                <td class="hora">
+                  <span class="dia" *ngIf="dia(p.desde)">{{ dia(p.desde) }}</span>
+                  {{ hora(p.desde) }}
                 </td>
-                <td class="mute chico">
-                  <span *ngIf="!p.identificado">
-                    suma de todos los no identificados, no una persona
+                <td class="hora mute">{{ hora(p.hasta) }}</td>
+                <td class="mute">{{ duracion(p.minutos) }}</td>
+                <td class="mute chico" [class.deducido]="!p.seenByFace">{{ comoSeSupo(p) }}</td>
+                <td>
+                  <span class="acceso" [class.no]="!p.hadAccess">
+                    {{ p.hadAccess ? 'Permitido' : 'DENEGADO' }}
                   </span>
                 </td>
               </tr>
@@ -148,56 +141,11 @@
         </div>
       </section>
 
-      <!-- Tabla por puesto -->
-      <section class="panel">
-        <div class="panel-head"><h2 class="panel-title">Detalle por puesto</h2></div>
-        <div class="tabla-wrap">
-          <table class="tbl">
-            <thead>
-              <tr>
-                <th>Puesto</th>
-                <th>Observado</th>
-                <th>Ocupado</th>
-                <th>Vacío</th>
-                <th>Con teléfono</th>
-                <th>Ocupación media</th>
-                <th>Cobertura</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr *ngFor="let p of inf.puestos; trackBy: trackPuesto">
-                <td class="nombre">{{ p.zoneName }}</td>
-                <td class="mute">{{ duracion(p.observadoSegundos) }}</td>
-                <td>
-                  <div class="conf">
-                    <span class="conf-bar"><i [style.width.%]="p.ocupacionPct"></i></span>
-                    <span class="conf-num">{{ p.ocupacionPct }}%</span>
-                  </div>
-                  <div class="mute chico">{{ duracion(p.ocupadoSegundos) }}</div>
-                </td>
-                <td class="mute">{{ duracion(p.vacioSegundos) }}</td>
-                <td>
-                  <span class="tel">{{ p.telefonoPct }}%</span>
-                  <div class="mute chico">{{ duracion(p.telefonoSegundos) }}</div>
-                </td>
-                <td class="mute">{{ p.ocupacionMedia }} <span class="chico">pers.</span></td>
-                <td>
-                  <span class="cobertura" [class.flojo]="coberturaFloja(p)">{{ p.coberturaPct }}%</span>
-                  <div class="mute chico" *ngIf="p.sinCoberturaSegundos > 0">
-                    {{ duracion(p.sinCoberturaSegundos) }} sin ver
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <!-- Las advertencias viajan con el informe, no en una nota al pie -->
-      <section class="advertencias" *ngIf="inf.advertencias.length || (nominal && nominal.advertencias.length)">
-        <div class="adv" *ngFor="let a of avisos()">
+      <!-- Las advertencias viajan con el registro, no en una nota al pie -->
+      <section class="advertencias" *ngIf="reg.advertencias.length">
+        <div class="adv" *ngFor="let a of reg.advertencias">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 3 2 20h20L12 3Z" /><path d="M12 10v4M12 17.5v.5" />
+            <circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8v.01" />
           </svg>
           <span>{{ a }}</span>
         </div>

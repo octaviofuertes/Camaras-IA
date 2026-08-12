@@ -96,10 +96,14 @@ class ConfigRostros:
 
 @dataclass
 class Persona:
-    """Un empleado dado de alta, con sus plantillas."""
+    """Una persona dada de alta, con sus plantillas y su permiso."""
     id: str
     nombre: str
     vectores: list[list[float]] = field(default_factory=list)
+    # Si tiene permitido estar donde mira esta cámara. Se decide al darla de
+    # alta y viaja con la galería: la alerta se emite en el mismo frame en que
+    # se la reconoce, sin ir a preguntar por red.
+    tiene_acceso: bool = True
 
 
 @dataclass
