@@ -157,12 +157,22 @@ export class PersonsController {
    */
   @Get('live')
   @RequirePermissions('reports:identified')
-  async live(@Req() req: Request, @Query('segundos') segundos?: string) {
-    const t = Number(segundos);
-    return this.persons.presentes(
-      req.auth as AuthContext,
-      Number.isFinite(t) && t > 0 ? t : 90,
+  async live(@Req() req: Request) {
+    return this.persons.presentes(req.auth as AuthContext);
+  }
+
+  /** Reporte de presencia del pipeline: quién está en el cuadro ahora. */
+  @Post('presence')
+  @RequirePermissions('events:ingest')
+  async presencia(
+    @Body() body: { cameraId?: string; presentes?: unknown[] },
+  ): Promise<{ ok: true }> {
+    if (!body?.cameraId) throw new BadRequestException('Falta el campo cameraId');
+    this.persons.reportarPresencia(
+      String(body.cameraId),
+      (body.presentes ?? []) as never[],
     );
+    return { ok: true };
   }
 
   /**

@@ -159,6 +159,11 @@ class RegistroDePasos:
             return True
         return False
 
+    def desde_de(self, persona_id: str) -> float | None:
+        """Desde cuándo está esta persona, según su paso en curso."""
+        p = self._abiertos.get(persona_id)
+        return p.desde if p else None
+
     # ── diagnóstico ─────────────────────────────────────────────────
     @property
     def en_curso(self) -> list[Paso]:

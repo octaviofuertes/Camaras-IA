@@ -24,6 +24,8 @@ export class ReportsComponent implements OnInit, OnDestroy {
   registro: RegistroAccesos | null = null;
   /** Quién está en el cuadro ahora mismo. */
   presentes: Presente[] = [];
+  /** false = el worker no está reportando; no es lo mismo que "no hay nadie". */
+  haySenalEnVivo = false;
   private timer?: ReturnType<typeof setInterval>;
   cargando = true;
   rango: Rango = 'hoy';
@@ -41,7 +43,9 @@ export class ReportsComponent implements OnInit, OnDestroy {
     this.cargar();
     this.refrescarVivo();
     // El registro del día cambia poco; quién está adentro, todo el tiempo.
-    this.timer = setInterval(() => this.refrescarVivo(), 4000);
+    // Rápido a propósito: el worker reporta una vez por frame y lo que se
+    // muestra tiene que ser el presente, no lo de hace un rato.
+    this.timer = setInterval(() => this.refrescarVivo(), 1500);
   }
 
   ngOnDestroy(): void {
@@ -49,7 +53,10 @@ export class ReportsComponent implements OnInit, OnDestroy {
   }
 
   refrescarVivo(): void {
-    this.api.enVivo().subscribe((p) => (this.presentes = p));
+    this.api.enVivo().subscribe((r) => {
+      this.presentes = r.presentes;
+      this.haySenalEnVivo = r.enVivo;
+    });
   }
 
   /** Hace cuánto que está. */

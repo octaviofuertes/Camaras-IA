@@ -13,6 +13,7 @@ mueve de ahí. La revisión es siempre de una persona.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import threading
 import time
@@ -368,6 +369,31 @@ class CameraPipeline(threading.Thread):
             self.last_error = f"analytics-service: {exc}"
             log.warning("[%s] no se pudo guardar la muestra: %s", self.a.camera_id, exc)
 
+    def _emitir_presencia(self, det) -> None:
+        """Quién está en el cuadro AHORA. No se persiste: es el presente.
+
+        Va en cada frame y no cada treinta segundos como el paso, porque son dos
+        preguntas distintas: el paso es el registro de lo que ocurrió y aguanta
+        escribirse cada tanto; esto es la pantalla en vivo, y si llega tarde
+        muestra gente que ya se fue.
+
+        Un fallo acá no se registra como `last_error`: que se pierda un cuadro
+        de la vista en vivo no es una falla del sistema, y marcarlo taparía un
+        problema real en el registro, que sí importa.
+        """
+        try:
+            requests.post(
+                f"{self.analytics_url}/api/v1/persons/presence",
+                json={
+                    "cameraId": self.a.camera_id,
+                    "presentes": json.loads(det.attributes.get("presentes", "[]")),
+                },
+                headers={"Authorization": f"Bearer {self.token}"},
+                timeout=3,
+            )
+        except (requests.RequestException, ValueError):
+            pass
+
     def _emitir_paso(self, det) -> None:
         """Persiste un paso: quién estuvo frente a esta cámara y entre qué horas.
 
@@ -470,8 +496,11 @@ class CameraPipeline(threading.Thread):
                     if d.attributes.get("kind") not in ("telemetry", "identity")
                 ]
                 for m in mediciones:
-                    if m.attributes.get('serie') == 'sighting':
+                    serie = m.attributes.get('serie')
+                    if serie == 'sighting':
                         self._emitir_paso(m)
+                    elif serie == 'presence':
+                        self._emitir_presencia(m)
                     else:
                         self._emitir_medicion(mod_cfg, m)
 

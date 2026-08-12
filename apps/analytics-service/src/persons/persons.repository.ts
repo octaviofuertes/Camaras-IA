@@ -256,51 +256,6 @@ export class PersonsRepository {
     }));
   }
 
-  /**
-   * Quién está siendo detectado AHORA.
-   *
-   * Sale de los mismos pasos que el registro: un paso cuyo `ended_at` es de
-   * hace segundos es alguien que la cámara está viendo en este momento. No hay
-   * una segunda fuente de verdad que pueda desincronizarse de la primera.
-   */
-  async presentesAhora(
-    client: PoolClient,
-    toleranciaSegundos: number,
-  ): Promise<
-    {
-      personId: string;
-      displayName: string;
-      hasAccess: boolean;
-      desde: string;
-      ultimaVez: string;
-      seenByFace: boolean;
-      cameraId: string;
-    }[]
-  > {
-    const { rows } = await client.query(
-      `SELECT DISTINCT ON (s.person_id)
-              s.person_id, p.display_name, p.has_access,
-              s.started_at, s.ended_at, s.seen_by_face, s.camera_id
-         FROM person_sightings s
-         JOIN persons p ON p.id = s.person_id
-        WHERE s.ended_at >= now() - ($1 || ' seconds')::interval
-        ORDER BY s.person_id, s.ended_at DESC`,
-      [String(Math.max(Math.round(toleranciaSegundos), 1))],
-    );
-    return rows.map((f: Record<string, unknown>) => ({
-      personId: String(f.person_id),
-      displayName: String(f.display_name),
-      // El acceso de AHORA, no el que tenía al entrar: esta vista es para mirar
-      // el presente, y si se le revocó el permiso hace un minuto eso es
-      // justamente lo que hay que ver.
-      hasAccess: Boolean(f.has_access),
-      desde: new Date(f.started_at as string).toISOString(),
-      ultimaVez: new Date(f.ended_at as string).toISOString(),
-      seenByFace: Boolean(f.seen_by_face),
-      cameraId: String(f.camera_id),
-    }));
-  }
-
   /** Cambia si una persona tiene acceso, dejando registro de quién lo decidió. */
   async cambiarAcceso(
     client: PoolClient,

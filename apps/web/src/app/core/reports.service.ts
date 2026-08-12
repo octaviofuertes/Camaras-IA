@@ -58,13 +58,10 @@ export class ReportsService {
    * Sale de los mismos pasos que el registro, no de una segunda fuente: lo que
    * se ve en vivo y lo que queda escrito no pueden discrepar.
    */
-  enVivo(): Observable<Presente[]> {
+  enVivo(): Observable<{ presentes: Presente[]; enVivo: boolean }> {
     return this.http
-      .get<{ presentes: Presente[] }>('/analytics/api/v1/persons/live')
-      .pipe(
-        map((r) => r.presentes ?? []),
-        catchError(() => of([])),
-      );
+      .get<{ presentes: Presente[]; enVivo: boolean }>('/analytics/api/v1/persons/live')
+      .pipe(catchError(() => of({ presentes: [], enVivo: false })));
   }
 
   /**

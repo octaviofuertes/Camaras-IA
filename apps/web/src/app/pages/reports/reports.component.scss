@@ -202,3 +202,11 @@ tr.negado {
   font-size: 10px; font-weight: 700; letter-spacing: .4px;
   background: rgba(239, 68, 68, .25); color: #fca5a5;
 }
+
+/* Sin señal no puede verse igual que "no hay nadie": son dos estados
+   distintos y confundirlos hace creer que el lugar está vacío. */
+.punto.apagado {
+  background: var(--text-mute);
+  animation: none;
+  box-shadow: none;
+}

@@ -392,6 +392,11 @@ class PersonIdentificationModule(PerceptaModule):
         cajas_cuerpo = [c for _, c in cuerpos]
         detecciones: list[Detection] = []
         anclados: set[int] = set()
+        # Quiénes están en el cuadro EN ESTE FRAME. No es lo mismo que tener un
+        # paso abierto: el paso tolera hasta minuto y medio de ausencia para no
+        # partir una visita en pedazos, y la vista en vivo no puede tolerar
+        # nada. Son dos preguntas distintas y necesitan dos respuestas.
+        en_cuadro: dict[str, tuple[str, bool]] = {}
 
         # 3. Las caras reconocidas ANCLAN su identidad al cuerpo que las lleva.
         for res in identificaciones:
@@ -409,6 +414,7 @@ class PersonIdentificationModule(PerceptaModule):
                 )
                 anclados.add(tid)
                 self._identificados += 1
+                en_cuadro[res.persona_id] = (res.nombre or "", True)
                 detecciones += self._registrar_paso(
                     res.persona_id, res.nombre or "", caja,
                     ahora=frame.captured_at, parecido=res.parecido, por_rostro=True,
@@ -464,6 +470,8 @@ class PersonIdentificationModule(PerceptaModule):
             )
             if r.persona_id:
                 self._identificados += 1
+                if r.persona_id not in en_cuadro:
+                    en_cuadro[r.persona_id] = (r.nombre or "", False)
                 detecciones += self._registrar_paso(
                     r.persona_id, r.nombre or "", caja,
                     ahora=frame.captured_at, parecido=0.0, por_rostro=False,
@@ -483,6 +491,28 @@ class PersonIdentificationModule(PerceptaModule):
         # Los pasos que terminaron se emiten para que queden registrados.
         for paso in self._pasos.cerrar_vencidos(frame.captured_at):
             detecciones.append(self._a_deteccion_paso(paso))
+
+        # Y en cada frame, quién está en el cuadro ahora. Va SIEMPRE, aunque no
+        # haya nadie: es lo que hace que la lista se vacíe apenas se van, en vez
+        # de esperar a que algo venza.
+        detecciones.append(Detection(
+            class_label="access.presence", class_id=0, confidence=1.0,
+            bbox=(0.0, 0.0, 1.0, 1.0),
+            attributes={
+                "kind": "telemetry",
+                "serie": "presence",
+                "presentes": json.dumps([
+                    {
+                        "personId": pid,
+                        "displayName": nombre,
+                        "seenByFace": por_rostro,
+                        "hasAccess": self._acceso_de.get(pid, True),
+                        "desde": (self._pasos.desde_de(pid) or frame.captured_at),
+                    }
+                    for pid, (nombre, por_rostro) in en_cuadro.items()
+                ]),
+            },
+        ))
 
         return InferenceResult(detections=detecciones, inference_ms=elapsed_ms)
 

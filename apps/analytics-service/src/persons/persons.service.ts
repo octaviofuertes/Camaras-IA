@@ -41,6 +41,28 @@ export interface Paso {
   cameraId: string;
 }
 
+/**
+ * Cuánto vale un reporte de presencia antes de considerarse viejo.
+ *
+ * El worker manda uno por frame (unos 3 s). Con seis segundos, si el worker se
+ * cae o la cámara se corta la lista se vacía sola en vez de mostrar para
+ * siempre a gente que no está. Es la diferencia entre "no hay nadie" y "no
+ * sabemos", y acá vale más equivocarse por decir de menos.
+ */
+const PRESENCIA_VIGENCIA_MS = 6000;
+
+/**
+ * Cuánto sigue mostrándose una persona después de la última vez que se la
+ * identificó en un frame.
+ *
+ * Identificar falla un cuadro cada tanto —se da vuelta, se tapa, la cara sale
+ * borrosa—. Sin este margen la lista parpadearía: la persona desaparecería y
+ * volvería cada pocos segundos, y eso se lee como que entró y salió cuarenta
+ * veces. Cinco segundos alcanzan para tapar un par de cuadros perdidos y siguen
+ * siendo, a ojo de quien mira, "se fue y desapareció".
+ */
+const PERSONA_VIGENCIA_MS = 5000;
+
 export interface Presente {
   personId: string;
   displayName: string;
@@ -221,17 +243,101 @@ export class PersonsService {
   }
 
   /**
+   * Lo último que reportó cada cámara sobre quién tiene en el cuadro.
+   *
+   * En memoria y no en la base a propósito: es el presente, llega una vez por
+   * frame y se reemplaza entero. Escribirlo sería miles de filas por hora para
+   * responder una pregunta que sólo importa durante tres segundos.
+   */
+  private readonly presencia = new Map<
+    string,
+    { at: number; personas: Map<string, { at: number; p: Presente }> }
+  >();
+
+  /**
+   * Alta de un reporte de presencia del pipeline.
+   *
+   * Se fusiona por persona en vez de reemplazar la lista entera: quien no vino
+   * en ESTE cuadro no desaparece al instante, se le empieza a contar el
+   * vencimiento. Es lo que evita que la lista parpadee cuando la
+   * identificación falla un frame.
+   */
+  reportarPresencia(cameraId: string, personas: Presente[]): void {
+    const ahora = Date.now();
+    // El módulo manda `desde` como segundos desde la época; la pantalla espera
+    // una fecha. Sin normalizarlo acá, `new Date(1786...)` lo lee como
+    // milisegundos y la pantalla mostraba "hace 495770 h". Se convierte una
+    // vez, en la frontera, y no en cada lugar que lo consuma.
+    for (const p of personas) {
+      const n = Number(p.desde);
+      if (Number.isFinite(n) && n > 0) p.desde = new Date(n * 1000).toISOString();
+    }
+    const previo = this.presencia.get(cameraId);
+    const mapa = previo?.personas ?? new Map<string, { at: number; p: Presente }>();
+
+    for (const p of personas) {
+      const anterior = mapa.get(p.personId);
+      mapa.set(p.personId, {
+        at: ahora,
+        // El "desde" del anterior manda: es cuándo empezó a estar, y el módulo
+        // lo recalcula si abre un paso nuevo.
+        p: anterior ? { ...p, desde: anterior.p.desde || p.desde } : p,
+      });
+    }
+
+    for (const [pid, v] of mapa) {
+      if (ahora - v.at > PERSONA_VIGENCIA_MS) mapa.delete(pid);
+    }
+
+    this.presencia.set(cameraId, { at: ahora, personas: mapa });
+  }
+
+  /**
    * Quién está siendo detectado en este momento.
    *
    * La tolerancia es la misma con la que el módulo cierra un paso: si no se lo
    * ve hace más de eso, ya no está. Un número más chico haría parpadear la
    * lista cada vez que alguien se da vuelta.
    */
-  async presentes(auth: AuthContext, toleranciaSegundos = 90): Promise<{ presentes: Presente[] }> {
-    const presentes = await this.db.withTenant(auth.organizationId, (c) =>
-      this.repo.presentesAhora(c, toleranciaSegundos),
-    );
-    return { presentes };
+  async presentes(auth: AuthContext): Promise<{ presentes: Presente[]; enVivo: boolean }> {
+    const ahora = Date.now();
+    const frescos: Presente[] = [];
+    let hayReporte = false;
+
+    for (const [camara, r] of this.presencia) {
+      if (ahora - r.at > PRESENCIA_VIGENCIA_MS) {
+        // Esa cámara dejó de reportar: se olvida en vez de mostrar su última
+        // foto como si fuera el presente.
+        this.presencia.delete(camara);
+        continue;
+      }
+      hayReporte = true;
+      for (const [pid, v] of r.personas) {
+        if (ahora - v.at > PERSONA_VIGENCIA_MS) {
+          r.personas.delete(pid);
+          continue;
+        }
+        frescos.push(v.p);
+      }
+    }
+
+    if (hayReporte) {
+      // El acceso se resuelve contra la base, no contra lo que dijo el módulo:
+      // si se le revocó hace diez segundos, la pantalla en vivo tiene que
+      // mostrarlo ya, y la galería del módulo se refresca cada treinta.
+      const personas = await this.db.withTenant(auth.organizationId, (c) =>
+        this.repo.listar(c),
+      );
+      const acceso = new Map(personas.map((p) => [p.id, p.hasAccess]));
+      for (const p of frescos) {
+        if (acceso.has(p.personId)) p.hasAccess = acceso.get(p.personId) as boolean;
+      }
+      return { presentes: frescos, enVivo: true };
+    }
+
+    // Sin reportes frescos no se inventa: la pantalla dice que no hay señal en
+    // vivo en vez de mostrar a alguien que quizá se fue hace una hora.
+    return { presentes: [], enVivo: false };
   }
 
   /** Cambia si una persona tiene acceso. Queda registrado quién lo decidió. */
