@@ -214,9 +214,11 @@ export class RecognitionComponent implements OnInit, OnDestroy {
     if (!file) return;
     const lector = new FileReader();
     lector.onload = () => {
-      r.imagen = String(lector.result);
-      r.resultado = undefined;
-      this.subirSiHayPersona(r);
+      void achicar(String(lector.result)).then((img) => {
+        r.imagen = img;
+        r.resultado = undefined;
+        this.subirSiHayPersona(r);
+      });
     };
     lector.readAsDataURL(file);
     input.value = '';
@@ -252,10 +254,12 @@ export class RecognitionComponent implements OnInit, OnDestroy {
     canvas.width = v.videoWidth || 1280;
     canvas.height = v.videoHeight || 720;
     canvas.getContext('2d')?.drawImage(v, 0, 0, canvas.width, canvas.height);
-    r.imagen = canvas.toDataURL('image/jpeg', 0.92);
-    r.resultado = undefined;
+    void achicar(canvas.toDataURL('image/jpeg', 0.95)).then((img) => {
+      r.imagen = img;
+      r.resultado = undefined;
+      this.subirSiHayPersona(r);
+    });
     this.cerrarCamara();
-    this.subirSiHayPersona(r);
   }
 
   cerrarCamara(): void {
@@ -337,6 +341,37 @@ export class RecognitionComponent implements OnInit, OnDestroy {
   trackEvento(_: number, e: EventItem): string {
     return e.id;
   }
+}
+
+/**
+ * Achica la foto antes de mandarla.
+ *
+ * Una foto de teléfono son varios megabytes y en base64 crece un tercio más.
+ * El detector de rostros trabaja a 640 px: más allá de mil y pico de píxeles no
+ * gana nada y sólo hace más lenta la subida. Se achica sólo si hace falta, para
+ * no degradar una foto que ya era chica.
+ */
+async function achicar(dataUrl: string, maxLado = 1280): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const lado = Math.max(img.width, img.height);
+      if (lado <= maxLado) {
+        resolve(dataUrl);
+        return;
+      }
+      const escala = maxLado / lado;
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * escala);
+      canvas.height = Math.round(img.height * escala);
+      canvas.getContext('2d')?.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', 0.9));
+    };
+    // Si el navegador no puede leerla, se manda tal cual: que falle el servidor
+    // con su mensaje es mejor que tragarse la foto acá en silencio.
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
 }
 
 /** El vector facial viaja en base64 dentro de la alerta. */
