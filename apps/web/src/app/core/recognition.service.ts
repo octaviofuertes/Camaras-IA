@@ -8,6 +8,8 @@ export interface Persona {
   displayName: string;
   active: boolean;
   hasAccess: boolean;
+  /** Miniatura de su cara. Null si se cargó sin ninguna foto utilizable. */
+  photo: string | null;
   consentBasis: string;
   consentAt: string;
   facesCount: number;
@@ -35,6 +37,8 @@ export interface AltaManual {
   displayName: string;
   hasAccess: boolean;
   consentBasis: string;
+  /** Miniatura, cuando el alta viene de una cara ya detectada. */
+  photo?: string;
 }
 
 @Injectable({ providedIn: 'root' })

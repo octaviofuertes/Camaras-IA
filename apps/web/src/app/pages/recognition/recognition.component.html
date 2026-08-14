@@ -4,34 +4,87 @@
 />
 
 <div class="page">
-  <div class="modos">
-    <button class="modo" [class.active]="modo === 'automatico'" (click)="setModo('automatico')">
-      <span class="modo-titulo">
-        Detectadas por la cámara
-        <span class="badge" *ngIf="pendientes.length">{{ pendientes.length }}</span>
-      </span>
-      <span class="modo-sub">Caras que vio y no conoce</span>
+  <nav class="tabs">
+    <button class="tab" [class.active]="modo === 'registradas'" (click)="setModo('registradas')">
+      Personas registradas
+      <span class="cuenta">{{ personas.length }}</span>
     </button>
-    <button class="modo" [class.active]="modo === 'manual'" (click)="setModo('manual')">
-      <span class="modo-titulo">Cargar con fotos</span>
-      <span class="modo-sub">Subirlas o sacarlas ahora</span>
+    <button class="tab" [class.active]="modo === 'detectadas'" (click)="setModo('detectadas')">
+      Detectadas por la cámara
+      <span class="cuenta alerta" *ngIf="pendientes.length">{{ pendientes.length }}</span>
     </button>
-  </div>
+    <button class="tab" [class.active]="modo === 'manual'" (click)="setModo('manual')">
+      Cargar con fotos
+    </button>
+  </nav>
 
-  <!-- ═══ Detectadas por la cámara ═════════════════════════════════ -->
-  <ng-container *ngIf="modo === 'automatico'">
+  <!-- ═══ 1. Personas registradas ══════════════════════════════════ -->
+  <ng-container *ngIf="modo === 'registradas'">
+    <div class="panel vacio" *ngIf="!personas.length">
+      <h3>Todavía no hay nadie cargado</h3>
+      <p>
+        Cargá personas desde <strong>Detectadas por la cámara</strong>, poniéndole nombre a una
+        cara que ya vio, o desde <strong>Cargar con fotos</strong>.
+      </p>
+    </div>
+
+    <div class="fichas" *ngIf="personas.length">
+      <article class="ficha" *ngFor="let p of personas; trackBy: trackPersona"
+               [class.sin-acceso]="!p.hasAccess">
+        <div class="ficha-foto">
+          <img *ngIf="p.photo" [src]="urlFoto(p.photo)" [alt]="p.displayName" />
+          <span class="inicial" *ngIf="!p.photo">{{ inicial(p.displayName) }}</span>
+        </div>
+
+        <div class="ficha-datos">
+          <h3 class="ficha-nombre">{{ p.displayName }}</h3>
+          <div class="ficha-meta">
+            <span class="etiqueta" [class.no]="!p.hasAccess">
+              {{ p.hasAccess ? 'Con acceso' : 'Sin acceso' }}
+            </span>
+            <span class="etiqueta neutra" [class.pocas]="p.facesCount < 2">
+              {{ p.facesCount }} foto(s)
+            </span>
+          </div>
+          <p class="ficha-nota" *ngIf="p.facesCount < 2">
+            Con una sola foto se lo reconoce de frente. Sumale otra de perfil.
+          </p>
+        </div>
+
+        <div class="ficha-acciones">
+          <button class="btn sm" (click)="agregarFotosA(p)">Agregar fotos</button>
+          <button class="btn sm" (click)="cambiarAcceso(p)">
+            {{ p.hasAccess ? 'Quitar acceso' : 'Dar acceso' }}
+          </button>
+          <button class="btn sm peligro" (click)="pedirBaja(p)">Eliminar</button>
+        </div>
+      </article>
+    </div>
+  </ng-container>
+
+  <!-- ═══ 2. Detectadas por la cámara ══════════════════════════════ -->
+  <ng-container *ngIf="modo === 'detectadas'">
     <div class="loading" *ngIf="cargandoPendientes"><span class="spinner"></span> Buscando…</div>
 
     <div class="panel vacio" *ngIf="!cargandoPendientes && !pendientes.length">
       <h3>No hay caras esperando respuesta</h3>
       <p>
-        Cuando una cámara vea a alguien que no está cargado, va a aparecer acá para que le
-        pongas nombre.
+        Cuando una cámara vea de frente a alguien que no está cargado, va a aparecer acá para
+        que le pongas nombre. Sólo se pregunta por caras que se ven bien: por un perfil o una
+        nuca no se puede decidir quién es.
       </p>
     </div>
 
+    <div class="barra" *ngIf="!cargandoPendientes && pendientes.length">
+      <span>{{ pendientes.length }} cara(s) esperando</span>
+      <button class="btn sm" (click)="descartarTodas()" [disabled]="descartando">
+        {{ descartando ? 'Descartando…' : 'Descartar todas' }}
+      </button>
+    </div>
+
     <div class="panel lista" *ngIf="!cargandoPendientes && pendientes.length">
-      <div class="fila" *ngFor="let e of pendientes; trackBy: trackEvento" [class.abierta]="abierta === e.id">
+      <div class="fila" *ngFor="let e of pendientes; trackBy: trackEvento"
+           [class.abierta]="abierta === e.id">
         <button class="cabecera" (click)="desplegar(e)">
           <img class="mini" *ngIf="e.faceThumbnail" [src]="urlMiniatura(e)" alt="Rostro detectado" />
           <span class="cab-txt">
@@ -49,29 +102,31 @@
           <img class="grande" *ngIf="e.faceThumbnail" [src]="urlMiniatura(e)" alt="Rostro detectado" />
 
           <div class="form">
-            <label class="campo">
-              <span class="campo-label">Nombre y apellido</span>
-              <input type="text" [(ngModel)]="nombre" placeholder="Ej: Juan Rodríguez" />
-            </label>
+            <div class="campos">
+              <label class="campo">
+                <span class="campo-label">Nombre y apellido</span>
+                <input type="text" [(ngModel)]="nombre" placeholder="Ej: Juan Rodríguez" />
+              </label>
 
-            <div class="campo">
-              <span class="campo-label">¿Puede estar en este lugar?</span>
-              <div class="opciones">
-                <button class="op si" [class.elegida]="acceso === true" (click)="acceso = true">Sí</button>
-                <button class="op no" [class.elegida]="acceso === false" (click)="acceso = false">No</button>
+              <div class="campo">
+                <span class="campo-label">¿Puede estar en este lugar?</span>
+                <div class="opciones">
+                  <button class="op si" [class.elegida]="acceso === true" (click)="acceso = true">Sí</button>
+                  <button class="op no" [class.elegida]="acceso === false" (click)="acceso = false">No</button>
+                </div>
               </div>
-              <small class="ojo" *ngIf="acceso === false">
-                Cada vez que aparezca va a generarse una alerta urgente.
-              </small>
+
+              <label class="campo ancho">
+                <span class="campo-label">Consentimiento</span>
+                <input type="text" [(ngModel)]="consentimiento"
+                       placeholder="Ej: firmado 10/08/2026, legajo 1042" />
+                <small>Guardar su cara requiere su consentimiento. Anotá cómo se documentó.</small>
+              </label>
             </div>
 
-            <label class="campo">
-              <span class="campo-label">Consentimiento</span>
-              <input type="text" [(ngModel)]="consentimiento"
-                     placeholder="Ej: firmado 10/08/2026, legajo 1042" />
-              <small>Guardar su cara requiere su consentimiento. Anotá cómo se documentó.</small>
-            </label>
-
+            <small class="ojo" *ngIf="acceso === false">
+              Cada vez que aparezca va a generarse una alerta urgente.
+            </small>
             <div class="error" *ngIf="errorAlta">{{ errorAlta }}</div>
 
             <div class="acciones">
@@ -87,145 +142,153 @@
     </div>
   </ng-container>
 
-  <!-- ═══ Cargar con fotos ═════════════════════════════════════════ -->
+  <!-- ═══ 3. Cargar con fotos ══════════════════════════════════════ -->
   <ng-container *ngIf="modo === 'manual'">
-    <!-- Paso 1 -->
-    <section class="panel paso">
-      <div class="paso-cab">
-        <span class="n">1</span>
-        <h2>¿Quién es?</h2>
-        <span class="paso-listo" *ngIf="personaElegida || nombre.trim()">✓</span>
-      </div>
-      <div class="quien">
-        <button class="chip-persona nueva" [class.active]="!personaElegida" (click)="elegirPersona(null)">
-          + Alguien nuevo
-        </button>
-        <button class="chip-persona" *ngFor="let p of personas; trackBy: trackPersona"
-                [class.active]="personaElegida?.id === p.id" (click)="elegirPersona(p)">
-          {{ p.displayName }}
-          <span class="fotos" [title]="p.facesCount + ' foto(s) que sirven para reconocerlo'">
-            {{ p.facesCount }}
-          </span>
-          <span class="sin-acceso" *ngIf="!p.hasAccess">sin acceso</span>
-        </button>
-      </div>
-      <p class="paso-ayuda" *ngIf="personaElegida">
-        Le vas a sumar fotos a <strong>{{ personaElegida.displayName }}</strong>. Cuantos más
-        ángulos tenga, en más situaciones lo va a reconocer.
-      </p>
-    </section>
-
-    <!-- Paso 2 -->
-    <section class="panel paso" [class.pendiente]="false">
-      <div class="paso-cab">
-        <span class="n">2</span>
-        <h2>Sus datos</h2>
-        <span class="paso-listo" *ngIf="puedeGuardar()">✓</span>
-      </div>
-
-      <div class="form dos-columnas">
-        <label class="campo">
-          <span class="campo-label">Nombre y apellido</span>
-          <input type="text" [(ngModel)]="nombre" [disabled]="!!personaElegida"
-                 placeholder="Ej: Juan Rodríguez" />
-        </label>
-
-        <div class="campo">
-          <span class="campo-label">¿Puede estar en este lugar?</span>
-          <div class="opciones">
-            <button class="op si" [class.elegida]="acceso === true" (click)="acceso = true">Sí</button>
-            <button class="op no" [class.elegida]="acceso === false" (click)="acceso = false">No</button>
+    <div class="columnas">
+      <div class="col">
+        <section class="panel paso">
+          <div class="paso-cab">
+            <span class="n">1</span>
+            <h2>¿Quién es?</h2>
           </div>
-        </div>
+          <div class="quien">
+            <button class="chip-persona nueva" [class.active]="!personaElegida"
+                    (click)="elegirPersona(null)">
+              + Alguien nuevo
+            </button>
+            <button class="chip-persona" *ngFor="let p of personas; trackBy: trackPersona"
+                    [class.active]="personaElegida?.id === p.id" (click)="elegirPersona(p)">
+              {{ p.displayName }}
+              <span class="fotos">{{ p.facesCount }}</span>
+            </button>
+          </div>
+        </section>
 
-        <label class="campo ancho">
-          <span class="campo-label">Consentimiento</span>
-          <input type="text" [(ngModel)]="consentimiento" [disabled]="!!personaElegida"
-                 placeholder="Ej: firmado 10/08/2026, legajo 1042" />
-          <small>Guardar la cara de alguien requiere su consentimiento. Anotá cómo se documentó.</small>
-        </label>
-      </div>
-      <div class="error" *ngIf="errorAlta">{{ errorAlta }}</div>
-    </section>
-
-    <!-- Paso 3 -->
-    <section class="panel paso" [class.pendiente]="!personaElegida && !puedeGuardar()">
-      <div class="paso-cab">
-        <span class="n">3</span>
-        <h2>Sus fotos</h2>
-        <span class="paso-listo" *ngIf="plantillasLogradas() > 0">
-          {{ plantillasLogradas() }} sirven
-        </span>
-      </div>
-
-      <div class="ranuras">
-        <div class="ranura" *ngFor="let r of ranuras"
-             [class.sirve]="r.resultado?.plantilla"
-             [class.no-sirve]="r.resultado && !r.resultado.plantilla">
-          <div class="foto" [class.vacia]="!r.imagen">
-            <img *ngIf="r.imagen" [src]="r.imagen" [alt]="r.titulo" />
-            <span class="sin" *ngIf="!r.imagen">
-              <svg viewBox="0 0 24 24" width="26" height="26" fill="none"
-                   stroke="currentColor" stroke-width="1.6">
-                <rect x="3" y="6" width="18" height="14" rx="2" />
-                <circle cx="12" cy="13" r="3.2" />
-                <path d="M8 6l1.2-2h5.6L16 6" />
-              </svg>
-            </span>
-            <span class="subiendo" *ngIf="r.subiendo"><span class="spinner"></span></span>
-            <span class="sello" *ngIf="r.resultado?.plantilla">✓ sirve</span>
+        <section class="panel paso">
+          <div class="paso-cab">
+            <span class="n">2</span>
+            <h2>Sus datos</h2>
+            <span class="paso-listo" *ngIf="puedeGuardar()">✓</span>
           </div>
 
-          <div class="ranura-txt">
-            <strong>{{ r.titulo }}</strong>
-            <span class="ranura-ayuda">{{ r.ayuda }}</span>
-          </div>
-
-          <div class="ranura-acciones">
-            <label class="btn sm">
-              Subir
-              <input type="file" accept="image/*" hidden (change)="elegirArchivo(r, $event)" />
+          <div class="campos">
+            <label class="campo">
+              <span class="campo-label">Nombre y apellido</span>
+              <input type="text" [(ngModel)]="nombre" [disabled]="!!personaElegida"
+                     placeholder="Ej: Juan Rodríguez" />
             </label>
-            <button class="btn sm" (click)="abrirCamara(r.tipo)">Sacar</button>
+
+            <div class="campo">
+              <span class="campo-label">¿Puede estar en este lugar?</span>
+              <div class="opciones">
+                <button class="op si" [class.elegida]="acceso === true" (click)="acceso = true">Sí</button>
+                <button class="op no" [class.elegida]="acceso === false" (click)="acceso = false">No</button>
+              </div>
+            </div>
+
+            <label class="campo ancho">
+              <span class="campo-label">Consentimiento</span>
+              <input type="text" [(ngModel)]="consentimiento" [disabled]="!!personaElegida"
+                     placeholder="Ej: firmado 10/08/2026, legajo 1042" />
+              <small>Guardar la cara de alguien requiere su consentimiento.</small>
+            </label>
+          </div>
+          <div class="error" *ngIf="errorAlta">{{ errorAlta }}</div>
+        </section>
+      </div>
+
+      <div class="col">
+        <section class="panel paso">
+          <div class="paso-cab">
+            <span class="n">3</span>
+            <h2>Sus fotos</h2>
+            <span class="paso-listo" *ngIf="plantillasLogradas() > 0">
+              {{ plantillasLogradas() }} sirven
+            </span>
           </div>
 
-          <div class="resultado" *ngIf="r.resultado"
-               [class.ok]="r.resultado.plantilla" [class.no]="!r.resultado.plantilla">
-            {{ r.resultado.motivo }}
+          <div class="ranuras">
+            <div class="ranura" *ngFor="let r of ranuras"
+                 [class.sirve]="r.resultado?.plantilla"
+                 [class.no-sirve]="r.resultado && !r.resultado.plantilla">
+              <div class="foto" [class.vacia]="!r.imagen">
+                <img *ngIf="r.imagen" [src]="r.imagen" [alt]="r.titulo" />
+                <span class="sin" *ngIf="!r.imagen">
+                  <svg viewBox="0 0 24 24" width="24" height="24" fill="none"
+                       stroke="currentColor" stroke-width="1.6">
+                    <rect x="3" y="6" width="18" height="14" rx="2" />
+                    <circle cx="12" cy="13" r="3.2" />
+                    <path d="M8 6l1.2-2h5.6L16 6" />
+                  </svg>
+                </span>
+                <span class="subiendo" *ngIf="r.subiendo"><span class="spinner"></span></span>
+                <span class="sello" *ngIf="r.resultado?.plantilla">✓</span>
+              </div>
+
+              <div class="ranura-txt">
+                <strong>{{ r.titulo }}</strong>
+                <span class="ranura-ayuda">{{ r.ayuda }}</span>
+              </div>
+
+              <div class="ranura-acciones">
+                <label class="btn sm">
+                  Subir
+                  <input type="file" accept="image/*" hidden (change)="elegirArchivo(r, $event)" />
+                </label>
+                <button class="btn sm" (click)="abrirCamara(r.tipo)">Sacar</button>
+              </div>
+
+              <div class="resultado" *ngIf="r.resultado"
+                   [class.ok]="r.resultado.plantilla" [class.no]="!r.resultado.plantilla">
+                {{ r.resultado.motivo }}
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
 
-      <div class="camara" *ngIf="camaraAbierta">
-        <video id="camara-preview" playsinline muted></video>
-        <div class="camara-acciones">
-          <button class="btn" (click)="cerrarCamara()">Cancelar</button>
-          <button class="btn btn-primary" (click)="sacarFoto()">Capturar</button>
-        </div>
-      </div>
-      <div class="error" *ngIf="errorCamara">{{ errorCamara }}</div>
+          <div class="camara" *ngIf="camaraAbierta">
+            <video id="camara-preview" playsinline muted></video>
+            <div class="camara-acciones">
+              <button class="btn" (click)="cerrarCamara()">Cancelar</button>
+              <button class="btn btn-primary" (click)="sacarFoto()">Capturar</button>
+            </div>
+          </div>
+          <div class="error" *ngIf="errorCamara">{{ errorCamara }}</div>
 
-      <div class="cierre" *ngIf="!personaElegida">
-        <button class="btn btn-primary" [disabled]="!puedeGuardar() || guardando"
-                (click)="guardarManual()">
-          {{ guardando ? 'Creando…' : 'Guardar' }}
-        </button>
-        <span class="cierre-ayuda" *ngIf="hayFotos()">
-          Las fotos se guardan al crear la ficha: una cara no puede guardarse sin el
-          consentimiento que la acompaña.
-        </span>
-        <span class="cierre-ayuda" *ngIf="!hayFotos()">
-          Podés guardarlo sin fotos, pero sin al menos una de frente el sistema no va a
-          poder reconocerlo.
-        </span>
+          <div class="cierre">
+            <button class="btn btn-primary" *ngIf="!personaElegida"
+                    [disabled]="!puedeGuardar() || guardando" (click)="guardarManual()">
+              {{ guardando ? 'Creando…' : 'Guardar' }}
+            </button>
+            <span class="cierre-ayuda" *ngIf="!personaElegida">
+              Las fotos se guardan al crear la ficha: una cara no puede guardarse sin el
+              consentimiento que la acompaña.
+            </span>
+            <span class="cierre-ayuda" *ngIf="personaElegida">
+              Cada foto se guarda apenas la cargás.
+              <strong>{{ personaElegida.displayName }}</strong> tiene
+              <strong>{{ personaElegida.facesCount }}</strong> foto(s) que sirven.
+            </span>
+          </div>
+        </section>
       </div>
-      <div class="cierre" *ngIf="personaElegida">
-        <span class="cierre-ayuda">
-          Cada foto se guarda sola apenas la cargás.
-          <strong>{{ personaElegida.displayName }}</strong> tiene
-          <strong>{{ personaElegida.facesCount }}</strong> foto(s) que sirven para reconocerlo.
-        </span>
-      </div>
-    </section>
+    </div>
   </ng-container>
+
+  <!-- Confirmación de baja: borra su cara y su historial -->
+  <div class="modal-fondo" *ngIf="bajaPedida as p" (click)="bajaPedida = null">
+    <div class="modal panel" (click)="$event.stopPropagation()">
+      <h2>Eliminar a {{ p.displayName }}</h2>
+      <p>
+        Se borran su cara, sus plantillas y su historial de accesos. El sistema deja de
+        reconocerlo y, si vuelve a aparecer, va a preguntar quién es como si fuera la primera vez.
+      </p>
+      <p class="modal-irrev">Esto no se puede deshacer.</p>
+      <div class="modal-acciones">
+        <button class="btn" (click)="bajaPedida = null">Cancelar</button>
+        <button class="btn peligro" [disabled]="borrando" (click)="confirmarBaja()">
+          {{ borrando ? 'Eliminando…' : 'Eliminar' }}
+        </button>
+      </div>
+    </div>
+  </div>
 </div>

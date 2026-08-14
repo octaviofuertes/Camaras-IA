@@ -59,6 +59,7 @@ export class PersonsController {
       notes?: string;
       forzarNueva?: boolean;
       hasAccess?: boolean;
+      photo?: string;
     },
   ) {
     if (!body?.displayName || !body?.consentBasis) {
@@ -73,6 +74,7 @@ export class PersonsController {
     return this.persons.alta(req.auth as AuthContext, {
       displayName: body.displayName,
       hasAccess: body.hasAccess,
+      photo: body.photo,
       consentBasis: body.consentBasis,
       embedding: body.embedding,
       notes: body.notes,

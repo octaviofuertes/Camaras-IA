@@ -11,7 +11,7 @@ import {
 import { EventsService } from '../../core/events.service';
 import type { EventItem } from '../../core/models';
 
-type Modo = 'automatico' | 'manual';
+type Modo = 'registradas' | 'detectadas' | 'manual';
 
 /** Las tres fotos que se piden, con qué aporta cada una. */
 interface RanuraFoto {
@@ -34,7 +34,7 @@ export class RecognitionComponent implements OnInit, OnDestroy {
   private readonly api = inject(RecognitionService);
   private readonly eventos = inject(EventsService);
 
-  modo: Modo = 'automatico';
+  modo: Modo = 'registradas';
 
   // ── automático ─────────────────────────────────────────────────────
   /** Caras que la cámara detectó y el sistema no conoce. */
@@ -71,6 +71,11 @@ export class RecognitionComponent implements OnInit, OnDestroy {
       ayuda: 'Queda como referencia. No sirve para reconocer: no hay cara que medir.',
     },
   ];
+
+  /** Persona cuya baja se está confirmando. */
+  bajaPedida: Persona | null = null;
+  borrando = false;
+  descartando = false;
 
   // ── cámara del navegador ───────────────────────────────────────────
   camaraAbierta: TipoFoto | null = null;
@@ -115,9 +120,66 @@ export class RecognitionComponent implements OnInit, OnDestroy {
   }
 
   urlMiniatura(e: EventItem): string {
-    const b64 = e.faceThumbnail;
+    return this.urlFoto(e.faceThumbnail);
+  }
+
+  /** Acepta tanto un data URL como base64 pelado: los dos llegan. */
+  urlFoto(b64?: string | null): string {
     if (!b64) return '';
     return b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`;
+  }
+
+  inicial(nombre: string): string {
+    return (nombre.trim()[0] ?? '?').toUpperCase();
+  }
+
+  // ── fichas registradas ─────────────────────────────────────────────
+  /** Lleva al modo manual con esta persona ya elegida. */
+  agregarFotosA(p: Persona): void {
+    this.elegirPersona(p);
+    this.modo = 'manual';
+  }
+
+  cambiarAcceso(p: Persona): void {
+    this.api.cambiarAcceso(p.id, !p.hasAccess).subscribe(() => this.cargarPersonas());
+  }
+
+  pedirBaja(p: Persona): void {
+    this.bajaPedida = p;
+  }
+
+  confirmarBaja(): void {
+    const p = this.bajaPedida;
+    if (!p || this.borrando) return;
+    this.borrando = true;
+    this.api.baja(p.id).subscribe(() => {
+      this.borrando = false;
+      this.bajaPedida = null;
+      if (this.personaElegida?.id === p.id) this.elegirPersona(null);
+      this.cargarPersonas();
+    });
+  }
+
+  /**
+   * Descarta todas las caras pendientes de una vez.
+   *
+   * Sirve para vaciar una cola vieja: las caras que quedaron de antes de que el
+   * módulo filtrara por pose son perfiles y nucas que nadie puede contestar, y
+   * responderlas de a una no aporta nada. De ninguna se guarda ningún dato.
+   */
+  descartarTodas(): void {
+    if (this.descartando || !this.pendientes.length) return;
+    this.descartando = true;
+    let quedan = this.pendientes.length;
+    for (const e of [...this.pendientes]) {
+      this.eventos.resolve(e.id, 'false_positive', 'Descartada en bloque').subscribe(() => {
+        quedan -= 1;
+        if (quedan <= 0) {
+          this.descartando = false;
+          this.cargarPendientes();
+        }
+      });
+    }
   }
 
   /** Da de alta a la persona de una alerta, con la cara que venía en ella. */
@@ -131,6 +193,7 @@ export class RecognitionComponent implements OnInit, OnDestroy {
         displayName: this.nombre.trim(),
         hasAccess: this.acceso === true,
         consentBasis: this.consentimiento.trim(),
+        photo: e.faceThumbnail,
         embedding: desempaquetar(e.faceEmbedding),
       })
       .subscribe((res) => {
@@ -318,6 +381,7 @@ export class RecognitionComponent implements OnInit, OnDestroy {
           displayName: this.nombre.trim(),
           active: true,
           hasAccess: this.acceso === true,
+          photo: null,
           consentBasis: this.consentimiento.trim(),
           consentAt: new Date().toISOString(),
           facesCount: 0,
@@ -330,9 +394,6 @@ export class RecognitionComponent implements OnInit, OnDestroy {
       });
   }
 
-  quitarAcceso(p: Persona): void {
-    this.api.cambiarAcceso(p.id, !p.hasAccess).subscribe(() => this.cargarPersonas());
-  }
 
   trackPersona(_: number, p: Persona): string {
     return p.id;

@@ -6,6 +6,8 @@ export interface AltaPersona {
   displayName: string;
   /** Si tiene permitido estar donde mira la cámara. */
   hasAccess: boolean;
+  /** Miniatura JPEG en base64, para poder verificar la ficha a ojo. */
+  photo?: string | null;
   /** Quién documentó el consentimiento y con qué base legal. Obligatorio. */
   consentRecordedBy: string;
   consentBasis: string;
@@ -17,6 +19,8 @@ export interface PersonaDto {
   displayName: string;
   active: boolean;
   hasAccess: boolean;
+  /** Miniatura para reconocer la ficha de un vistazo. */
+  photo: string | null;
   consentBasis: string;
   consentAt: string;
   facesCount: number;
@@ -47,11 +51,11 @@ export class PersonsRepository {
     const { rows } = await client.query<{ id: string }>(
       `INSERT INTO persons
          (organization_id, display_name, consent_recorded_by, consent_basis, notes,
-          has_access, access_decided_by, access_decided_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $3, now())
+          has_access, access_decided_by, access_decided_at, photo)
+       VALUES ($1, $2, $3, $4, $5, $6, $3, now(), $7)
        RETURNING id`,
       [p.organizationId, p.displayName.trim(), p.consentRecordedBy, p.consentBasis.trim(),
-       p.notes ?? null, p.hasAccess],
+       p.notes ?? null, p.hasAccess, p.photo ?? null],
     );
     return rows[0].id;
   }
@@ -103,7 +107,7 @@ export class PersonsRepository {
 
   async listar(client: PoolClient): Promise<PersonaDto[]> {
     const { rows } = await client.query(
-      `SELECT p.id, p.display_name, p.active, p.has_access,
+      `SELECT p.id, p.display_name, p.active, p.has_access, p.photo,
               p.consent_basis, p.consent_at, p.created_at,
               count(f.id) AS faces
          FROM persons p
@@ -116,6 +120,7 @@ export class PersonsRepository {
       displayName: String(r.display_name),
       active: Boolean(r.active),
       hasAccess: Boolean(r.has_access),
+      photo: (r.photo as string) ?? null,
       consentBasis: String(r.consent_basis),
       consentAt: r.consent_at?.toISOString?.() ?? String(r.consent_at),
       facesCount: Number(r.faces ?? 0),
@@ -254,6 +259,21 @@ export class PersonsRepository {
       hadAccess: Boolean(f.had_access),
       cameraId: String(f.camera_id),
     }));
+  }
+
+  /**
+   * Guarda la miniatura sólo si todavía no tiene una.
+   *
+   * No se pisa la existente: la primera foto es la que el administrador miró
+   * cuando decidió que esta persona era quien decía ser, y reemplazarla con la
+   * última que subió alguien haría que la ficha deje de mostrar lo que se
+   * verificó.
+   */
+  async guardarFotoSiFalta(client: PoolClient, personId: string, photo: string): Promise<void> {
+    await client.query(
+      `UPDATE persons SET photo = $2 WHERE id = $1 AND photo IS NULL`,
+      [personId, photo],
+    );
   }
 
   /** Cambia si una persona tiene acceso, dejando registro de quién lo decidió. */

@@ -19,6 +19,8 @@ export interface AltaConRostro {
    * que suene o no una alerta urgente.
    */
   hasAccess: boolean;
+  /** Miniatura de la cara, para poder verificar la ficha a ojo. */
+  photo?: string;
   consentBasis: string;
   /** Vector facial de 512 dimensiones que venía con la alerta. */
   embedding?: number[];
@@ -188,6 +190,7 @@ export class PersonsService {
         organizationId: auth.organizationId,
         displayName: nombre,
         hasAccess: datos.hasAccess !== false,
+        photo: datos.photo,
         consentRecordedBy: auth.userId,
         consentBasis: base,
         notes: datos.notes,
@@ -448,6 +451,11 @@ export class PersonsService {
       }
 
       await this.repo.agregarRostro(c, auth.organizationId, personId, mejor.embedding, mejor.score);
+      // La primera foto de frente pasa a ser la cara de la ficha: es la que un
+      // administrador va a mirar para saber de quién es este registro.
+      if (tipo === 'frontal') {
+        await this.repo.guardarFotoSiFalta(c, personId, imagenBase64);
+      }
       this.logger.log(`foto ${tipo} agregada a ${personId} (nitidez ${mejor.score})`);
       return {
         tipo,

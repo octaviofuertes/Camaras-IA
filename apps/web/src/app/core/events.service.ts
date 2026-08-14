@@ -47,6 +47,8 @@ export interface AltaPersona {
   displayName: string;
   /** Si tiene permitido estar donde mira esta cámara. */
   hasAccess: boolean;
+  /** La cara que venía en la alerta, para poder verificar la ficha después. */
+  photo?: string;
   consentBasis: string;
   embedding?: number[];
   /** El operador ya vio el aviso de parecido y afirma que es otra persona. */
