@@ -3,13 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { PageHeaderComponent } from '../../shared/page-header.component';
 import { ModuleIconComponent } from '../../shared/module-icon.component';
-import {
-  EventsService,
-  type EvidenceItem,
-  type PersonaCargada,
-  type ResultadoAlta,
-  type TrainingStats,
-} from '../../core/events.service';
+import { EventsService, type EvidenceItem, type TrainingStats } from '../../core/events.service';
 import { AI_MODULES } from '../../core/catalog';
 import {
   SEVERITY_CLASS,
@@ -29,18 +23,6 @@ const STATUS_FILTERS: { key: FilterKey; label: string }[] = [
   { key: 'false_positive', label: 'Falsos positivos' },
 ];
 
-/** Convierte el vector facial que viajó en base64 de vuelta a números. */
-function desempaquetar(b64?: string): number[] | undefined {
-  if (!b64) return undefined;
-  try {
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return Array.from(new Float32Array(bytes.buffer));
-  } catch {
-    return undefined;
-  }
-}
 
 @Component({
   selector: 'px-events',
@@ -74,26 +56,6 @@ export class EventsComponent implements OnInit, OnDestroy {
   confirmando: EventItem | null = null;
   tituloEvidencia = '';
   notaRevision = '';
-
-  // ── reconocimiento de personas ─────────────────────────────────────
-  /** Alerta "¿reconocés a esta persona?" que se está respondiendo. */
-  reconociendo: EventItem | null = null;
-  nombrePersona = '';
-  baseConsentimiento = '';
-  /**
-   * Si esta persona tiene acceso al lugar que mira la cámara.
-   *
-   * Arranca sin responder —no en "sí"— porque de esto depende que suene una
-   * alerta urgente cuando aparezca, y un valor por defecto haría que esa
-   * decisión la tome el formulario en vez de una persona.
-   */
-  accesoPersona: boolean | null = null;
-  guardandoPersona = false;
-  /** Las personas ya dadas de alta, para sumarle un ángulo a una existente. */
-  personasCargadas: PersonaCargada[] = [];
-  /** El servidor detectó que esta cara ya es de alguien. */
-  avisoParecido: ResultadoAlta | null = null;
-  forzarNueva = false;
 
   evidencias: EvidenceItem[] = [];
   cargandoEvidencias = false;
@@ -144,133 +106,9 @@ export class EventsComponent implements OnInit, OnDestroy {
     });
   }
 
-  esReconocimiento(e: EventItem): boolean {
-    return e.eventType === 'person.unknown';
-  }
-
   /** Alguien a quien se le negó el acceso está adentro. */
   esAccesoDenegado(e: EventItem): boolean {
     return e.eventType === 'access.denied';
-  }
-
-  /** Abre el diálogo para responder quién es la persona de la alerta. */
-  abrirReconocimiento(e: EventItem): void {
-    this.reconociendo = e;
-    this.nombrePersona = '';
-    this.baseConsentimiento = '';
-    this.accesoPersona = null;
-    this.avisoParecido = null;
-    this.forzarNueva = false;
-    // Las ya cargadas se ofrecen primero: sumarle este ángulo a quien ya está
-    // es casi siempre lo correcto, y es lo que hace que se la reconozca mejor
-    // la próxima vez. Darla de alta de nuevo la parte en dos en el informe.
-    this.api.personas().subscribe((ps) => (this.personasCargadas = ps));
-  }
-
-  /** "Es esta persona": suma el ángulo a alguien ya dado de alta. */
-  sumarAPersona(p: { id: string; displayName: string }): void {
-    const e = this.reconociendo;
-    if (!e) return;
-    const vector = desempaquetar(e.faceEmbedding);
-    if (!vector) return;
-
-    this.guardandoPersona = true;
-    this.api.sumarRostro(p.id, vector).subscribe((ok) => {
-      this.guardandoPersona = false;
-      this.reconociendo = null;
-      if (!ok) return;
-      this.busy = e.id;
-      this.api
-        .resolve(e.id, 'confirmed', `Otro ángulo de ${p.displayName}`)
-        .subscribe(() => {
-          this.busy = null;
-          this.load();
-        });
-    });
-  }
-
-  cerrarReconocimiento(): void {
-    this.reconociendo = null;
-    this.avisoParecido = null;
-  }
-
-  /** "Es esta persona" desde el aviso de parecido. */
-  sumarAlParecido(): void {
-    const p = this.avisoParecido?.yaExiste;
-    if (!p) return;
-    this.avisoParecido = null;
-    this.sumarAPersona({ id: p.id, displayName: p.displayName });
-  }
-
-  /** "No, es otra persona": se insiste con el alta. */
-  insistirConAlta(): void {
-    this.forzarNueva = true;
-    this.avisoParecido = null;
-    this.confirmarPersona();
-  }
-
-  /**
-   * "Sí, trabaja acá": da de alta a la persona con su consentimiento registrado.
-   *
-   * El vector facial de la alerta se convierte en su primera plantilla. A partir
-   * de acá el sistema la reconoce y sus entradas quedan en el registro de accesos.
-   */
-  confirmarPersona(): void {
-    const e = this.reconociendo;
-    if (!e) return;
-    const nombre = this.nombrePersona.trim();
-    const base = this.baseConsentimiento.trim();
-    if (nombre.length < 2 || base.length < 3 || this.accesoPersona === null) return;
-
-    this.guardandoPersona = true;
-    this.api
-      .altaPersona({
-        displayName: nombre,
-        hasAccess: this.accesoPersona === true,
-        consentBasis: base,
-        embedding: desempaquetar(e.faceEmbedding),
-        forzarNueva: this.forzarNueva,
-      })
-      .subscribe((res) => {
-        this.guardandoPersona = false;
-        if (!res) {
-          this.reconociendo = null;
-          return;
-        }
-        // El servidor cree que esta cara ya es de alguien. Se muestra y se
-        // decide: sumarle el ángulo, o afirmar que es otra persona.
-        if (res.yaExiste) {
-          this.avisoParecido = res;
-          return;
-        }
-        this.reconociendo = null;
-        if (!res.id) return;
-        // La alerta se resuelve como confirmada: la pregunta fue respondida.
-        this.busy = e.id;
-        const nota = this.accesoPersona
-          ? `Dado de alta como ${nombre} (con acceso)`
-          : `Dado de alta como ${nombre} — SIN ACCESO a este lugar`;
-        this.api.resolve(e.id, 'confirmed', nota).subscribe(() => {
-          this.busy = null;
-          this.load();
-        });
-      });
-  }
-
-  /**
-   * "No trabaja acá": se descarta sin guardar NADA.
-   *
-   * Ni plantilla ni foto. El sistema va a volver a preguntar si esa persona
-   * reaparece dentro de un rato, y es el precio elegido a cambio de no armar un
-   * fichero biométrico de gente que nunca dio su consentimiento.
-   */
-  ignorarPersona(e: EventItem): void {
-    if (this.demoMode) return;
-    this.busy = e.id;
-    this.api.resolve(e.id, 'false_positive', 'No trabaja en este entorno').subscribe(() => {
-      this.busy = null;
-      this.load();
-    });
   }
 
   descartarAlerta(): void {
@@ -301,7 +139,11 @@ export class EventsComponent implements OnInit, OnDestroy {
       res.items.forEach((e) => this.vistos.add(e.id));
       this.primeraCarga = false;
 
-      this.events = res.items;
+      // La pregunta "¿reconocés a esta persona?" NO va acá. Esta pantalla es
+      // la cola de lo que hay que atender —una caída, alguien sin acceso— y
+      // ponerle nombre a una cara no es eso: es completar una ficha, y tiene su
+      // propia pantalla. Mezcladas, lo urgente quedaba enterrado entre trámites.
+      this.events = res.items.filter((e) => e.eventType !== 'person.unknown');
       this.demoMode = res.demo;
       this.loading = false;
       if (this.selected) {
@@ -389,16 +231,6 @@ export class EventsComponent implements OnInit, OnDestroy {
 
   confidencePct(c: number): number {
     return Math.round(c * 100);
-  }
-
-  /** URL lista para un <img> con la miniatura que vino en la alerta. */
-  urlMiniatura(e: EventItem): string {
-    const b64 = e.faceThumbnail;
-    if (!b64) return '';
-    // El módulo manda el base64 pelado. Si alguna vez llegara ya con prefijo, el
-    // `img` quedaría roto sin decir nada, y acá lo único que se le pide al
-    // operador es mirar una cara: se acepta cualquiera de las dos formas.
-    return b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`;
   }
 
   trackEvent(_: number, e: EventItem): string {

@@ -1,127 +1,191 @@
 .page {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
   padding: 0 22px 28px;
+  max-width: 1060px;
 }
 
 /* ─── Los dos modos ─────────────────────────────────────────────── */
-.modos { display: flex; gap: 8px; flex-wrap: wrap; }
+.modos { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
 .modo {
-  display: flex; align-items: center; gap: 8px;
-  padding: 9px 16px; cursor: pointer;
+  display: flex; flex-direction: column; gap: 3px; align-items: flex-start;
+  padding: 12px 16px; cursor: pointer; text-align: left;
   border: 1px solid var(--border); border-radius: var(--radius-sm);
-  background: transparent; color: var(--text-mute);
-  font: inherit; font-size: 13px; font-weight: 500;
-  transition: background .15s, color .15s, border-color .15s;
+  background: var(--panel); color: var(--text-mute);
+  font: inherit;
+  transition: border-color .15s, background .15s;
 
-  &:hover { color: var(--text); }
+  &:hover { border-color: var(--accent, #3b82f6); }
   &.active {
-    background: var(--accent, #3b82f6); border-color: transparent; color: #fff;
+    background: var(--accent-soft, rgba(59, 130, 246, .12));
+    border-color: var(--accent, #3b82f6);
+    color: var(--text);
   }
 }
 
+.modo-titulo {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13.5px; font-weight: 600; color: var(--text);
+}
+.modo-sub { font-size: 11.5px; color: var(--text-mute); }
+
 .badge {
   padding: 1px 8px; border-radius: 999px;
-  background: rgba(255, 255, 255, .22);
+  background: var(--accent, #3b82f6); color: #fff;
   font-size: 11px; font-weight: 700;
 }
-.modo:not(.active) .badge { background: var(--accent, #3b82f6); color: #fff; }
 
-/* ─── Textos de contexto ────────────────────────────────────────── */
-.nota {
-  display: flex; gap: 10px; padding: 13px 16px;
-  font-size: 12.5px; line-height: 1.6; color: var(--text-mute);
-  border-left: 3px solid #60a5fa;
-
-  strong { color: var(--text); }
-}
-
+/* ─── Estados ───────────────────────────────────────────────────── */
 .loading {
   display: flex; align-items: center; gap: 9px;
   padding: 26px; color: var(--text-mute); font-size: 13px;
 }
 
 .vacio {
-  padding: 30px 26px;
-  h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
-  p { margin: 0; color: var(--text-mute); font-size: 13px; line-height: 1.6; max-width: 64ch; }
+  padding: 28px 24px;
+  h3 { margin: 0 0 7px; font-size: 15px; font-weight: 600; }
+  p { margin: 0; color: var(--text-mute); font-size: 13px; line-height: 1.6; max-width: 60ch; }
 }
 
-/* ─── Desplegable de detectadas ─────────────────────────────────── */
+/* ─── Lista de detectadas ───────────────────────────────────────── */
 .lista { padding: 0; overflow: hidden; }
 
-.fila { border-bottom: 1px solid var(--border); }
-.fila:last-child { border-bottom: none; }
+.fila {
+  border-bottom: 1px solid var(--border);
+  &:last-child { border-bottom: none; }
+  &.abierta { background: var(--panel-2); }
+}
 
 .cabecera {
   display: flex; align-items: center; gap: 13px; width: 100%;
-  padding: 12px 16px; cursor: pointer; text-align: left;
+  padding: 11px 16px; cursor: pointer; text-align: left;
   background: transparent; border: none; color: var(--text); font: inherit;
 
   &:hover { background: var(--panel-2); }
 }
 
 .mini {
-  width: 46px; height: 46px; object-fit: cover; border-radius: 8px;
+  width: 44px; height: 44px; object-fit: cover; border-radius: 8px;
   background: var(--panel-2); flex: 0 0 auto;
 }
 
-.cab-txt { flex: 1; min-width: 0; }
+.cab-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .cab-titulo { font-size: 13px; font-weight: 600; }
-.cab-sub { margin-top: 2px; font-size: 11.5px; color: var(--text-mute); }
+.cab-sub { font-size: 11.5px; color: var(--text-mute); }
+
+.cab-accion {
+  font-size: 12px; font-weight: 600; color: var(--accent-light, #60a5fa);
+}
 
 .chevron {
-  color: var(--text-mute); flex: 0 0 auto;
-  transition: transform .18s;
+  color: var(--text-mute); flex: 0 0 auto; transition: transform .18s;
   &.abierto { transform: rotate(180deg); }
 }
 
 .detalle {
-  display: flex; gap: 18px; padding: 4px 16px 18px;
-  border-top: 1px solid var(--border);
+  display: flex; gap: 20px; padding: 6px 16px 18px 16px;
   flex-wrap: wrap;
 }
 
 .grande {
-  width: 190px; max-height: 220px; object-fit: contain;
-  border-radius: var(--radius-sm); background: var(--panel-2);
+  width: 170px; max-height: 200px; object-fit: contain;
+  border-radius: var(--radius-sm); background: var(--bg);
 }
 
-/* ─── Formulario ────────────────────────────────────────────────── */
-.form { flex: 1; min-width: 280px; display: flex; flex-direction: column; gap: 13px; }
+/* ─── Pasos ─────────────────────────────────────────────────────── */
+.paso {
+  padding: 16px 18px;
+  transition: opacity .2s;
 
-.aviso {
-  margin: 0; padding: 10px 12px; border-radius: var(--radius-sm);
-  border-left: 3px solid #fbbf24; background: rgba(251, 191, 36, .06);
-  font-size: 12px; line-height: 1.55; color: var(--text-mute);
+  /* Un paso que todavía no corresponde se ve apagado: se entiende que hay un
+     orden sin tener que leer una instrucción. */
+  &.pendiente { opacity: .55; }
+}
+
+.paso-cab {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
+
+  h2 { margin: 0; font-size: 14px; font-weight: 600; flex: 1; }
+}
+
+.n {
+  display: grid; place-items: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--panel-2); border: 1px solid var(--border);
+  font-size: 11.5px; font-weight: 700; color: var(--text-mute);
+}
+
+.paso-listo {
+  font-size: 11.5px; font-weight: 600; color: #86efac;
+  padding: 2px 9px; border-radius: 999px; background: rgba(34, 197, 94, .14);
+}
+
+.paso-ayuda {
+  margin: 12px 0 0; font-size: 12px; line-height: 1.6; color: var(--text-mute);
   strong { color: var(--text); }
 }
+
+/* ─── Elegir persona ────────────────────────────────────────────── */
+.quien { display: flex; flex-wrap: wrap; gap: 7px; }
+
+.chip-persona {
+  display: flex; align-items: center; gap: 7px;
+  padding: 7px 13px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--panel-2); color: var(--text-dim);
+  font: inherit; font-size: 12.5px;
+
+  &:hover { color: var(--text); border-color: var(--border-strong, var(--border)); }
+  &.active { background: var(--accent, #3b82f6); border-color: transparent; color: #fff; }
+  &.nueva { border-style: dashed; }
+
+  .fotos {
+    min-width: 18px; padding: 0 5px; border-radius: 999px; text-align: center;
+    background: rgba(255, 255, 255, .14); font-size: 11px; font-variant-numeric: tabular-nums;
+  }
+  .sin-acceso {
+    padding: 1px 7px; border-radius: 999px;
+    background: rgba(239, 68, 68, .2); color: #fca5a5;
+    font-size: 10px; font-weight: 700;
+  }
+}
+.chip-persona:not(.active) .fotos { background: var(--bg); }
+
+/* ─── Formulario ────────────────────────────────────────────────── */
+.form { display: flex; flex-direction: column; gap: 13px; flex: 1; min-width: 260px; }
+
+.dos-columnas {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 13px 16px;
+  .ancho { grid-column: 1 / -1; }
+}
+@media (max-width: 640px) { .dos-columnas { grid-template-columns: 1fr; } }
 
 .campo {
   display: flex; flex-direction: column; gap: 6px;
 
-  > span { font-size: 12.5px; font-weight: 500; color: var(--text-dim); }
   input {
     background: var(--bg); border: 1px solid var(--border);
-    border-radius: var(--radius-sm); padding: 10px 12px;
+    border-radius: var(--radius-sm); padding: 9px 12px;
     color: var(--text); font-size: 13px; font-family: inherit; outline: none;
 
     &:focus { border-color: var(--accent); }
-    &:disabled { opacity: .6; cursor: not-allowed; }
+    &:disabled { opacity: .55; cursor: not-allowed; }
   }
   small { font-size: 11px; color: var(--text-mute); line-height: 1.5; }
 }
 
+.campo-label { font-size: 12px; font-weight: 500; color: var(--text-dim); }
+
 /* Sin opción por defecto: de esta respuesta depende una alerta urgente. */
-.acceso-ops { display: flex; gap: 8px; }
+.opciones { display: flex; gap: 7px; }
 
 .op {
-  flex: 1; padding: 10px 12px; cursor: pointer;
+  flex: 1; padding: 9px 12px; cursor: pointer;
   border: 1px solid var(--border); border-radius: var(--radius-sm);
-  background: var(--panel-2); color: var(--text-dim);
-  font: inherit; font-size: 12.5px; font-weight: 500;
+  background: var(--bg); color: var(--text-dim);
+  font: inherit; font-size: 12.5px; font-weight: 600;
 
   &:hover { color: var(--text); }
   &.si.elegida { background: rgba(34, 197, 94, .16); border-color: rgba(34, 197, 94, .5); color: #86efac; }
@@ -131,86 +195,63 @@
 .ojo { color: #fca5a5 !important; }
 
 .error {
-  padding: 10px 12px; border-radius: var(--radius-sm);
+  margin-top: 12px; padding: 10px 12px; border-radius: var(--radius-sm);
   background: rgba(239, 68, 68, .1); border: 1px solid rgba(239, 68, 68, .35);
   color: #fca5a5; font-size: 12px; line-height: 1.5;
 }
 
 .acciones { display: flex; gap: 9px; justify-content: flex-end; }
 
-/* ─── Carga manual ──────────────────────────────────────────────── */
-.bloque { padding: 16px 18px; }
-.bloque-titulo { margin: 0 0 12px; font-size: 14px; font-weight: 600; }
-.bloque-ayuda {
-  margin: -4px 0 14px; font-size: 12px; line-height: 1.6; color: var(--text-mute);
-  max-width: 78ch;
-  strong { color: var(--text); }
-}
-
-.quien { display: flex; flex-wrap: wrap; gap: 8px; }
-
-.chip-persona {
-  display: flex; align-items: center; gap: 7px;
-  padding: 8px 13px; cursor: pointer;
-  border: 1px solid var(--border); border-radius: 999px;
-  background: var(--panel-2); color: var(--text-dim);
-  font: inherit; font-size: 12.5px;
-
-  &:hover { color: var(--text); }
-  &.active { background: var(--accent, #3b82f6); border-color: transparent; color: #fff; }
-
-  .fotos {
-    padding: 0 6px; border-radius: 999px;
-    background: rgba(255, 255, 255, .12); font-size: 11px;
-  }
-  .sin-acceso {
-    padding: 1px 7px; border-radius: 999px;
-    background: rgba(239, 68, 68, .2); color: #fca5a5;
-    font-size: 10px; font-weight: 700;
-  }
-}
-
 /* ─── Las tres fotos ────────────────────────────────────────────── */
 .ranuras {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
-  gap: 14px;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
 }
+@media (max-width: 720px) { .ranuras { grid-template-columns: 1fr; } }
 
 .ranura {
   display: flex; flex-direction: column; gap: 9px;
-  padding: 13px; border-radius: var(--radius-sm);
+  padding: 11px; border-radius: var(--radius-sm);
   border: 1px solid var(--border); background: var(--panel-2);
-}
 
-.ranura-cab strong { display: block; font-size: 13px; }
-.ranura-ayuda {
-  display: block; margin-top: 3px;
-  font-size: 11px; line-height: 1.5; color: var(--text-mute);
+  /* Se ve de un vistazo cuál sirvió y cuál no, sin leer el texto. */
+  &.sirve { border-color: rgba(34, 197, 94, .45); }
+  &.no-sirve { border-color: rgba(251, 191, 36, .4); }
 }
 
 .foto {
   position: relative;
-  aspect-ratio: 3 / 4; border-radius: var(--radius-sm); overflow: hidden;
+  aspect-ratio: 1 / 1; border-radius: var(--radius-sm); overflow: hidden;
   background: var(--bg); display: grid; place-items: center;
 
   img { width: 100%; height: 100%; object-fit: cover; }
-  &.vacia { border: 1px dashed var(--border); color: var(--text-mute); font-size: 11.5px; }
+  &.vacia { border: 1px dashed var(--border); }
+  .sin { color: var(--text-mute); opacity: .55; display: grid; place-items: center; }
+}
+
+.sello {
+  position: absolute; left: 7px; bottom: 7px;
+  padding: 2px 8px; border-radius: 999px;
+  background: rgba(34, 197, 94, .9); color: #062d13;
+  font-size: 10.5px; font-weight: 700;
 }
 
 .subiendo {
   position: absolute; inset: 0; display: grid; place-items: center;
-  background: rgba(0, 0, 0, .5);
+  background: rgba(0, 0, 0, .55);
 }
 
-.ranura-acciones { display: flex; gap: 7px; }
+.ranura-txt {
+  display: flex; flex-direction: column; gap: 3px;
+  strong { font-size: 12.5px; }
+}
+.ranura-ayuda { font-size: 11px; line-height: 1.45; color: var(--text-mute); }
+
+.ranura-acciones { display: flex; gap: 6px; margin-top: auto; }
 .ranura-acciones .btn { flex: 1; text-align: center; cursor: pointer; }
 
-/* El resultado de cada foto se ve distinto según si sirvió o no: es la
-   diferencia entre haber cargado algo y haber cargado algo que reconoce. */
 .resultado {
-  padding: 8px 10px; border-radius: var(--radius-sm);
-  font-size: 11.5px; line-height: 1.5;
+  padding: 7px 9px; border-radius: var(--radius-sm);
+  font-size: 11px; line-height: 1.45;
 
   &.ok { background: rgba(34, 197, 94, .12); color: #86efac; }
   &.no { background: rgba(251, 191, 36, .1); color: #fcd34d; }
@@ -218,28 +259,21 @@
 
 /* ─── Cámara ────────────────────────────────────────────────────── */
 .camara {
-  margin-top: 16px; display: flex; flex-direction: column; gap: 10px;
-  align-items: center;
+  margin-top: 14px; display: flex; flex-direction: column; gap: 10px; align-items: center;
 
-  video {
-    width: 100%; max-width: 520px; border-radius: var(--radius-sm);
-    background: #000;
-  }
+  video { width: 100%; max-width: 480px; border-radius: var(--radius-sm); background: #000; }
 }
 .camara-acciones { display: flex; gap: 9px; }
 
-.resumen {
-  margin-top: 14px; padding: 11px 13px; border-radius: var(--radius-sm);
-  background: var(--panel-2); font-size: 12.5px; line-height: 1.6;
-  color: var(--text-mute);
-  strong { color: var(--text); }
-}
-
-.guardar {
+/* ─── Cierre del paso 3 ─────────────────────────────────────────── */
+.cierre {
   display: flex; align-items: center; gap: 13px; flex-wrap: wrap;
+  margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);
 }
-.guardar-ayuda {
-  font-size: 11.5px; line-height: 1.5; color: var(--text-mute); max-width: 60ch;
+.cierre-ayuda {
+  flex: 1; min-width: 240px;
+  font-size: 11.5px; line-height: 1.55; color: var(--text-mute);
+  strong { color: var(--text); }
 }
 
 .spinner {

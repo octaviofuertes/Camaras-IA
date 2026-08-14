@@ -141,26 +141,16 @@
                   Reconocer
                 </button>
                 <ng-container *ngIf="e.status === 'acknowledged'">
-                  <ng-container *ngIf="esReconocimiento(e); else revisionNormal">
-                    <button class="btn sm ok" [disabled]="demoMode" (click)="abrirReconocimiento(e)">
-                      Sí, trabaja acá
-                    </button>
-                    <button class="btn sm" [disabled]="demoMode" (click)="ignorarPersona(e)">
-                      No trabaja acá
-                    </button>
-                  </ng-container>
-                  <ng-template #revisionNormal>
-                    <button
-                      class="btn sm ok"
-                      [disabled]="demoMode"
-                      (click)="esCaida(e) ? abrirConfirmacion(e) : resolve(e, 'confirmed')"
-                    >
-                      {{ esCaida(e) ? 'Fue una caída real' : 'Confirmar' }}
-                    </button>
-                    <button class="btn sm" [disabled]="demoMode" (click)="resolve(e, 'false_positive')">
-                      Falso positivo
-                    </button>
-                  </ng-template>
+                  <button
+                    class="btn sm ok"
+                    [disabled]="demoMode"
+                    (click)="esCaida(e) ? abrirConfirmacion(e) : resolve(e, 'confirmed')"
+                  >
+                    {{ esCaida(e) ? 'Fue una caída real' : 'Confirmar' }}
+                  </button>
+                  <button class="btn sm" [disabled]="demoMode" (click)="resolve(e, 'false_positive')">
+                    Falso positivo
+                  </button>
                 </ng-container>
                 <span class="mute closed" *ngIf="e.status !== 'new' && e.status !== 'acknowledged'">
                   Revisado
@@ -183,29 +173,7 @@
              simulada: mostrarle al operador un video de mentira mientras se le
              pide que dictamine sobre una persona real es lo peor que podía
              hacer esta pantalla. -->
-        <!-- Alerta de reconocimiento: se muestra a quién hay que identificar -->
-        <div class="cara" *ngIf="esReconocimiento(e) && e.faceThumbnail">
-          <img [src]="urlMiniatura(e)" alt="Rostro sin reconocer" />
-          <p class="mute">
-            Esta persona no está dada de alta. Si trabaja acá, dale de alta con su nombre
-            —vas a tener que indicar cómo se documentó su consentimiento—. Si no, marcala
-            como ajena: <strong>no se guarda ningún dato suyo</strong>.
-          </p>
-        </div>
-
-        <div class="acceso-denegado" *ngIf="esAccesoDenegado(e)">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 3 2 20h20L12 3Z" /><path d="M12 10v4M12 17.5v.5" />
-          </svg>
-          <p>
-            <strong>{{ e.personName || 'Esta persona' }}</strong> está donde enfoca la cámara y
-            figura <strong>sin acceso</strong> a este lugar. La decisión de quitarle el acceso la
-            tomó un administrador y quedó registrada. Revisá el video antes de actuar: la
-            identificación puede haberse deducido sin verle la cara.
-          </p>
-        </div>
-
-        <div class="clip-revision" *ngIf="!esReconocimiento(e)">
+        <div class="clip-revision">
           <div class="mute" *ngIf="cargandoEvidencias">
             <span class="spinner"></span> buscando el clip…
           </div>
@@ -267,120 +235,6 @@
       </div>
     </div>
   </section>
-</div>
-
-<!-- Dar de alta a la persona reconocida -->
-<div class="modal-backdrop" *ngIf="reconociendo as rec" (click)="cerrarReconocimiento()">
-  <div class="modal panel" (click)="$event.stopPropagation()">
-    <div class="panel-head">
-      <h2 class="panel-title">¿Quién es esta persona?</h2>
-      <button class="icon-x" (click)="cerrarReconocimiento()">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M18 6 6 18M6 6l12 12" />
-        </svg>
-      </button>
-    </div>
-
-    <div class="modal-body">
-      <img class="cara-modal" *ngIf="rec.faceThumbnail" [src]="urlMiniatura(rec)" alt="Rostro" />
-
-      <!-- La cara ya es de alguien: se dice antes de crear un duplicado -->
-      <div class="parecido" *ngIf="avisoParecido as av">
-        <p>{{ av.mensaje }}</p>
-        <div class="parecido-acciones">
-          <button class="btn btn-primary" (click)="sumarAlParecido()">
-            Sí, es {{ av.yaExiste?.displayName }}
-          </button>
-          <button class="btn" (click)="insistirConAlta()">No, es otra persona</button>
-        </div>
-      </div>
-
-      <!-- Sumarle este ángulo a alguien ya cargado. Es el camino habitual: así
-           el sistema la reconoce cada vez mejor en vez de duplicarla. -->
-      <div class="ya-cargadas" *ngIf="!avisoParecido && personasCargadas.length">
-        <div class="yc-titulo">¿Es alguien que ya está dado de alta?</div>
-        <p class="yc-ayuda">
-          Sumale esta foto y se la va a reconocer también desde este ángulo. Darla de alta
-          otra vez la parte en dos personas distintas en el informe.
-        </p>
-        <div class="yc-lista">
-          <button
-            class="yc-persona"
-            *ngFor="let p of personasCargadas"
-            [disabled]="guardandoPersona"
-            (click)="sumarAPersona(p)"
-          >
-            <span class="yc-nombre">
-              {{ p.displayName }}
-              <span class="yc-sin-acceso" *ngIf="!p.hasAccess">sin acceso</span>
-            </span>
-            <span class="yc-fotos">{{ p.facesCount }} foto(s)</span>
-          </button>
-        </div>
-        <div class="yc-sep"><span>o dala de alta como alguien nuevo</span></div>
-      </div>
-
-      <p class="modal-intro aviso" *ngIf="!avisoParecido">
-        Vas a guardar el <strong>dato biométrico</strong> de esta persona. En Argentina es un
-        dato sensible: requiere su consentimiento expreso e informado. Registrá abajo cómo se
-        documentó — queda asociado a tu usuario.
-      </p>
-
-      <label class="field" *ngIf="!avisoParecido">
-        <span>Nombre y apellido</span>
-        <input type="text" [(ngModel)]="nombrePersona" placeholder="Ej: Juan Rodríguez" />
-      </label>
-
-      <!-- De esta respuesta depende que suene una alerta urgente cuando esta
-           persona aparezca. Por eso no hay opción marcada por defecto. -->
-      <div class="field acceso-campo" *ngIf="!avisoParecido">
-        <span>¿Tiene acceso a este lugar?</span>
-        <div class="acceso-ops">
-          <button
-            type="button"
-            class="acceso-op si"
-            [class.elegida]="accesoPersona === true"
-            (click)="accesoPersona = true"
-          >
-            Sí, puede estar acá
-          </button>
-          <button
-            type="button"
-            class="acceso-op no"
-            [class.elegida]="accesoPersona === false"
-            (click)="accesoPersona = false"
-          >
-            No tiene acceso
-          </button>
-        </div>
-        <small *ngIf="accesoPersona === false" class="ojo">
-          Cada vez que esta persona aparezca frente a la cámara va a generarse una
-          alerta urgente en Eventos.
-        </small>
-      </div>
-
-      <label class="field" *ngIf="!avisoParecido">
-        <span>Cómo se documentó el consentimiento</span>
-        <input
-          type="text"
-          [(ngModel)]="baseConsentimiento"
-          placeholder="Ej: Consentimiento firmado 10/08/2026, legajo 1042"
-        />
-        <small>Sin esto no se puede dar de alta: la base de datos lo rechaza.</small>
-      </label>
-    </div>
-
-    <div class="modal-foot" *ngIf="!avisoParecido">
-      <button class="btn" (click)="cerrarReconocimiento()">Cancelar</button>
-      <button
-        class="btn btn-primary"
-        (click)="confirmarPersona()"
-        [disabled]="guardandoPersona || nombrePersona.trim().length < 2 || baseConsentimiento.trim().length < 3 || accesoPersona === null"
-      >
-        {{ guardandoPersona ? 'Guardando…' : 'Dar de alta' }}
-      </button>
-    </div>
-  </div>
 </div>
 
 <!-- Confirmar caída real y ponerle nombre a la evidencia -->

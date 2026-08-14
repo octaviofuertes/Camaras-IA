@@ -395,12 +395,6 @@ def module_state(module_key: str, camera: str | None = None) -> dict:
     return salida
 
 
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "3010")))
-
-
 @app.post("/faces/analyze")
 def analyze_face(payload: dict) -> dict:
     """Analiza una foto y devuelve la plantilla facial que contiene, si hay.
@@ -459,3 +453,9 @@ def analyze_face(payload: dict) -> dict:
     # es casi siempre la que se quiso fotografiar.
     caras.sort(key=lambda c: (c["alto"], c["score"]), reverse=True)
     return {"ok": True, "caras": caras}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "3010")))

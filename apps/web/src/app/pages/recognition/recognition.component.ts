@@ -58,19 +58,17 @@ export class RecognitionComponent implements OnInit, OnDestroy {
     {
       tipo: 'frontal',
       titulo: 'De frente',
-      ayuda: 'Mirando a la cámara. Es la que más sirve: con ésta se lo reconoce.',
+      ayuda: 'La más importante: con ésta se lo reconoce.',
     },
     {
       tipo: 'perfil',
       titulo: 'De perfil',
-      ayuda: 'De costado, pero con la cara visible. Cubre cuando gira la cabeza.',
+      ayuda: 'Cubre cuando gira la cabeza.',
     },
     {
       tipo: 'espalda',
       titulo: 'De espaldas',
-      ayuda:
-        'No produce plantilla facial —no hay cara que medir— pero queda como ' +
-        'referencia visual de la persona.',
+      ayuda: 'Queda como referencia. No sirve para reconocer: no hay cara que medir.',
     },
   ];
 
