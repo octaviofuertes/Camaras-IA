@@ -399,3 +399,63 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "3010")))
+
+
+@app.post("/faces/analyze")
+def analyze_face(payload: dict) -> dict:
+    """Analiza una foto y devuelve la plantilla facial que contiene, si hay.
+
+    Lo usa el alta manual: alguien sube o saca una foto y hay que convertirla en
+    algo con lo que después se pueda reconocer a esa persona. El modelo está
+    cargado acá, así que la conversión ocurre acá.
+
+    Devuelve SIEMPRE qué se pudo y qué no. Una foto de espaldas no tiene cara y
+    no produce plantilla: decirlo es la diferencia entre que el operador sepa
+    que esa foto no va a servir para reconocer a nadie y que crea que sí.
+    """
+    import base64 as _b64
+
+    b64 = str(payload.get("image", ""))
+    if "," in b64[:64]:                      # data:image/jpeg;base64,....
+        b64 = b64.split(",", 1)[1]
+    try:
+        crudo = _b64.b64decode(b64)
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "error": "la imagen no es base64 válido"}
+
+    import cv2 as _cv2
+    import numpy as _np
+
+    img = _cv2.imdecode(_np.frombuffer(crudo, _np.uint8), _cv2.IMREAD_COLOR)
+    if img is None:
+        return {"ok": False, "error": "no se pudo leer la imagen"}
+
+    # Se usa la instancia ya cargada del módulo de identificación: levantar otra
+    # copia del modelo por cada foto tardaría más que el resto del alta junta.
+    inst = next(
+        (v for k, v in _instances.items() if k.endswith(":person-identification")), None
+    )
+    if inst is None or getattr(inst, "_app", None) is None:
+        return {
+            "ok": False,
+            "error": "el módulo de control de accesos no está cargado en ninguna cámara",
+        }
+
+    h, w = img.shape[:2]
+    caras = []
+    for c in inst._app.get(img):            # noqa: SLF001 — misma app, no hay API pública
+        x1, y1, x2, y2 = (float(v) for v in c.bbox)
+        pose = getattr(c, "pose", None)
+        emb = _np.asarray(c.normed_embedding, dtype=_np.float32)
+        caras.append({
+            "embedding": emb.tolist(),
+            "score": round(float(getattr(c, "det_score", 0.0)), 3),
+            "alto": round((y2 - y1) / h, 4),
+            "yaw": round(float(pose[1]), 1) if pose is not None and len(pose) > 1 else None,
+            "pitch": round(float(pose[0]), 1) if pose is not None else None,
+        })
+
+    # La mejor primero: si hay varias personas en la foto, la más grande y nítida
+    # es casi siempre la que se quiso fotografiar.
+    caras.sort(key=lambda c: (c["alto"], c["score"]), reverse=True)
+    return {"ok": True, "caras": caras}

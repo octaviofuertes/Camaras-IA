@@ -63,6 +63,29 @@ const PRESENCIA_VIGENCIA_MS = 6000;
  */
 const PERSONA_VIGENCIA_MS = 5000;
 
+/**
+ * Calidad mínima de una foto para que su plantilla sirva.
+ *
+ * Más exigente que reconocer en vivo, y por la misma razón que al preguntar por
+ * un desconocido: esta plantilla va a decidir a quién se reconoce durante meses.
+ * Una foto mala no falla ahora, falla dentro de tres semanas identificando a
+ * otra persona, que es cuando nadie la va a relacionar con esta pantalla.
+ */
+const FOTO_SCORE_MINIMO = 0.65;
+const FOTO_ALTO_MINIMO = 0.08;
+
+export type TipoFoto = 'frontal' | 'perfil' | 'espalda';
+
+export interface ResultadoFoto {
+  tipo: TipoFoto;
+  /** Si se pudo crear una plantilla facial con esta foto. */
+  plantilla: boolean;
+  motivo: string;
+  score?: number;
+  /** Si esta cara se parece a alguien YA dado de alta que no es esta persona. */
+  yaEsDeOtro?: { id: string; displayName: string; parecido: number };
+}
+
 export interface Presente {
   personId: string;
   displayName: string;
@@ -338,6 +361,101 @@ export class PersonsService {
     // Sin reportes frescos no se inventa: la pantalla dice que no hay señal en
     // vivo en vez de mostrar a alguien que quizá se fue hace una hora.
     return { presentes: [], enVivo: false };
+  }
+
+  /**
+   * Suma una foto a una persona: la convierte en plantilla si tiene cara.
+   *
+   * La conversión la hace el worker, que es donde está cargado el modelo. Acá
+   * se decide si el resultado sirve y se guarda.
+   */
+  async agregarFoto(
+    auth: AuthContext,
+    personId: string,
+    imagenBase64: string,
+    tipo: TipoFoto,
+  ): Promise<ResultadoFoto> {
+    if (!imagenBase64) throw new BadRequestException('Falta la imagen');
+
+    const base = process.env.AI_WORKER_URL ?? 'http://127.0.0.1:3010';
+    let caras: { embedding: number[]; score: number; alto: number; yaw: number | null }[] = [];
+    try {
+      const r = await fetch(`${base}/faces/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: imagenBase64 }),
+      });
+      const cuerpo = (await r.json()) as { ok?: boolean; error?: string; caras?: typeof caras };
+      if (!cuerpo.ok) {
+        throw new BadRequestException(
+          cuerpo.error ?? 'no se pudo analizar la foto',
+        );
+      }
+      caras = cuerpo.caras ?? [];
+    } catch (err) {
+      if (err instanceof BadRequestException) throw err;
+      this.logger.error(`no se pudo hablar con el worker para analizar la foto: ${err}`);
+      throw new BadRequestException(
+        'El servicio de reconocimiento no responde. Revisá que el módulo de control de ' +
+          'accesos esté asignado a una cámara y que el worker esté corriendo.',
+      );
+    }
+
+    const mejor = caras[0];
+    if (!mejor) {
+      // El caso de la foto de espaldas, y también el de una foto movida. Se
+      // dice qué pasó en vez de guardar algo que no sirve.
+      return {
+        tipo,
+        plantilla: false,
+        motivo:
+          tipo === 'espalda'
+            ? 'No hay ninguna cara en la foto, que es lo esperable de una foto de espaldas. ' +
+              'Sirve como referencia visual, pero no se puede reconocer a nadie con ella.'
+            : 'No se detectó ninguna cara en la foto.',
+      };
+    }
+
+    if (mejor.score < FOTO_SCORE_MINIMO || mejor.alto < FOTO_ALTO_MINIMO) {
+      return {
+        tipo,
+        plantilla: false,
+        score: mejor.score,
+        motivo:
+          `La cara se ve poco (nitidez ${mejor.score}, ocupa el ` +
+          `${Math.round(mejor.alto * 100)}% de la foto). Con una plantilla así se ` +
+          'confundiría a esta persona con otra. Probá más de cerca o con mejor luz.',
+      };
+    }
+
+    return this.db.withTenant(auth.organizationId, async (c) => {
+      // ¿Esta cara ya es de otro? Es el mismo control que en el alta desde una
+      // alerta, y acá importa más: al subir fotos a mano es fácil equivocarse
+      // de persona, y una plantilla ajena en la ficha de alguien hace que el
+      // sistema los confunda a los dos para siempre.
+      const parecida = await this.buscarParecida(c, mejor.embedding);
+      if (parecida && parecida.id !== personId) {
+        return {
+          tipo,
+          plantilla: false,
+          score: mejor.score,
+          yaEsDeOtro: parecida,
+          motivo:
+            `Esta cara se parece a ${parecida.displayName}, que ya está dado de alta. ` +
+            'Si son la misma persona, sumale la foto a esa ficha; si no, revisá que la ' +
+            'foto sea de quien creés.',
+        };
+      }
+
+      await this.repo.agregarRostro(c, auth.organizationId, personId, mejor.embedding, mejor.score);
+      this.logger.log(`foto ${tipo} agregada a ${personId} (nitidez ${mejor.score})`);
+      return {
+        tipo,
+        plantilla: true,
+        score: mejor.score,
+        motivo: 'Plantilla creada: a partir de ahora se lo reconoce también desde este ángulo.',
+      };
+    });
   }
 
   /** Cambia si una persona tiene acceso. Queda registrado quién lo decidió. */

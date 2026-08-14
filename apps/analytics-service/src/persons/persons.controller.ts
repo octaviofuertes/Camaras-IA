@@ -161,6 +161,32 @@ export class PersonsController {
     return this.persons.presentes(req.auth as AuthContext);
   }
 
+  /**
+   * Suma una foto a una persona (alta manual).
+   *
+   * El cuerpo lleva la imagen en base64. Va por JSON y no multipart porque la
+   * pantalla la obtiene de la cámara del navegador, donde ya es un data URL.
+   */
+  @Post(':id/photos')
+  @RequirePermissions('persons:write')
+  async foto(
+    @Req() req: Request,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: { image?: string; kind?: string },
+  ) {
+    const tipos = ['frontal', 'perfil', 'espalda'];
+    if (!body?.image) throw new BadRequestException('Falta la imagen');
+    if (!body?.kind || !tipos.includes(body.kind)) {
+      throw new BadRequestException(`El tipo de foto debe ser uno de: ${tipos.join(', ')}`);
+    }
+    return this.persons.agregarFoto(
+      req.auth as AuthContext,
+      id,
+      body.image,
+      body.kind as 'frontal' | 'perfil' | 'espalda',
+    );
+  }
+
   /** Reporte de presencia del pipeline: quién está en el cuadro ahora. */
   @Post('presence')
   @RequirePermissions('events:ingest')
