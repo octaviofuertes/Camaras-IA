@@ -78,6 +78,27 @@ const FOTO_ALTO_MINIMO = 0.08;
 
 export type TipoFoto = 'frontal' | 'perfil' | 'espalda';
 
+/**
+ * Parecido mínimo para saludar a alguien por su nombre en la pantalla de
+ * bienvenida.
+ *
+ * Más exigente que el 0.42 con el que se identifica en el registro, y a
+ * propósito: allá una identificación floja se ve en el informe y se corrige;
+ * acá el sistema le dice a alguien "Hola Juan" en la cara y le muestra la
+ * oficina de otro. Equivocarse es visible e incómodo, así que ante la duda no
+ * saluda.
+ */
+const SALUDO_PARECIDO_MINIMO = 0.55;
+
+export interface Reconocido {
+  personId: string;
+  displayName: string;
+  photo: string | null;
+  hasAccess: boolean;
+  workZone: string | null;
+  parecido: number;
+}
+
 export interface ResultadoFoto {
   tipo: TipoFoto;
   /** Si se pudo crear una plantilla facial con esta foto. */
@@ -462,6 +483,80 @@ export class PersonsService {
         plantilla: true,
         score: mejor.score,
         motivo: 'Plantilla creada: a partir de ahora se lo reconoce también desde este ángulo.',
+      };
+    });
+  }
+
+  /** Asigna la zona del plano donde trabaja una persona. */
+  async cambiarZona(auth: AuthContext, personId: string, zona: string | null): Promise<void> {
+    const ok = await this.db.withTenant(auth.organizationId, (c) =>
+      this.repo.cambiarZona(c, personId, zona && zona.trim() ? zona.trim() : null),
+    );
+    if (!ok) throw new NotFoundException('Persona no encontrada');
+  }
+
+  /**
+   * ¿Quién es la persona de esta foto?
+   *
+   * Lo usa la pantalla de bienvenida: una cámara mirando a quien llega. Devuelve
+   * null cuando no hay una respuesta segura —nadie en el cuadro, la cara no se
+   * ve, o el parecido no alcanza—, y la pantalla muestra eso en vez de arriesgar
+   * un nombre.
+   */
+  async identificar(auth: AuthContext, imagenBase64: string): Promise<Reconocido | null> {
+    if (!imagenBase64) throw new BadRequestException('Falta la imagen');
+
+    const base = process.env.AI_WORKER_URL ?? 'http://127.0.0.1:3010';
+    let caras: { embedding: number[]; score: number; alto: number }[] = [];
+    try {
+      const r = await fetch(`${base}/faces/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: imagenBase64 }),
+      });
+      const cuerpo = (await r.json()) as { ok?: boolean; caras?: typeof caras };
+      if (!cuerpo.ok) return null;
+      caras = cuerpo.caras ?? [];
+    } catch {
+      // Que el worker no responda no es motivo para romper la pantalla: sigue
+      // mostrando "acercate a la cámara" hasta que vuelva.
+      return null;
+    }
+
+    const mejor = caras[0];
+    if (!mejor) return null;
+
+    return this.db.withTenant(auth.organizationId, async (c) => {
+      const galeria = await this.repo.galeriaConDatos(c);
+
+      // Primero el mejor parecido POR PERSONA, y recién después se comparan
+      // entre sí. Comparar plantilla contra plantilla mezclaría las varias
+      // fotos de una misma persona —que se parecen entre ellas, para eso
+      // están— con las de otra, y el margen descartaría a alguien por
+      // parecerse a sí mismo.
+      const porPersona = galeria
+        .map((p) => ({
+          p,
+          parecido: p.embeddings.reduce((max, v) => Math.max(max, coseno(mejor.embedding, v)), -1),
+        }))
+        .sort((a, b) => b.parecido - a.parecido);
+
+      const primera = porPersona[0];
+      if (!primera || primera.parecido < SALUDO_PARECIDO_MINIMO) return null;
+
+      // Si hay OTRA persona casi igual de parecida, no se saluda a ninguna:
+      // decirle a alguien el nombre de otro delante suyo es el peor error que
+      // puede cometer esta pantalla.
+      const segunda = porPersona[1];
+      if (segunda && primera.parecido - segunda.parecido < 0.06) return null;
+
+      return {
+        personId: primera.p.id,
+        displayName: primera.p.displayName,
+        photo: primera.p.photo,
+        hasAccess: primera.p.hasAccess,
+        workZone: primera.p.workZone,
+        parecido: Math.round(primera.parecido * 1000) / 1000,
       };
     });
   }

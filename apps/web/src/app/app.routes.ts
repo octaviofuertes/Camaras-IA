@@ -18,6 +18,12 @@ export const APP_ROUTES: Routes = [
     loadComponent: () => import('./pages/events/events.component').then((m) => m.EventsComponent),
   },
   {
+    path: 'bienvenida',
+    title: 'Bienvenida — VisionAI',
+    loadComponent: () =>
+      import('./pages/welcome/welcome.component').then((m) => m.WelcomeComponent),
+  },
+  {
     path: 'reconocimiento',
     title: 'Reconocimiento — VisionAI',
     loadComponent: () =>

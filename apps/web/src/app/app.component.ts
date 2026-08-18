@@ -1,13 +1,18 @@
 import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { filter } from 'rxjs';
 
 @Component({
   selector: 'px-root',
   standalone: true,
   imports: [CommonModule, RouterOutlet, RouterLink, RouterLinkActive],
   template: `
-    <div class="layout">
+    <!-- La pantalla de bienvenida va sola: quien está enfrente no opera nada y
+         un menú lateral sólo invitaría a tocarlo. -->
+    <router-outlet *ngIf="soloKiosco" />
+
+    <div class="layout" *ngIf="!soloKiosco">
       <aside class="sidebar">
         <div class="brand">
           <div class="brand-mark">
@@ -200,4 +205,14 @@ import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
     `,
   ],
 })
-export class AppComponent {}
+export class AppComponent {
+  /** La ruta actual es la pantalla de kiosco: se dibuja sin ningún marco. */
+  soloKiosco = false;
+
+  constructor(private readonly router: Router) {
+    this.soloKiosco = this.router.url.startsWith('/bienvenida');
+    this.router.events
+      .pipe(filter((e): e is NavigationEnd => e instanceof NavigationEnd))
+      .subscribe((e) => (this.soloKiosco = e.urlAfterRedirects.startsWith('/bienvenida')));
+  }
+}

@@ -49,6 +49,14 @@
           <p class="ficha-nota" *ngIf="p.facesCount < 2">
             Con una sola foto se lo reconoce de frente. Sumale otra de perfil.
           </p>
+
+          <label class="ficha-zona">
+            <span>Trabaja en</span>
+            <select [value]="p.workZone || ''" (change)="asignarZona(p, $event)">
+              <option value="">Sin asignar</option>
+              <option *ngFor="let z of zonas" [value]="z.clave">{{ z.nombre }}</option>
+            </select>
+          </label>
         </div>
 
         <div class="ficha-acciones">

@@ -395,6 +395,48 @@ def module_state(module_key: str, camera: str | None = None) -> dict:
     return salida
 
 
+# Detector propio para analizar fotos sueltas. Se carga una sola vez y sólo si
+# hace falta.
+_app_fotos = None
+
+
+def _detector_de_caras():
+    """El detector con el que se analizan las fotos que llegan por HTTP.
+
+    Se prefiere la instancia que ya tiene cargada un pipeline: es el mismo
+    modelo y evita ocupar memoria dos veces. Pero si no hay ninguna —porque las
+    cámaras están apagadas o el módulo no está asignado— se carga una propia.
+
+    Antes esto devolvía un error y dejaba sin funcionar el alta de personas y la
+    pantalla de bienvenida cada vez que se caía una cámara, que es justamente
+    cuando alguien puede estar cargando gente.
+    """
+    global _app_fotos
+
+    inst = next(
+        (v for k, v in _instances.items() if k.endswith(":person-identification")), None
+    )
+    propia = getattr(inst, "_app", None) if inst is not None else None
+    if propia is not None:
+        return propia
+
+    if _app_fotos is None:
+        try:
+            from insightface.app import FaceAnalysis
+
+            log.info("cargando el detector de rostros para analizar fotos sueltas")
+            _app_fotos = FaceAnalysis(
+                name="buffalo_l",
+                allowed_modules=["detection", "recognition"],
+                providers=["CPUExecutionProvider"],
+            )
+            _app_fotos.prepare(ctx_id=-1, det_size=(640, 640))
+        except Exception:  # noqa: BLE001
+            log.exception("no se pudo cargar el detector de rostros")
+            return None
+    return _app_fotos
+
+
 @app.post("/faces/analyze")
 def analyze_face(payload: dict) -> dict:
     """Analiza una foto y devuelve la plantilla facial que contiene, si hay.
@@ -424,20 +466,13 @@ def analyze_face(payload: dict) -> dict:
     if img is None:
         return {"ok": False, "error": "no se pudo leer la imagen"}
 
-    # Se usa la instancia ya cargada del módulo de identificación: levantar otra
-    # copia del modelo por cada foto tardaría más que el resto del alta junta.
-    inst = next(
-        (v for k, v in _instances.items() if k.endswith(":person-identification")), None
-    )
-    if inst is None or getattr(inst, "_app", None) is None:
-        return {
-            "ok": False,
-            "error": "el módulo de control de accesos no está cargado en ninguna cámara",
-        }
+    app_caras = _detector_de_caras()
+    if app_caras is None:
+        return {"ok": False, "error": "no se pudo cargar el modelo de rostros"}
 
     h, w = img.shape[:2]
     caras = []
-    for c in inst._app.get(img):            # noqa: SLF001 — misma app, no hay API pública
+    for c in app_caras.get(img):
         x1, y1, x2, y2 = (float(v) for v in c.bbox)
         pose = getattr(c, "pose", None)
         emb = _np.asarray(c.normed_embedding, dtype=_np.float32)

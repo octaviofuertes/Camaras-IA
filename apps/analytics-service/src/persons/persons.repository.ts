@@ -21,6 +21,8 @@ export interface PersonaDto {
   hasAccess: boolean;
   /** Miniatura para reconocer la ficha de un vistazo. */
   photo: string | null;
+  /** Zona del plano donde trabaja. Null si no se le asignó ninguna. */
+  workZone: string | null;
   consentBasis: string;
   consentAt: string;
   facesCount: number;
@@ -107,7 +109,7 @@ export class PersonsRepository {
 
   async listar(client: PoolClient): Promise<PersonaDto[]> {
     const { rows } = await client.query(
-      `SELECT p.id, p.display_name, p.active, p.has_access, p.photo,
+      `SELECT p.id, p.display_name, p.active, p.has_access, p.photo, p.work_zone,
               p.consent_basis, p.consent_at, p.created_at,
               count(f.id) AS faces
          FROM persons p
@@ -121,6 +123,7 @@ export class PersonsRepository {
       active: Boolean(r.active),
       hasAccess: Boolean(r.has_access),
       photo: (r.photo as string) ?? null,
+      workZone: (r.work_zone as string) ?? null,
       consentBasis: String(r.consent_basis),
       consentAt: r.consent_at?.toISOString?.() ?? String(r.consent_at),
       facesCount: Number(r.faces ?? 0),
@@ -274,6 +277,46 @@ export class PersonsRepository {
       `UPDATE persons SET photo = $2 WHERE id = $1 AND photo IS NULL`,
       [personId, photo],
     );
+  }
+
+  /** Asigna la zona del plano donde trabaja. */
+  async cambiarZona(client: PoolClient, personId: string, zona: string | null): Promise<boolean> {
+    const r = await client.query(
+      `UPDATE persons SET work_zone = $2, updated_at = now() WHERE id = $1`,
+      [personId, zona],
+    );
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  /** La galería con todo lo que la pantalla de bienvenida necesita mostrar. */
+  async galeriaConDatos(client: PoolClient): Promise<
+    {
+      id: string;
+      displayName: string;
+      hasAccess: boolean;
+      photo: string | null;
+      workZone: string | null;
+      embeddings: number[][];
+    }[]
+  > {
+    const { rows } = await client.query(
+      `SELECT p.id, p.display_name, p.has_access, p.photo, p.work_zone,
+              array_agg(f.embedding) FILTER (WHERE f.id IS NOT NULL) AS embeddings
+         FROM persons p
+         LEFT JOIN person_faces f ON f.person_id = p.id
+        WHERE p.active
+        GROUP BY p.id`,
+    );
+    return rows.map((f: Record<string, unknown>) => ({
+      id: String(f.id),
+      displayName: String(f.display_name),
+      hasAccess: Boolean(f.has_access),
+      photo: (f.photo as string) ?? null,
+      workZone: (f.work_zone as string) ?? null,
+      embeddings: ((f.embeddings as unknown[]) ?? []).map((e) =>
+        (e as unknown as string[]).map(Number),
+      ),
+    }));
   }
 
   /** Cambia si una persona tiene acceso, dejando registro de quién lo decidió. */

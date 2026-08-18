@@ -189,6 +189,32 @@ export class PersonsController {
     );
   }
 
+  /** Asigna la zona del plano donde trabaja una persona. */
+  @Post(':id/zone')
+  @RequirePermissions('persons:write')
+  async zona(
+    @Req() req: Request,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: { workZone?: string | null },
+  ) {
+    await this.persons.cambiarZona(req.auth as AuthContext, id, body?.workZone ?? null);
+    return { ok: true };
+  }
+
+  /**
+   * Quién es la persona de esta foto. Lo consume la pantalla de bienvenida.
+   *
+   * Requiere `persons:read` y no `reports:identified`: saludar a quien está
+   * parado enfrente no es lo mismo que poder consultar a qué hora entró cada
+   * uno todos los días.
+   */
+  @Post('identify')
+  @RequirePermissions('persons:read')
+  async identificar(@Req() req: Request, @Body() body: { image?: string }) {
+    const r = await this.persons.identificar(req.auth as AuthContext, body?.image ?? '');
+    return { reconocido: r };
+  }
+
   /** Reporte de presencia del pipeline: quién está en el cuadro ahora. */
   @Post('presence')
   @RequirePermissions('events:ingest')

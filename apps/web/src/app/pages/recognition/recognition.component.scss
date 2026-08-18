@@ -354,3 +354,21 @@
   animation: girar .7s linear infinite;
 }
 @keyframes girar { to { transform: rotate(360deg); } }
+
+/* ─── Zona de trabajo en la ficha ───────────────────────────────── */
+/* Es lo que la pantalla de bienvenida ilumina en el plano, así que se edita
+   donde se ve la persona y no en otro lado. */
+.ficha-zona {
+  display: flex; align-items: center; gap: 8px; margin-top: 10px;
+
+  > span { font-size: 11px; color: var(--text-mute); flex: 0 0 auto; }
+
+  select {
+    flex: 1; min-width: 0;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 5px 8px;
+    color: var(--text); font-size: 12px; font-family: inherit; outline: none;
+
+    &:focus { border-color: var(--accent); }
+  }
+}

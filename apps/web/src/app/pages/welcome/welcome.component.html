@@ -1,0 +1,67 @@
+<div class="kiosco">
+  <!-- La cámara se ve chica y arriba: es la prueba de que está mirando, no el
+       contenido de la pantalla. -->
+  <div class="espejo-caja" [class.activa]="camaraLista">
+    <video id="espejo" playsinline muted></video>
+    <span class="punto" *ngIf="camaraLista"></span>
+  </div>
+
+  <div class="hora">{{ hora }}</div>
+
+  <!-- Nadie enfrente -->
+  <div class="centro" *ngIf="!persona">
+    <div class="esperando">
+      <svg viewBox="0 0 24 24" width="52" height="52" fill="none" stroke="currentColor" stroke-width="1.4">
+        <circle cx="12" cy="9" r="3.6" />
+        <path d="M4.5 20a7.5 7.5 0 0 1 15 0" />
+      </svg>
+      <h1>Acercate a la cámara</h1>
+      <p *ngIf="!errorCamara">Mirá de frente y te digo dónde te toca hoy.</p>
+      <p class="error" *ngIf="errorCamara">{{ errorCamara }}</p>
+    </div>
+  </div>
+
+  <!-- Alguien reconocido -->
+  <div class="centro" *ngIf="persona as p">
+    <div class="saludo">
+      <div class="retrato">
+        <img *ngIf="p.photo" [src]="urlFoto(p.photo)" [alt]="p.displayName" />
+        <span class="inicial" *ngIf="!p.photo">{{ p.displayName.charAt(0) }}</span>
+      </div>
+
+      <div class="texto">
+        <div class="hola">{{ saludo() }},</div>
+        <h1 class="nombre">{{ primerNombre(p.displayName) }}</h1>
+
+        <div class="zona-txt" *ngIf="zona as z">
+          Tu lugar hoy: <strong>{{ z.nombre }}</strong>
+        </div>
+        <div class="zona-txt sin" *ngIf="!zona && p.hasAccess">
+          Todavía no tenés un lugar asignado.
+        </div>
+        <div class="zona-txt negado" *ngIf="!p.hasAccess">
+          No tenés acceso a este lugar. Avisale a un responsable.
+        </div>
+      </div>
+    </div>
+
+    <!-- El plano, con su zona iluminada -->
+    <div class="plano-caja">
+      <svg class="plano" [attr.viewBox]="'0 0 ' + plano.ancho + ' ' + plano.alto"
+           preserveAspectRatio="xMidYMid meet">
+        <rect class="edificio" x="20" y="20" [attr.width]="plano.ancho - 40"
+              [attr.height]="plano.alto - 40" rx="10" />
+
+        <g *ngFor="let z of zonas">
+          <rect class="zona" [class.suya]="esSuZona(z)"
+                [attr.x]="z.x" [attr.y]="z.y" [attr.width]="z.w" [attr.height]="z.h" rx="6" />
+          <text class="etiqueta" [class.suya]="esSuZona(z)"
+                [attr.x]="z.x + z.w / 2" [attr.y]="z.y + z.h / 2"
+                text-anchor="middle" dominant-baseline="middle">
+            {{ z.nombre }}
+          </text>
+        </g>
+      </svg>
+    </div>
+  </div>
+</div>

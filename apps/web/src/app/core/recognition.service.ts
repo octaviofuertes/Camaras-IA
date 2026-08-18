@@ -10,6 +10,8 @@ export interface Persona {
   hasAccess: boolean;
   /** Miniatura de su cara. Null si se cargó sin ninguna foto utilizable. */
   photo: string | null;
+  /** Zona del plano donde trabaja. Null si no se le asignó ninguna. */
+  workZone: string | null;
   consentBasis: string;
   consentAt: string;
   facesCount: number;
@@ -84,6 +86,13 @@ export class RecognitionService {
   cambiarAcceso(personId: string, hasAccess: boolean, note?: string): Observable<boolean> {
     return this.http
       .post(`${this.base}/${personId}/access`, { hasAccess, note })
+      .pipe(map(() => true), catchError(() => of(false)));
+  }
+
+  /** Asigna la zona del plano donde trabaja. */
+  cambiarZona(personId: string, workZone: string | null): Observable<boolean> {
+    return this.http
+      .post(`${this.base}/${personId}/zone`, { workZone })
       .pipe(map(() => true), catchError(() => of(false)));
   }
 

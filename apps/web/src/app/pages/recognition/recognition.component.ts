@@ -9,6 +9,7 @@ import {
   type TipoFoto,
 } from '../../core/recognition.service';
 import { EventsService } from '../../core/events.service';
+import { ZONAS } from '../../core/zonas';
 import type { EventItem } from '../../core/models';
 
 type Modo = 'registradas' | 'detectadas' | 'manual';
@@ -35,6 +36,7 @@ export class RecognitionComponent implements OnInit, OnDestroy {
   private readonly eventos = inject(EventsService);
 
   modo: Modo = 'registradas';
+  readonly zonas = ZONAS;
 
   // ── automático ─────────────────────────────────────────────────────
   /** Caras que la cámara detectó y el sistema no conoce. */
@@ -138,6 +140,16 @@ export class RecognitionComponent implements OnInit, OnDestroy {
   agregarFotosA(p: Persona): void {
     this.elegirPersona(p);
     this.modo = 'manual';
+  }
+
+  /** Asigna dónde trabaja: es lo que la pantalla de bienvenida ilumina. */
+  asignarZona(p: Persona, ev: Event): void {
+    const valor = (ev.target as HTMLSelectElement).value || null;
+    this.api.cambiarZona(p.id, valor).subscribe(() => this.cargarPersonas());
+  }
+
+  nombreZona(clave: string | null): string {
+    return this.zonas.find((z) => z.clave === clave)?.nombre ?? 'Sin zona';
   }
 
   cambiarAcceso(p: Persona): void {
@@ -382,6 +394,7 @@ export class RecognitionComponent implements OnInit, OnDestroy {
           active: true,
           hasAccess: this.acceso === true,
           photo: null,
+          workZone: null,
           consentBasis: this.consentimiento.trim(),
           consentAt: new Date().toISOString(),
           facesCount: 0,

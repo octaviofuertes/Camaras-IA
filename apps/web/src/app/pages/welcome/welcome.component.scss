@@ -1,0 +1,125 @@
+/* Pantalla de kiosco: ocupa todo, sin menú y sin nada para tocar. */
+.kiosco {
+  position: fixed; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 28px;
+  background: radial-gradient(circle at 50% 0%, #16243a 0%, var(--bg, #0b0f17) 62%);
+  overflow: hidden;
+  user-select: none;
+}
+
+/* ─── La cámara, como prueba de que está mirando ────────────────── */
+.espejo-caja {
+  position: absolute; top: 22px; right: 24px;
+  width: 132px; height: 99px; border-radius: 12px; overflow: hidden;
+  border: 1px solid var(--border); background: #000;
+  opacity: .5; transition: opacity .3s;
+
+  &.activa { opacity: .85; }
+  video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+}
+
+.punto {
+  position: absolute; top: 8px; left: 8px;
+  width: 8px; height: 8px; border-radius: 50%; background: #4ade80;
+  box-shadow: 0 0 0 0 rgba(74, 222, 128, .6);
+  animation: latido 2s ease-out infinite;
+}
+@keyframes latido {
+  0%   { box-shadow: 0 0 0 0 rgba(74, 222, 128, .55); }
+  70%  { box-shadow: 0 0 0 8px rgba(74, 222, 128, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+}
+
+.hora {
+  position: absolute; top: 26px; left: 30px;
+  font-size: 26px; font-weight: 300; letter-spacing: 1px;
+  color: var(--text-mute); font-variant-numeric: tabular-nums;
+}
+
+.centro {
+  display: flex; flex-direction: column; align-items: center; gap: 30px;
+  width: 100%; max-width: 1180px;
+}
+
+/* ─── Sin nadie enfrente ────────────────────────────────────────── */
+.esperando {
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  color: var(--text-mute); text-align: center;
+
+  h1 { margin: 0; font-size: 30px; font-weight: 300; color: var(--text); }
+  p { margin: 0; font-size: 15px; }
+  .error { color: #fca5a5; max-width: 44ch; line-height: 1.6; }
+  svg { opacity: .35; }
+}
+
+/* ─── El saludo ─────────────────────────────────────────────────── */
+.saludo {
+  display: flex; align-items: center; gap: 26px;
+  animation: aparecer .35s ease-out;
+}
+@keyframes aparecer {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.retrato {
+  width: 132px; height: 132px; border-radius: 50%; overflow: hidden; flex: 0 0 auto;
+  border: 3px solid rgba(74, 222, 128, .55);
+  background: var(--panel-2); display: grid; place-items: center;
+
+  img { width: 100%; height: 100%; object-fit: cover; }
+  .inicial { font-size: 52px; font-weight: 300; color: var(--text-mute); }
+}
+
+.texto { min-width: 0; }
+.hola { font-size: 19px; color: var(--text-mute); }
+.nombre {
+  margin: 2px 0 10px; font-size: 54px; font-weight: 600; line-height: 1.05;
+  letter-spacing: -1px;
+}
+
+.zona-txt {
+  font-size: 17px; color: var(--text-mute);
+  strong { color: #86efac; font-weight: 600; }
+
+  &.sin { color: var(--text-mute); }
+  /* Que no tenga acceso no puede leerse igual que el resto del saludo. */
+  &.negado { color: #fca5a5; font-weight: 600; }
+}
+
+/* ─── El plano ──────────────────────────────────────────────────── */
+.plano-caja { width: 100%; }
+
+.plano {
+  width: 100%; max-height: 46vh; display: block;
+}
+
+.edificio {
+  fill: none; stroke: var(--border); stroke-width: 3;
+}
+
+.zona {
+  fill: rgba(255, 255, 255, .035);
+  stroke: var(--border); stroke-width: 2;
+  transition: fill .4s, stroke .4s;
+
+  /* La zona de esta persona: verde, encendida y latiendo despacio, para que se
+     encuentre desde lejos sin tener que leer los nombres. */
+  &.suya {
+    fill: rgba(34, 197, 94, .28);
+    stroke: #4ade80; stroke-width: 4;
+    animation: respirar 2.4s ease-in-out infinite;
+  }
+}
+@keyframes respirar {
+  0%, 100% { fill: rgba(34, 197, 94, .22); }
+  50%      { fill: rgba(34, 197, 94, .42); }
+}
+
+.etiqueta {
+  fill: var(--text-mute); font-size: 26px; font-weight: 500;
+  font-family: inherit; pointer-events: none;
+
+  &.suya { fill: #dcfce7; font-weight: 700; font-size: 30px; }
+}
