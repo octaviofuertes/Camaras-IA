@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, firstValueFrom, of, tap } from 'rxjs';
+import { Observable, of, tap } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 
 interface LoginResponse {
@@ -27,16 +27,15 @@ const USER_KEY = 'px_user';
  * La autenticación es real: `identity-service` valida la contraseña con bcrypt
  * y arma el token con los permisos que el usuario tiene EN LA BASE.
  *
- * Mientras no exista pantalla de login, `ensureSession()` inicia sesión sola
- * con las credenciales de desarrollo. No es una puerta trasera: pasa por el
- * mismo endpoint y las mismas validaciones que usaría una persona.
+ * Ya no inicia sesión sola: hay pantalla de login y entrar es una decisión de
+ * una persona. Un auto-login con credenciales fijas convertía cualquier
+ * navegador que abriera la aplicación en un administrador, y con eso la
+ * pantalla de login sería decoración.
  */
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly http = inject(HttpClient);
   private readonly api = '/identity/api/v1';
-
-  private pending: Promise<boolean> | null = null;
 
   get token(): string | null {
     return localStorage.getItem(TOKEN_KEY);
@@ -65,11 +64,7 @@ export class AuthService {
    * Las llamadas concurrentes comparten el mismo intento (no repite el login).
    */
   ensureSession(): Promise<boolean> {
-    if (this.hasValidToken()) return Promise.resolve(true);
-    if (this.pending) return this.pending;
-
-    this.pending = firstValueFrom(this.autoLogin()).finally(() => (this.pending = null));
-    return this.pending;
+    return Promise.resolve(this.hasValidToken());
   }
 
   login(email: string, password: string): Observable<boolean> {
@@ -80,10 +75,24 @@ export class AuthService {
     );
   }
 
-  private autoLogin(): Observable<boolean> {
-    const email = 'admin@percepta.local';
-    const password = 'percepta';
-    return this.login(email, password);
+  /**
+   * Sesión de la pantalla de bienvenida.
+   *
+   * No pide credenciales porque nadie inicia sesión en un kiosco. El token que
+   * devuelve tiene un solo permiso —mandar una foto y recibir un saludo— así
+   * que dejarlo en ese dispositivo no expone nada más.
+   */
+  entrarComoKiosco(): Observable<boolean> {
+    return this.http.post<LoginResponse>(`${this.api}/auth/kiosk`, {}).pipe(
+      tap((r) => this.store(r)),
+      map(() => true),
+      catchError(() => of(false)),
+    );
+  }
+
+  /** True si la sesión actual es la de la pantalla, no la de una persona. */
+  esKiosco(): boolean {
+    return this.user?.permissions?.every((p) => p === 'kiosk:identify') ?? false;
   }
 
   logout(): void {

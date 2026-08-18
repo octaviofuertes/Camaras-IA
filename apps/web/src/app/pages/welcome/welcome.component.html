@@ -30,7 +30,7 @@
       </div>
 
       <div class="texto">
-        <div class="hola">{{ saludo() }},</div>
+        <div class="hola">{{ momento() }} · {{ saludo() }}</div>
         <h1 class="nombre">{{ primerNombre(p.displayName) }}</h1>
 
         <div class="zona-txt" *ngIf="zona as z">

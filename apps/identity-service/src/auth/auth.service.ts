@@ -91,6 +91,66 @@ export class AuthService {
     };
   }
 
+  /**
+   * Token para la pantalla de bienvenida.
+   *
+   * No pide credenciales, y eso es deliberado: esa pantalla cuelga de una
+   * cámara en la entrada y nadie inicia sesión en ella. Si necesitara usuario y
+   * contraseña, alguien dejaría una sesión de administrador abierta en el hall.
+   *
+   * Lo que hace seguro no pedirlas es lo que entrega: un token con UN permiso,
+   * `kiosk:identify`, que sólo habilita mandar una foto y recibir un saludo. No
+   * puede listar personas, ni ver sus fotos, ni consultar el registro de
+   * accesos. Si alguien se lo lleva, lo único que puede hacer es preguntarle al
+   * sistema si conoce una cara que ya tiene.
+   *
+   * Dura poco y no trae refresh: la pantalla lo vuelve a pedir sola.
+   */
+  async kiosco(): Promise<LoginResult> {
+    const accessSecret = process.env.JWT_ACCESS_SECRET;
+    if (!accessSecret) throw new Error('Falta JWT_ACCESS_SECRET');
+
+    const user = await this.db.asAdmin(async (client) => {
+      const { rows } = await client.query<UserRow>(
+        `SELECT id, organization_id, email, password_hash, full_name, status
+           FROM users WHERE lower(email) = 'kiosco@percepta.local' LIMIT 1`,
+      );
+      return rows[0] ?? null;
+    });
+    if (!user || user.status !== 'active') {
+      throw new UnauthorizedException('La pantalla de bienvenida no está habilitada');
+    }
+
+    const permissions = await this.permissionsOf(user.id);
+    // Cinturón y tirantes: aunque alguien le agregue roles a este usuario por
+    // error, el token del kiosco nunca lleva más que su permiso.
+    const soloKiosco = permissions.filter((p) => p === 'kiosk:identify');
+    if (!soloKiosco.length) {
+      throw new UnauthorizedException('La pantalla de bienvenida no tiene permisos asignados');
+    }
+
+    const ttl = Number(process.env.JWT_KIOSK_TTL ?? 43200);
+    const accessToken = jwt.sign(
+      { sub: user.id, org: user.organization_id, perms: soloKiosco },
+      accessSecret,
+      { algorithm: 'HS256', expiresIn: ttl },
+    );
+
+    this.logger.log('token de pantalla de bienvenida emitido');
+    return {
+      accessToken,
+      refreshToken: '',
+      expiresIn: ttl,
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.full_name,
+        organizationId: user.organization_id,
+        permissions: soloKiosco,
+      },
+    };
+  }
+
   /** Permisos efectivos: unión de los de todos sus roles. */
   private async permissionsOf(userId: string): Promise<Permission[]> {
     return this.db.asAdmin(async (client) => {

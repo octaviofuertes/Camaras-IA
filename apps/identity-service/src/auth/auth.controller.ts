@@ -13,6 +13,12 @@ export class AuthController {
     return this.auth.login(email, password);
   }
 
+  /** Token de la pantalla de bienvenida: un solo permiso, sin credenciales. */
+  @Post('kiosk')
+  async kiosk(): Promise<LoginResult> {
+    return this.auth.kiosco();
+  }
+
   @Post('refresh')
   async refresh(@Body() body: Record<string, unknown>): Promise<LoginResult> {
     const token = String(body?.['refreshToken'] ?? '');

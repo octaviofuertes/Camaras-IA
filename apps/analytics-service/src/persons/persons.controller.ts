@@ -204,12 +204,13 @@ export class PersonsController {
   /**
    * Quién es la persona de esta foto. Lo consume la pantalla de bienvenida.
    *
-   * Requiere `persons:read` y no `reports:identified`: saludar a quien está
-   * parado enfrente no es lo mismo que poder consultar a qué hora entró cada
-   * uno todos los días.
+   * Tiene su propio permiso, `kiosk:identify`, y no `persons:read`. La
+   * diferencia importa: con `persons:read` el token de una pantalla colgada en
+   * la entrada podría además LISTAR a todas las personas con sus fotos. Acá lo
+   * único que habilita es preguntar por una cara que ya se tiene.
    */
   @Post('identify')
-  @RequirePermissions('persons:read')
+  @RequirePermissions('kiosk:identify')
   async identificar(@Req() req: Request, @Body() body: { image?: string }) {
     const r = await this.persons.identificar(req.auth as AuthContext, body?.image ?? '');
     return { reconocido: r };

@@ -1,7 +1,8 @@
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { filter } from 'rxjs';
+import { AuthService } from './core/auth.service';
 
 @Component({
   selector: 'px-root',
@@ -76,16 +77,17 @@ import { filter } from 'rxjs';
           </a>
         </nav>
 
-        <div class="user">
-          <div class="avatar">A</div>
+        <button class="user" (click)="salir()" title="Cerrar sesión">
+          <div class="avatar">{{ inicial() }}</div>
           <div class="user-text">
-            <div class="user-name">Admin</div>
-            <div class="user-role">Administrador</div>
+            <div class="user-name">{{ nombreUsuario() }}</div>
+            <div class="user-role">Cerrar sesión</div>
           </div>
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="m6 9 6 6 6-6" />
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <path d="m16 17 5-5-5-5M21 12H9" />
           </svg>
-        </div>
+        </button>
       </aside>
 
       <main class="content">
@@ -161,6 +163,12 @@ import { filter } from 'rxjs';
         color: #fff;
       }
       .user {
+        width: 100%;
+        border: 1px solid transparent;
+        font: inherit;
+        color: inherit;
+        cursor: pointer;
+        text-align: left;
         display: flex;
         align-items: center;
         gap: 10px;
@@ -209,10 +217,32 @@ export class AppComponent {
   /** La ruta actual es la pantalla de kiosco: se dibuja sin ningún marco. */
   soloKiosco = false;
 
+  private readonly auth = inject(AuthService);
+
+  nombreUsuario(): string {
+    const u = this.auth.user;
+    return u?.fullName || u?.email?.split('@')[0] || 'Sesión';
+  }
+
+  inicial(): string {
+    return (this.nombreUsuario()[0] ?? 'A').toUpperCase();
+  }
+
+  /** Cierra la sesión y vuelve al login. */
+  salir(): void {
+    this.auth.logout();
+    void this.router.navigateByUrl('/login');
+  }
+
   constructor(private readonly router: Router) {
-    this.soloKiosco = this.router.url.startsWith('/bienvenida');
+    // La bienvenida y el login se dibujan solos: uno porque nadie lo opera, el
+    // otro porque todavía no hay sesión que enmarcar.
+    const sinMarco = (url: string): boolean =>
+      url.startsWith('/bienvenida') || url.startsWith('/login');
+
+    this.soloKiosco = sinMarco(this.router.url);
     this.router.events
       .pipe(filter((e): e is NavigationEnd => e instanceof NavigationEnd))
-      .subscribe((e) => (this.soloKiosco = e.urlAfterRedirects.startsWith('/bienvenida')));
+      .subscribe((e) => (this.soloKiosco = sinMarco(e.urlAfterRedirects)));
   }
 }

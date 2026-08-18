@@ -1,0 +1,65 @@
+.entrada {
+  position: fixed; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 26px; padding: 24px;
+  background: radial-gradient(circle at 50% 0%, #16243a 0%, var(--bg, #0b0f17) 62%);
+}
+
+.marca { display: flex; align-items: center; gap: 13px; }
+
+.marca-mark {
+  width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center;
+  background: var(--accent, #3b82f6); color: #fff;
+}
+.marca-nombre { font-size: 19px; font-weight: 700; letter-spacing: -.3px; }
+.marca-sub { font-size: 11.5px; color: var(--text-mute); }
+
+.caja {
+  width: 100%; max-width: 390px; padding: 26px 26px 22px;
+
+  h1 { margin: 0 0 20px; font-size: 18px; font-weight: 600; }
+}
+
+form { display: flex; flex-direction: column; gap: 14px; }
+
+.campo {
+  display: flex; flex-direction: column; gap: 6px;
+
+  > span { font-size: 12px; font-weight: 500; color: var(--text-dim); }
+  input {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 10px 12px;
+    color: var(--text); font-size: 13.5px; font-family: inherit; outline: none;
+
+    &:focus { border-color: var(--accent); }
+  }
+}
+
+.error {
+  padding: 9px 12px; border-radius: var(--radius-sm);
+  background: rgba(239, 68, 68, .1); border: 1px solid rgba(239, 68, 68, .35);
+  color: #fca5a5; font-size: 12px; line-height: 1.5;
+}
+
+.btn.ancho {
+  width: 100%; justify-content: center; text-align: center; cursor: pointer;
+  padding: 11px 14px; font-size: 13.5px;
+}
+
+.separador {
+  display: flex; align-items: center; gap: 12px;
+  margin: 20px 0 16px; color: var(--text-mute); font-size: 11.5px;
+
+  &::before, &::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+}
+
+/* El segundo camino no compite con el primero: es otra cosa, no otra forma de
+   entrar. Por eso no va en color de acción principal. */
+.btn.kiosco {
+  display: flex; align-items: center; gap: 9px;
+  svg { flex: 0 0 auto; opacity: .8; }
+}
+
+.kiosco-nota {
+  margin: 10px 0 0; font-size: 11px; line-height: 1.55; color: var(--text-mute);
+}

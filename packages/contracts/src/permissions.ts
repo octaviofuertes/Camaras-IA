@@ -24,6 +24,8 @@ export const PERMISSIONS = [
   // alcance ese dato, mejor.
   'persons:read', 'persons:write',
   'reports:identified',
+  // La pantalla de bienvenida: mandar una foto y recibir un saludo. Nada más.
+  'kiosk:identify',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -45,6 +47,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRole, Permission[] | ['*']> =
     'organizations:read',
     'persons:read', 'persons:write',
     'reports:identified',
+    'kiosk:identify',
     'sites:read', 'sites:write',
     'zones:read', 'zones:write',
     'cameras:read', 'cameras:write', 'cameras:live',
@@ -62,6 +65,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRole, Permission[] | ['*']> =
     'sites:read',
     'persons:read', 'persons:write',
     'reports:identified',
+    'kiosk:identify',
     'zones:read', 'zones:write',
     'cameras:read', 'cameras:write', 'cameras:live',
     'modules:read',

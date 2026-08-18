@@ -1,0 +1,54 @@
+<div class="entrada">
+  <div class="marca">
+    <div class="marca-mark">
+      <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 2 4 6v6c0 5 3.4 9.4 8 10 4.6-.6 8-5 8-10V6l-8-4Z" />
+        <circle cx="12" cy="11" r="2.5" fill="currentColor" stroke="none" />
+      </svg>
+    </div>
+    <div>
+      <div class="marca-nombre">VisionAI</div>
+      <div class="marca-sub">Análisis Inteligente de Video</div>
+    </div>
+  </div>
+
+  <div class="caja panel">
+    <h1>Ingresar</h1>
+
+    <form (submit)="$event.preventDefault(); entrar()">
+      <label class="campo">
+        <span>Email</span>
+        <input type="email" name="email" autocomplete="username"
+               [(ngModel)]="email" placeholder="tu@empresa.com" />
+      </label>
+
+      <label class="campo">
+        <span>Contraseña</span>
+        <input type="password" name="password" autocomplete="current-password"
+               [(ngModel)]="password" placeholder="••••••••" />
+      </label>
+
+      <div class="error" *ngIf="error">{{ error }}</div>
+
+      <button class="btn btn-primary ancho" type="submit"
+              [disabled]="entrando || !email.trim() || !password">
+        {{ entrando ? 'Entrando…' : 'Entrar como administrador' }}
+      </button>
+    </form>
+
+    <div class="separador"><span>o</span></div>
+
+    <button class="btn ancho kiosco" [disabled]="entrando" (click)="abrirPantallaDeCamara()">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8">
+        <rect x="2.5" y="5" width="19" height="13" rx="2" />
+        <circle cx="12" cy="11.5" r="3" />
+      </svg>
+      Panel de cámara
+    </button>
+    <p class="kiosco-nota">
+      Abre la pantalla de bienvenida: reconoce a quien se para enfrente y le muestra dónde
+      trabaja. No pide contraseña y no da acceso a ningún dato: sólo puede preguntar si el
+      sistema conoce una cara.
+    </p>
+  </div>
+</div>

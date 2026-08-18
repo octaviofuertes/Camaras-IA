@@ -130,7 +130,12 @@ export class WelcomeComponent implements OnInit, OnDestroy {
     return b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`;
   }
 
+  /** El saludo de la pantalla. La hora sólo cambia la despedida del renglón. */
   saludo(): string {
+    return 'Bienvenido';
+  }
+
+  momento(): string {
     const h = new Date().getHours();
     if (h < 12) return 'Buen día';
     if (h < 20) return 'Buenas tardes';
