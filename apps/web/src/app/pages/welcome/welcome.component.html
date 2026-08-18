@@ -42,20 +42,33 @@
         <div class="zona-txt negado" *ngIf="!p.hasAccess">
           No tenés acceso a este lugar. Avisale a un responsable.
         </div>
+
+        <!-- Que la persona vea con qué hora quedó anotada su entrada. -->
+        <div class="ingreso" *ngIf="horaDeEntrada() as h">
+          Ingreso registrado · <strong>{{ h }}</strong>
+        </div>
       </div>
     </div>
 
     <!-- El plano, con su zona iluminada -->
     <div class="plano-caja">
-      <svg class="plano" [attr.viewBox]="'0 0 ' + plano.ancho + ' ' + plano.alto"
+      <svg class="plano" [class.con-imagen]="!!plano"
+           [attr.viewBox]="'0 0 ' + medidas.ancho + ' ' + medidas.alto"
            preserveAspectRatio="xMidYMid meet">
-        <rect class="edificio" x="20" y="20" [attr.width]="plano.ancho - 40"
-              [attr.height]="plano.alto - 40" rx="10" />
+        <!-- El plano de la empresa, si lo subió. Las zonas se dibujan encima. -->
+        <image *ngIf="plano" [attr.href]="plano" x="0" y="0"
+               [attr.width]="medidas.ancho" [attr.height]="medidas.alto"
+               preserveAspectRatio="xMidYMid meet" />
+
+        <!-- Sin plano cargado se dibuja el esquema, para que la pantalla sirva
+             igual mientras alguien lo sube. -->
+        <rect class="edificio" *ngIf="!plano" x="20" y="20" [attr.width]="medidas.ancho - 40"
+              [attr.height]="medidas.alto - 40" rx="10" />
 
         <g *ngFor="let z of zonas">
-          <rect class="zona" [class.suya]="esSuZona(z)"
+          <rect class="zona" [class.suya]="esSuZona(z)" [class.sobre-imagen]="!!plano"
                 [attr.x]="z.x" [attr.y]="z.y" [attr.width]="z.w" [attr.height]="z.h" rx="6" />
-          <text class="etiqueta" [class.suya]="esSuZona(z)"
+          <text class="etiqueta" [class.suya]="esSuZona(z)" [class.sobre-imagen]="!!plano"
                 [attr.x]="z.x + z.w / 2" [attr.y]="z.y + z.h / 2"
                 text-anchor="middle" dominant-baseline="middle">
             {{ z.nombre }}

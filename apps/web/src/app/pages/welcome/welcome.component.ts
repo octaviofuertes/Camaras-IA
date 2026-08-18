@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { catchError, of } from 'rxjs';
 import { PLANO, ZONAS, zonaPorClave, type Zona } from '../../core/zonas';
+import { debeSaludar, vencio, type EstadoSaludo } from '../../core/saludo';
 
 /** A quién reconoció la cámara de esta pantalla. */
 interface Reconocido {
@@ -12,7 +13,10 @@ interface Reconocido {
   hasAccess: boolean;
   workZone: string | null;
   parecido: number;
+  /** Hora en que quedó registrada su entrada. */
+  entrada: string | null;
 }
+
 
 /**
  * Pantalla de bienvenida.
@@ -35,12 +39,14 @@ interface Reconocido {
 export class WelcomeComponent implements OnInit, OnDestroy {
   private readonly http = inject(HttpClient);
 
-  readonly plano = PLANO;
+  readonly medidas = PLANO;
   readonly zonas = ZONAS;
 
   persona: Reconocido | null = null;
-  /** Cuándo se lo reconoció, para saber cuándo dejar de saludarlo. */
-  private visto = 0;
+  /** El plano que subió la empresa. Null = se dibuja el esquema. */
+  plano: string | null = null;
+  /** El último saludo que hubo, esté todavía en pantalla o no. */
+  private ultimo: EstadoSaludo | null = null;
   camaraLista = false;
   errorCamara: string | null = null;
   buscando = false;
@@ -53,6 +59,10 @@ export class WelcomeComponent implements OnInit, OnDestroy {
   async ngOnInit(): Promise<void> {
     this.actualizarHora();
     this.reloj = setInterval(() => this.actualizarHora(), 10_000);
+    this.http
+      .get<{ image: string | null }>('/analytics/api/v1/persons/floorplan')
+      .pipe(catchError(() => of({ image: null })))
+      .subscribe((r) => (this.plano = r.image));
     await this.abrirCamara();
     // Un intento por segundo y medio: la persona llega, se para y espera. Más
     // rápido no la reconoce antes y carga al worker sin necesidad.
@@ -91,8 +101,8 @@ export class WelcomeComponent implements OnInit, OnDestroy {
   private mirar(): void {
     if (!this.camaraLista || this.buscando) return;
 
-    // A los diez segundos sin volver a reconocerlo, deja de saludarlo: se fue.
-    if (this.persona && Date.now() - this.visto > 10_000) this.persona = null;
+    // El saludo se retira solo, para dejar la pantalla libre para el que sigue.
+    if (this.persona && vencio(this.ultimo, Date.now())) this.persona = null;
 
     const v = document.getElementById('espejo') as HTMLVideoElement | null;
     if (!v || !v.videoWidth) return;
@@ -113,10 +123,14 @@ export class WelcomeComponent implements OnInit, OnDestroy {
       .pipe(catchError(() => of({ reconocido: null })))
       .subscribe((r) => {
         this.buscando = false;
-        if (r.reconocido) {
-          this.persona = r.reconocido;
-          this.visto = Date.now();
-        }
+        const quien = r.reconocido;
+        if (!quien) return;
+
+        const ahora = Date.now();
+        if (!debeSaludar(this.ultimo, quien.personId, ahora)) return;
+
+        this.persona = quien;
+        this.ultimo = { personId: quien.personId, desde: ahora };
       });
   }
 
@@ -145,6 +159,15 @@ export class WelcomeComponent implements OnInit, OnDestroy {
   /** Sólo el nombre de pila: en una pantalla de bienvenida el apellido sobra. */
   primerNombre(nombre: string): string {
     return nombre.trim().split(/\s+/)[0] ?? nombre;
+  }
+
+  /** La hora que quedó registrada, en formato de reloj. */
+  horaDeEntrada(): string {
+    const iso = this.persona?.entrada;
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   }
 
   esSuZona(z: Zona): boolean {

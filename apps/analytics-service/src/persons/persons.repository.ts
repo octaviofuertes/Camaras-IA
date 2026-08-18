@@ -162,7 +162,7 @@ export class PersonsRepository {
       seenByFace: boolean;
       hadAccess: boolean;
     },
-  ): Promise<{ id: string; nuevo: boolean }> {
+  ): Promise<{ id: string; nuevo: boolean; startedAt: string }> {
     const desde = new Date(m.from * 1000).toISOString();
     const hasta = new Date(m.to * 1000).toISOString();
 
@@ -195,7 +195,7 @@ export class PersonsRepository {
           WHERE id = $1 AND started_at = $2`,
         [abiertos[0].id, abiertos[0].started_at, hasta, m.bestScore, m.seenByFace],
       );
-      return { id: abiertos[0].id, nuevo: false };
+      return { id: abiertos[0].id, nuevo: false, startedAt: abiertos[0].started_at };
     }
 
     const { rows } = await client.query<{ id: string }>(
@@ -207,7 +207,7 @@ export class PersonsRepository {
       [desde, m.organizationId, m.siteId, m.cameraId, m.personId,
        hasta, m.bestScore, m.seenByFace, m.hadAccess],
     );
-    return { id: rows[0].id, nuevo: true };
+    return { id: rows[0].id, nuevo: true, startedAt: desde };
   }
 
   /**
@@ -276,6 +276,39 @@ export class PersonsRepository {
     await client.query(
       `UPDATE persons SET photo = $2 WHERE id = $1 AND photo IS NULL`,
       [personId, photo],
+    );
+  }
+
+  /** Cualquier sitio de la organización, para poder anclar el paso del kiosco. */
+  async primerSitio(client: PoolClient): Promise<string | null> {
+    const { rows } = await client.query<{ id: string }>(
+      `SELECT id FROM sites ORDER BY created_at LIMIT 1`,
+    );
+    return rows[0]?.id ?? null;
+  }
+
+  /** El plano del lugar, tal como lo subió esta empresa. */
+  async plano(client: PoolClient): Promise<string | null> {
+    const { rows } = await client.query<{ image: string }>(
+      `SELECT image FROM floor_plans LIMIT 1`,
+    );
+    return rows[0]?.image ?? null;
+  }
+
+  /** Reemplaza el plano. Hay uno solo por empresa. */
+  async guardarPlano(
+    client: PoolClient,
+    organizationId: string,
+    image: string,
+    userId: string,
+  ): Promise<void> {
+    await client.query(
+      `INSERT INTO floor_plans (organization_id, image, updated_by, updated_at)
+       VALUES ($1, $2, $3, now())
+       ON CONFLICT (organization_id)
+       DO UPDATE SET image = EXCLUDED.image, updated_by = EXCLUDED.updated_by,
+                     updated_at = now()`,
+      [organizationId, image, userId],
     );
   }
 

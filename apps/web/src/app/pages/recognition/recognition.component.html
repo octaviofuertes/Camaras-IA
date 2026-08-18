@@ -16,7 +16,42 @@
     <button class="tab" [class.active]="modo === 'manual'" (click)="setModo('manual')">
       Cargar con fotos
     </button>
+    <button class="tab" [class.active]="modo === 'plano'" (click)="setModo('plano')">
+      Plano del lugar
+    </button>
   </nav>
+
+  <!-- ═══ El plano que ve la pantalla de bienvenida ════════════════ -->
+  <ng-container *ngIf="modo === 'plano'">
+    <section class="panel paso">
+      <div class="paso-cab">
+        <h2>Plano del lugar</h2>
+        <span class="paso-listo" *ngIf="plano">✓ cargado</span>
+      </div>
+      <p class="bloque-ayuda">
+        Es el fondo de la pantalla de bienvenida: cuando reconoce a alguien, ilumina en verde
+        la zona donde trabaja. Subí el plano de tu oficina —una imagen apaisada, con la misma
+        distribución que las zonas de más abajo.
+      </p>
+
+      <div class="plano-vista" [class.vacio]="!plano">
+        <img *ngIf="plano" [src]="plano" alt="Plano del lugar" />
+        <span *ngIf="!plano">Todavía no subiste ningún plano</span>
+      </div>
+
+      <div class="plano-acciones">
+        <label class="btn btn-primary">
+          {{ subiendoPlano ? 'Guardando…' : (plano ? 'Reemplazar plano' : 'Subir plano') }}
+          <input type="file" accept="image/*" hidden (change)="elegirPlano($event)" />
+        </label>
+        <span class="cierre-ayuda">
+          Las zonas se dibujan encima con esta distribución:
+          {{ zonas.length }} sectores (oficinas, sala de reuniones, recepción y pasillos).
+        </span>
+      </div>
+      <div class="error" *ngIf="errorPlano">{{ errorPlano }}</div>
+    </section>
+  </ng-container>
 
   <!-- ═══ 1. Personas registradas ══════════════════════════════════ -->
   <ng-container *ngIf="modo === 'registradas'">

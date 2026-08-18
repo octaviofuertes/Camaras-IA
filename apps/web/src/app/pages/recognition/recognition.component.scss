@@ -372,3 +372,25 @@
     &:focus { border-color: var(--accent); }
   }
 }
+
+/* ─── Plano del lugar ───────────────────────────────────────────── */
+.bloque-ayuda {
+  margin: -4px 0 14px; font-size: 12px; line-height: 1.6; color: var(--text-mute);
+  max-width: 78ch;
+}
+
+.plano-vista {
+  border-radius: var(--radius-sm); overflow: hidden;
+  background: var(--bg); display: grid; place-items: center;
+
+  img { width: 100%; display: block; }
+  &.vacio {
+    min-height: 190px; border: 1px dashed var(--border);
+    color: var(--text-mute); font-size: 12.5px;
+  }
+}
+
+.plano-acciones {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 13px;
+  .btn { cursor: pointer; }
+}

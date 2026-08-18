@@ -93,6 +93,10 @@
 
 .plano {
   width: 100%; max-height: 46vh; display: block;
+
+  /* Con el plano real de fondo conviene un poco más de alto: es una foto, no
+     un esquema de cajas. */
+  &.con-imagen { max-height: 52vh; }
 }
 
 .edificio {
@@ -103,6 +107,10 @@
   fill: rgba(255, 255, 255, .035);
   stroke: var(--border); stroke-width: 2;
   transition: fill .4s, stroke .4s;
+
+  /* Sobre el plano de la empresa las zonas desaparecen: lo que tiene que verse
+     es el dibujo, no una grilla encima. Sólo queda la que hay que encontrar. */
+  &.sobre-imagen { fill: transparent; stroke: transparent; }
 
   /* La zona de esta persona: verde, encendida y latiendo despacio, para que se
      encuentre desde lejos sin tener que leer los nombres. */
@@ -122,4 +130,19 @@
   font-family: inherit; pointer-events: none;
 
   &.suya { fill: #dcfce7; font-weight: 700; font-size: 30px; }
+
+  /* Igual que las zonas: sobre el plano, sólo se nombra la del saludo. */
+  &.sobre-imagen { fill: transparent; }
+  &.sobre-imagen.suya {
+    fill: #fff;
+    paint-order: stroke;
+    stroke: rgba(6, 45, 19, .85); stroke-width: 6px; stroke-linejoin: round;
+  }
+}
+
+/* La hora con que quedó anotada la entrada. Discreta: confirma, no grita. */
+.ingreso {
+  margin-top: 14px; font-size: 15px; letter-spacing: .2px;
+  color: rgba(255, 255, 255, .58);
+  strong { color: rgba(255, 255, 255, .9); font-variant-numeric: tabular-nums; }
 }

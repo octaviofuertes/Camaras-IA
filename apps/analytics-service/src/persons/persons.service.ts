@@ -90,6 +90,16 @@ export type TipoFoto = 'frontal' | 'perfil' | 'espalda';
  */
 const SALUDO_PARECIDO_MINIMO = 0.55;
 
+/**
+ * De dónde viene un paso registrado por la pantalla de bienvenida.
+ *
+ * `person_sightings` guarda de qué cámara vino cada paso, y la pantalla no es
+ * una cámara del sistema: es un punto de acceso. Se le da un identificador
+ * propio y fijo para que el registro diga la verdad —esta persona fue vista
+ * ACÁ— en vez de atribuirle su entrada a una cámara que no la vio.
+ */
+const CAMARA_DEL_KIOSCO = '00000000-0000-4000-c000-0000000c105c';
+
 export interface Reconocido {
   personId: string;
   displayName: string;
@@ -487,6 +497,23 @@ export class PersonsService {
     });
   }
 
+  /** El plano del lugar. Null si esta empresa todavía no subió ninguno. */
+  async plano(auth: AuthContext): Promise<{ image: string | null }> {
+    const image = await this.db.withTenant(auth.organizationId, (c) => this.repo.plano(c));
+    return { image };
+  }
+
+  /** Guarda el plano que subió un administrador. */
+  async guardarPlano(auth: AuthContext, image: string): Promise<void> {
+    if (!image?.startsWith('data:image/')) {
+      throw new BadRequestException('El plano tiene que ser una imagen');
+    }
+    await this.db.withTenant(auth.organizationId, (c) =>
+      this.repo.guardarPlano(c, auth.organizationId, image, auth.userId),
+    );
+    this.logger.log(`plano actualizado por ${auth.userId}`);
+  }
+
   /** Asigna la zona del plano donde trabaja una persona. */
   async cambiarZona(auth: AuthContext, personId: string, zona: string | null): Promise<void> {
     const ok = await this.db.withTenant(auth.organizationId, (c) =>
@@ -550,6 +577,40 @@ export class PersonsService {
       const segunda = porPersona[1];
       if (segunda && primera.parecido - segunda.parecido < 0.06) return null;
 
+      // Reconocer a alguien en la entrada ES su hora de llegada: si no queda
+      // registrada acá, el saludo sería lo único que pasó y el control de
+      // accesos no se enteraría de que la persona entró.
+      //
+      // Se apoya en la misma función que usa el pipeline, así que las llegadas
+      // seguidas —la pantalla pregunta cada segundo y medio— se unen en una
+      // sola visita en vez de dejar una fila por saludo.
+      let entrada: string | null = null;
+      try {
+        const sitio = await this.repo.primerSitio(c);
+        if (sitio) {
+          const ahora = Date.now() / 1000;
+          const paso = await this.repo.registrarPaso(c, {
+            organizationId: auth.organizationId,
+            siteId: sitio,
+            cameraId: CAMARA_DEL_KIOSCO,
+            personId: primera.p.id,
+            from: ahora,
+            to: ahora,
+            bestScore: primera.parecido,
+            seenByFace: true,
+            hadAccess: primera.p.hasAccess,
+          });
+          // La hora que se muestra es la del REGISTRO, no la de este saludo: si
+          // la persona ya había entrado hace un rato y vuelve a pasar por la
+          // pantalla, lo que corresponde mostrar es cuándo llegó.
+          entrada = paso.startedAt;
+        }
+      } catch (err) {
+        // Que falle el registro no puede dejar a alguien sin su saludo: la
+        // pantalla sigue funcionando y el problema queda en el log.
+        this.logger.warn(`no se pudo registrar la llegada de ${primera.p.id}: ${err}`);
+      }
+
       return {
         personId: primera.p.id,
         displayName: primera.p.displayName,
@@ -557,6 +618,7 @@ export class PersonsService {
         hasAccess: primera.p.hasAccess,
         workZone: primera.p.workZone,
         parecido: Math.round(primera.parecido * 1000) / 1000,
+        entrada,
       };
     });
   }

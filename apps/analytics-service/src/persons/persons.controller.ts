@@ -216,6 +216,27 @@ export class PersonsController {
     return { reconocido: r };
   }
 
+  /**
+   * El plano del lugar.
+   *
+   * Lo lee también la pantalla de bienvenida, así que alcanza con el permiso
+   * del kiosco: es el dibujo de la planta, no un dato de nadie.
+   */
+  @Get('floorplan')
+  @RequirePermissions('kiosk:identify')
+  async verPlano(@Req() req: Request) {
+    return this.persons.plano(req.auth as AuthContext);
+  }
+
+  /** Sube o reemplaza el plano. Sólo quien administra. */
+  @Post('floorplan')
+  @RequirePermissions('persons:write')
+  async subirPlano(@Req() req: Request, @Body() body: { image?: string }) {
+    if (!body?.image) throw new BadRequestException('Falta la imagen del plano');
+    await this.persons.guardarPlano(req.auth as AuthContext, body.image);
+    return { ok: true };
+  }
+
   /** Reporte de presencia del pipeline: quién está en el cuadro ahora. */
   @Post('presence')
   @RequirePermissions('events:ingest')
