@@ -6,7 +6,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { DatabaseService } from '../db/database.service';
-import { PersonsRepository, type PersonaDto, type ZonaEntrada, type ZonaFila } from './persons.repository';
+import {
+  PersonsRepository,
+  type PersonaDto,
+  type PisoFila,
+  type ZonaEntrada,
+  type ZonaFila,
+} from './persons.repository';
 import type { AuthContext } from '../auth/auth.types';
 
 export interface AltaConRostro {
@@ -500,14 +506,70 @@ export class PersonsService {
   }
 
   /** El plano del lugar. Null si esta empresa todavía no subió ninguno. */
-  async plano(auth: AuthContext): Promise<{ image: string | null; ancho: number | null; alto: number | null }> {
-    const f = await this.db.withTenant(auth.organizationId, (c) => this.repo.plano(c));
-    return { image: f?.image ?? null, ancho: f?.ancho ?? null, alto: f?.alto ?? null };
+  /**
+   * El lugar entero: sus pisos, cada uno con su plano y sus bloques.
+   *
+   * Viene todo junto porque es una sola cosa: un piso sin sus bloques no se
+   * puede dibujar, y un bloque sin su piso no se sabe dónde va.
+   */
+  async zonas(auth: AuthContext): Promise<{
+    pisos: (PisoFila & { zonas: (ZonaFila & { personas: number })[] })[];
+  }> {
+    return this.db.withTenant(auth.organizationId, async (c) => {
+      const [pisos, filas, gente] = await Promise.all([
+        this.repo.pisos(c),
+        this.repo.zonas(c),
+        this.repo.personasPorZona(c),
+      ]);
+      return {
+        pisos: pisos.map((f) => ({
+          ...f,
+          // Cuánta gente hay en cada bloque viaja con el bloque porque es lo
+          // que decide si se puede borrar, y la pantalla lo necesita ANTES de
+          // que alguien apriete borrar.
+          zonas: filas
+            .filter((z) => z.floorId === f.id)
+            .map((z) => ({ ...z, personas: gente[z.key] ?? 0 })),
+        })),
+      };
+    });
   }
 
-  /** Guarda el plano que subió un administrador. */
+  /** Agrega un piso. Nace vacío: el plano se sube después. */
+  async crearPiso(auth: AuthContext, name: string): Promise<PisoFila> {
+    const nombre = String(name ?? '').trim();
+    if (!nombre) throw new BadRequestException('El piso necesita un nombre');
+    if (nombre.length > 60) throw new BadRequestException('El nombre del piso es demasiado largo');
+    return this.db.withTenant(auth.organizationId, async (c) => {
+      const previos = await this.repo.pisos(c);
+      if (previos.some((f) => f.name.toLowerCase() === nombre.toLowerCase())) {
+        throw new BadRequestException(`Ya hay un piso que se llama "${nombre}"`);
+      }
+      if (previos.length >= 40) throw new BadRequestException('Demasiados pisos');
+      const orden = previos.reduce((max, f) => Math.max(max, f.orden), -1) + 1;
+      return this.repo.crearPiso(c, auth.organizationId, nombre, orden, auth.userId);
+    });
+  }
+
+  /** Cambia el nombre o la posición de un piso en la lista. */
+  async renombrarPiso(
+    auth: AuthContext,
+    floorId: string,
+    name: string,
+    orden: number,
+  ): Promise<void> {
+    const nombre = String(name ?? '').trim();
+    if (!nombre) throw new BadRequestException('El piso necesita un nombre');
+    const ok = await this.db.withTenant(auth.organizationId, (c) =>
+      this.repo.renombrarPiso(c, floorId, nombre, Number.isFinite(orden) ? orden : 0),
+    );
+    if (!ok) throw new NotFoundException('Piso no encontrado');
+  }
+
+  /** Sube o reemplaza el plano de un piso. */
   async guardarPlano(
     auth: AuthContext,
+    floorId: string,
     image: string,
     ancho?: number | null,
     alto?: number | null,
@@ -515,53 +577,60 @@ export class PersonsService {
     if (!image?.startsWith('data:image/')) {
       throw new BadRequestException('El plano tiene que ser una imagen');
     }
-    await this.db.withTenant(auth.organizationId, (c) =>
-      this.repo.guardarPlano(c, auth.organizationId, image, auth.userId, ancho ?? null, alto ?? null),
+    const ok = await this.db.withTenant(auth.organizationId, (c) =>
+      this.repo.guardarPlanoDePiso(c, floorId, image, ancho ?? null, alto ?? null, auth.userId),
     );
-    this.logger.log(`plano actualizado por ${auth.userId}`);
+    if (!ok) throw new NotFoundException('Piso no encontrado');
+    this.logger.log(`plano del piso ${floorId} actualizado por ${auth.userId}`);
   }
 
-  // ── Los bloques del plano ────────────────────────────────────────────
-
-  /** El plano dibujado: la imagen de fondo y los bloques, con su gente. */
-  async zonas(auth: AuthContext): Promise<{
-    plano: { image: string | null; ancho: number | null; alto: number | null };
-    zonas: (ZonaFila & { personas: number })[];
-  }> {
-    return this.db.withTenant(auth.organizationId, async (c) => {
-      const [f, filas, gente] = await Promise.all([
-        this.repo.plano(c),
+  /**
+   * Borra un piso.
+   *
+   * Se lleva sus bloques por cascada, así que primero hay que sacar a la gente
+   * que trabaja en ellos: borrar un piso no puede vaciarle la zona a nadie sin
+   * avisar.
+   */
+  async borrarPiso(auth: AuthContext, floorId: string): Promise<void> {
+    await this.db.withTenant(auth.organizationId, async (c) => {
+      const [zonas, gente] = await Promise.all([
         this.repo.zonas(c),
         this.repo.personasPorZona(c),
       ]);
-      return {
-        plano: { image: f?.image ?? null, ancho: f?.ancho ?? null, alto: f?.alto ?? null },
-        // Cuánta gente hay en cada bloque viaja con el bloque porque es lo que
-        // decide si se puede borrar, y la pantalla necesita saberlo ANTES de
-        // que alguien apriete borrar.
-        zonas: filas.map((z) => ({ ...z, personas: gente[z.key] ?? 0 })),
-      };
+      const conGente = zonas
+        .filter((z) => z.floorId === floorId && (gente[z.key] ?? 0) > 0)
+        .map((z) => `${z.name} (${gente[z.key]})`);
+      if (conGente.length) {
+        throw new BadRequestException(
+          `No se puede borrar el piso: hay personas asignadas en ${conGente.join(', ')}. ` +
+            'Cambiales la zona desde Reconocimiento y volvé a intentar.',
+        );
+      }
+      const ok = await this.repo.borrarPiso(c, floorId);
+      if (!ok) throw new NotFoundException('Piso no encontrado');
+      this.logger.log(`piso ${floorId} borrado por ${auth.userId}`);
     });
   }
 
   /**
-   * Guarda el plano dibujado.
+   * Guarda los bloques de todos los pisos.
    *
    * Borrar un bloque que tiene gente asignada se rechaza en vez de vaciarle la
-   * zona a esa gente en silencio. Alguien que arrastra bloques en una pantalla
-   * no está pensando en el padrón de empleados, y una asignación que
-   * desaparece sola no se nota hasta que la pantalla de bienvenida deja de
-   * mostrarle a alguien dónde le toca.
+   * zona a esa gente en silencio. Alguien que marca áreas sobre un plano no
+   * está pensando en el padrón de empleados, y una asignación que desaparece
+   * sola no se nota hasta que la pantalla de bienvenida deja de mostrarle a
+   * alguien dónde le toca.
    */
   async guardarZonas(auth: AuthContext, zonas: ZonaEntrada[]): Promise<{ ok: true }> {
     if (!Array.isArray(zonas)) throw new BadRequestException('Faltan las zonas');
-    if (zonas.length > 200) throw new BadRequestException('Demasiadas zonas (máximo 200)');
+    if (zonas.length > 400) throw new BadRequestException('Demasiadas zonas (máximo 400)');
 
     const claves = new Set<string>();
     for (const z of zonas) {
       const key = String(z?.key ?? '').trim();
       const name = String(z?.name ?? '').trim();
       if (!key || !name) throw new BadRequestException('Cada bloque necesita nombre');
+      if (!z?.floorId) throw new BadRequestException(`El bloque "${name}" no tiene piso`);
       if (claves.has(key)) throw new BadRequestException(`Hay dos bloques con la clave "${key}"`);
       claves.add(key);
       if (!['oficina', 'pasillo', 'otro'].includes(z.kind)) {

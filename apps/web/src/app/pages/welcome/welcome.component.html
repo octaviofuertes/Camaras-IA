@@ -70,9 +70,10 @@
       </div>
     </div>
 
-    <!-- El plano, con su zona iluminada -->
+    <!-- El plano del piso donde trabaja, con su área iluminada -->
     <div class="plano-caja">
-      <svg class="plano" [class.con-imagen]="!!plano.image"
+      <div class="piso-nombre" *ngIf="piso as f">{{ f.nombre }}</div>
+      <svg class="plano" [class.con-imagen]="!!piso?.image"
            [attr.viewBox]="'0 0 ' + ancho + ' ' + alto"
            preserveAspectRatio="xMidYMid meet">
         <!-- El plano de la empresa, si lo subió. Los bloques se dibujan encima.
@@ -80,20 +81,20 @@
              proporción de la imagen (sale de su tamaño real), así que estirar
              a la caja es exacto, y "meet" volvería a encajarla dejando franjas
              que correrían los bloques respecto de lo que se ve. -->
-        <image *ngIf="plano.image" [attr.href]="plano.image" x="0" y="0"
+        <image *ngIf="piso?.image" [attr.href]="piso!.image" x="0" y="0"
                [attr.width]="ancho" [attr.height]="alto"
                preserveAspectRatio="none" />
 
         <!-- Sin plano cargado se dibuja el contorno, para que los bloques no
              queden flotando en el vacío mientras alguien sube la imagen. -->
-        <rect class="edificio" *ngIf="!plano.image" x="8" y="8" [attr.width]="ancho - 16"
+        <rect class="edificio" *ngIf="!piso?.image" x="8" y="8" [attr.width]="ancho - 16"
               [attr.height]="alto - 16" rx="10" />
 
-        <g *ngFor="let z of zonas">
-          <rect class="zona" [class.suya]="esSuZona(z)" [class.sobre-imagen]="!!plano.image"
+        <g *ngFor="let z of piso?.zonas || []">
+          <rect class="zona" [class.suya]="esSuZona(z)" [class.sobre-imagen]="!!piso?.image"
                 [attr.x]="px(z.x)" [attr.y]="py(z.y)"
                 [attr.width]="px(z.w)" [attr.height]="py(z.h)" rx="6" />
-          <text class="etiqueta" [class.suya]="esSuZona(z)" [class.sobre-imagen]="!!plano.image"
+          <text class="etiqueta" [class.suya]="esSuZona(z)" [class.sobre-imagen]="!!piso?.image"
                 [attr.x]="px(z.x) + px(z.w) / 2" [attr.y]="py(z.y) + py(z.h) / 2"
                 text-anchor="middle" dominant-baseline="middle">
             {{ z.nombre }}

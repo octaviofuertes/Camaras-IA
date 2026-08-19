@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, OnInit, Output, inject } from '@angular/core';
+import { Component, EventEmitter, OnInit, Output, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { CamerasService, type ApiCamera } from '../../core/cameras.service';
@@ -8,30 +8,38 @@ import {
   TIPOS,
   altoLienzo,
   claveDesde,
-  type Plano,
+  type Piso,
   type TipoZona,
   type Zona,
 } from '../../core/zonas';
 
 /** Qué se está haciendo con el mouse apretado. */
 type Gesto =
-  | { que: 'dibujar'; x0: number; y0: number }
+  | { que: 'marcar'; x0: number; y0: number }
   | { que: 'mover'; i: number; dx: number; dy: number }
   | { que: 'estirar'; i: number }
   | null;
 
-/** Cuánto tiene que medir un arrastre para contar como bloque, en fracción. */
+/** Cuánto tiene que medir un arrastre para contar como área, en fracción. */
 const MINIMO = 0.02;
+
+/** Lo más grande que se acepta subir, ya achicada. */
+const ANCHO_MAXIMO = 2000;
 
 /**
  * El editor del plano del lugar.
  *
- * Tres gestos y nada más: arrastrar sobre el vacío dibuja un bloque, arrastrar
- * un bloque lo mueve, arrastrar su esquina lo agranda. Es una pantalla que se
- * usa una vez —cuando se configura el lugar— y después casi nunca, así que no
- * paga tener rotación, formas libres ni deshacer.
+ * El plano NO se dibuja: se sube. Cada piso tiene su imagen —el render, el
+ * plano del arquitecto, una foto del plano impreso— y lo único que se hace
+ * encima es marcar con un rectángulo dónde queda cada área y cómo se llama.
  *
- * Se dibuja en SVG y no en canvas porque la pantalla de bienvenida ya dibuja
+ * Dibujar el edificio a mano funcionaba mientras el lugar era una sola planta.
+ * Con un subsuelo y dos pisos deja de funcionar: no hay forma de dibujar tres
+ * plantas distintas sobre un mismo lienzo sin mentir sobre dónde está cada
+ * cosa, y nadie va a redibujar a mano un edificio que ya está dibujado en un
+ * plano que tiene guardado.
+ *
+ * Se marca en SVG y no en canvas porque la pantalla de bienvenida ya dibuja
  * exactamente esto en SVG: con canvas habría que escribir un segundo dibujante
  * y resolver a mano qué rectángulo está debajo del mouse, que es justo lo que
  * el navegador ya hace solo.
@@ -48,22 +56,27 @@ export class PlanoEditorComponent implements OnInit {
   private readonly camarasApi = inject(CamerasService);
 
   /** Avisa cuando se guardó, para que el resto de la pantalla se entere. */
-  @Output() guardado = new EventEmitter<Zona[]>();
+  @Output() guardado = new EventEmitter<Piso[]>();
 
   readonly tipos = TIPOS;
   readonly ancho = LIENZO;
 
-  plano: Plano = { image: null, ancho: null, alto: null };
-  zonas: Zona[] = [];
+  pisos: Piso[] = [];
   camaras: ApiCamera[] = [];
+  /** Qué piso se está mirando. */
+  pisoActual = 0;
   seleccionada: number | null = null;
 
   cargando = true;
   guardando = false;
+  subiendo = false;
   error: string | null = null;
   aviso: string | null = null;
-  /** Hay cambios sin guardar. */
+  /** Hay marcas sin guardar. */
   sucio = false;
+  /** Se está pidiendo el nombre de un piso nuevo. */
+  agregandoPiso = false;
+  nombrePiso = '';
 
   private gesto: Gesto = null;
 
@@ -73,25 +86,126 @@ export class PlanoEditorComponent implements OnInit {
 
   private cargar(): void {
     this.cargando = true;
-    this.api.cargar().subscribe((r) => {
-      this.plano = r.plano;
-      this.zonas = r.zonas;
+    this.api.cargar().subscribe((pisos) => {
+      this.pisos = pisos;
+      if (this.pisoActual >= pisos.length) this.pisoActual = Math.max(0, pisos.length - 1);
       this.cargando = false;
       this.sucio = false;
+      this.seleccionada = null;
     });
     this.camarasApi.listCameras().subscribe((c) => (this.camaras = c ?? []));
   }
 
+  // ── el piso que se está mirando ────────────────────────────────────
+  get piso(): Piso | null {
+    return this.pisos[this.pisoActual] ?? null;
+  }
+
+  get zonas(): Zona[] {
+    return this.piso?.zonas ?? [];
+  }
+
   get alto(): number {
-    return altoLienzo(this.plano);
+    return altoLienzo(this.piso);
   }
 
-  /** El bloque que está seleccionado, si hay alguno. */
-  get actual(): Zona | null {
-    return this.seleccionada === null ? null : this.zonas[this.seleccionada] ?? null;
+  verPiso(i: number): void {
+    this.pisoActual = i;
+    this.seleccionada = null;
+    this.error = null;
   }
 
-  // ── dibujar, mover, estirar ────────────────────────────────────────
+  // ── pisos ──────────────────────────────────────────────────────────
+
+  agregarPiso(): void {
+    const nombre = this.nombrePiso.trim();
+    if (!nombre) return;
+    this.api.crearPiso(nombre).subscribe((r) => {
+      if (!r.ok) {
+        this.error = r.motivo ?? 'No se pudo agregar el piso';
+        return;
+      }
+      this.agregandoPiso = false;
+      this.nombrePiso = '';
+      this.error = null;
+      this.aviso = `Piso "${nombre}" agregado. Subile su plano.`;
+      this.api.cargar().subscribe((pisos) => {
+        this.pisos = pisos;
+        this.pisoActual = pisos.findIndex((p) => p.id === r.id);
+        if (this.pisoActual < 0) this.pisoActual = pisos.length - 1;
+      });
+    });
+  }
+
+  renombrarPiso(i: number, valor: string): void {
+    const p = this.pisos[i];
+    const nombre = valor.trim();
+    if (!nombre || nombre === p.nombre) return;
+    this.api.renombrarPiso(p.id, nombre, p.orden).subscribe((ok) => {
+      if (ok) p.nombre = nombre;
+      else this.error = 'No se pudo renombrar el piso';
+    });
+  }
+
+  borrarPiso(i: number): void {
+    const p = this.pisos[i];
+    this.api.borrarPiso(p.id).subscribe((r) => {
+      if (!r.ok) {
+        this.error = r.motivo ?? 'No se pudo borrar el piso';
+        return;
+      }
+      this.error = null;
+      this.aviso = `Piso "${p.nombre}" borrado`;
+      this.cargar();
+    });
+  }
+
+  // ── el plano de fondo ──────────────────────────────────────────────
+
+  elegirImagen(ev: Event): void {
+    const input = ev.target as HTMLInputElement;
+    const file = input.files?.[0];
+    const piso = this.piso;
+    if (!file || !piso) return;
+    this.error = null;
+
+    const lector = new FileReader();
+    lector.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        // Se achica antes de subirla y se mide después: lo que se guarda es el
+        // tamaño de lo que se va a dibujar, no el del archivo original. Si no
+        // coincidieran, la proporción del lienzo mentiría.
+        const escala = Math.min(1, ANCHO_MAXIMO / img.naturalWidth);
+        const w = Math.round(img.naturalWidth * escala);
+        const h = Math.round(img.naturalHeight * escala);
+        const lienzo = document.createElement('canvas');
+        lienzo.width = w;
+        lienzo.height = h;
+        lienzo.getContext('2d')?.drawImage(img, 0, 0, w, h);
+        const chica = lienzo.toDataURL('image/jpeg', 0.88);
+
+        this.subiendo = true;
+        this.api.subirPlano(piso.id, chica, w, h).subscribe((r) => {
+          this.subiendo = false;
+          if (!r.ok) {
+            this.error = r.motivo ?? 'No se pudo subir el plano';
+            return;
+          }
+          piso.image = chica;
+          piso.ancho = w;
+          piso.alto = h;
+          this.aviso = `Plano de "${piso.nombre}" cargado`;
+        });
+      };
+      img.onerror = () => (this.error = 'No se pudo leer esa imagen');
+      img.src = String(lector.result);
+    };
+    lector.readAsDataURL(file);
+    input.value = '';
+  }
+
+  // ── marcar, mover, estirar ─────────────────────────────────────────
 
   /**
    * Dónde cayó el mouse, en fracciones del plano.
@@ -101,7 +215,8 @@ export class PlanoEditorComponent implements OnInit {
    * pantalla no es una unidad de dibujo.
    */
   private punto(ev: PointerEvent): { x: number; y: number } {
-    const svg = (ev.currentTarget as SVGSVGElement).closest('svg') ?? (ev.currentTarget as SVGSVGElement);
+    const destino = ev.currentTarget as SVGElement;
+    const svg = (destino.closest('svg') ?? destino) as SVGSVGElement;
     const caja = svg.getBoundingClientRect();
     return {
       x: Math.min(1, Math.max(0, (ev.clientX - caja.left) / caja.width)),
@@ -110,44 +225,53 @@ export class PlanoEditorComponent implements OnInit {
   }
 
   alBajar(ev: PointerEvent, i?: number, esquina = false): void {
+    const piso = this.piso;
+    // Sin plano no se marca nada: no hay sobre qué. El recuadro vacío es una
+    // invitación a subirlo, no un lienzo para dibujar el edificio a mano.
+    if (!piso?.image) return;
+
     ev.preventDefault();
     (ev.currentTarget as Element).setPointerCapture?.(ev.pointerId);
     const p = this.punto(ev);
 
     if (i === undefined) {
       this.seleccionada = null;
-      this.gesto = { que: 'dibujar', x0: p.x, y0: p.y };
-      // El bloque en construcción se dibuja como uno más: así se ve dónde va a
+      this.gesto = { que: 'marcar', x0: p.x, y0: p.y };
+      // El área en construcción se dibuja como una más: así se ve dónde va a
       // quedar mientras se arrastra, en vez de aparecer al soltar.
-      this.zonas = [...this.zonas, { clave: '', nombre: '', tipo: 'oficina', x: p.x, y: p.y, w: 0, h: 0 }];
-      this.seleccionada = this.zonas.length - 1;
+      piso.zonas = [
+        ...piso.zonas,
+        { pisoId: piso.id, clave: '', nombre: '', tipo: 'oficina', x: p.x, y: p.y, w: 0, h: 0 },
+      ];
+      this.seleccionada = piso.zonas.length - 1;
       return;
     }
 
     this.seleccionada = i;
-    const z = this.zonas[i];
+    const z = piso.zonas[i];
     this.gesto = esquina ? { que: 'estirar', i } : { que: 'mover', i, dx: p.x - z.x, dy: p.y - z.y };
   }
 
   alMover(ev: PointerEvent): void {
-    if (!this.gesto) return;
+    const piso = this.piso;
+    if (!this.gesto || !piso) return;
     const p = this.punto(ev);
     const g = this.gesto;
 
-    if (g.que === 'dibujar') {
-      const z = this.zonas[this.zonas.length - 1];
+    if (g.que === 'marcar') {
+      const z = piso.zonas[piso.zonas.length - 1];
       z.x = Math.min(g.x0, p.x);
       z.y = Math.min(g.y0, p.y);
       z.w = Math.abs(p.x - g.x0);
       z.h = Math.abs(p.y - g.y0);
     } else if (g.que === 'mover') {
-      const z = this.zonas[g.i];
-      // Se frena en el borde en vez de dejarlo salir: la base rechaza un
-      // bloque fuera del plano, y enterarse al guardar es tarde.
+      const z = piso.zonas[g.i];
+      // Se frena en el borde en vez de dejarlo salir: la base rechaza un área
+      // fuera del plano, y enterarse al guardar es tarde.
       z.x = Math.min(1 - z.w, Math.max(0, p.x - g.dx));
       z.y = Math.min(1 - z.h, Math.max(0, p.y - g.dy));
     } else {
-      const z = this.zonas[g.i];
+      const z = piso.zonas[g.i];
       z.w = Math.min(1 - z.x, Math.max(MINIMO, p.x - z.x));
       z.h = Math.min(1 - z.y, Math.max(MINIMO, p.y - z.y));
     }
@@ -156,20 +280,22 @@ export class PlanoEditorComponent implements OnInit {
 
   alSoltar(): void {
     const g = this.gesto;
+    const piso = this.piso;
     this.gesto = null;
-    if (g?.que !== 'dibujar') return;
+    if (g?.que !== 'marcar' || !piso) return;
 
-    const z = this.zonas[this.zonas.length - 1];
-    // Un clic suelto no es un bloque: sin esto, cada vez que alguien toca el
+    const z = piso.zonas[piso.zonas.length - 1];
+    // Un clic suelto no es un área: sin esto, cada vez que alguien toca el
     // plano para deseleccionar quedaba un rectángulo invisible.
     if (z.w < MINIMO || z.h < MINIMO) {
-      this.zonas = this.zonas.slice(0, -1);
+      piso.zonas = piso.zonas.slice(0, -1);
       this.seleccionada = null;
       return;
     }
-    const tomadas = new Set(this.zonas.map((q) => q.clave).filter(Boolean));
-    const n = this.zonas.length;
-    z.nombre = `Bloque ${n}`;
+    // La clave es única en todo el lugar, no por piso: las personas guardan
+    // sólo la clave, así que dos pisos con la misma se pisarían.
+    const tomadas = new Set(this.pisos.flatMap((f) => f.zonas.map((q) => q.clave)).filter(Boolean));
+    z.nombre = `Área ${piso.zonas.length}`;
     z.clave = claveDesde(z.nombre, tomadas);
     this.sucio = true;
   }
@@ -189,44 +315,27 @@ export class PlanoEditorComponent implements OnInit {
   }
 
   borrar(i: number): void {
-    const z = this.zonas[i];
+    const piso = this.piso;
+    if (!piso) return;
+    const z = piso.zonas[i];
     if (z.personas) {
       this.error =
         `"${z.nombre}" tiene ${z.personas} persona(s) asignada(s). ` +
         'Cambiales la zona desde Reconocimiento y volvé a intentar.';
       return;
     }
-    this.zonas = this.zonas.filter((_, k) => k !== i);
+    piso.zonas = piso.zonas.filter((_, k) => k !== i);
     this.seleccionada = null;
     this.error = null;
     this.sucio = true;
   }
 
-  // ── el fondo ───────────────────────────────────────────────────────
-
-  elegirImagen(ev: Event): void {
-    const input = ev.target as HTMLInputElement;
-    const file = input.files?.[0];
-    if (!file) return;
-    const lector = new FileReader();
-    lector.onload = () => {
-      const src = String(lector.result);
-      // Se mide la imagen antes de subirla: su proporción es la del plano, y
-      // sin ella habría que suponer una y deformar todo lo que se dibuje.
-      const img = new Image();
-      img.onload = () => {
-        this.api.subirPlano(src, img.naturalWidth, img.naturalHeight).subscribe((ok) => {
-          if (ok) this.plano = { image: src, ancho: img.naturalWidth, alto: img.naturalHeight };
-          else this.error = 'No se pudo guardar la imagen del plano';
-        });
-      };
-      img.src = src;
-    };
-    lector.readAsDataURL(file);
-    input.value = '';
-  }
-
   // ── las cámaras ────────────────────────────────────────────────────
+
+  /** Todas las áreas del lugar, con su piso, para el selector de cámaras. */
+  get todasLasZonas(): { piso: string; zonas: Zona[] }[] {
+    return this.pisos.filter((p) => p.zonas.length).map((p) => ({ piso: p.nombre, zonas: p.zonas }));
+  }
 
   camaraEnZona(c: ApiCamera): string {
     return c.floorZoneId ?? '';
@@ -240,38 +349,33 @@ export class PlanoEditorComponent implements OnInit {
         return;
       }
       c.floorZoneId = id;
-      this.aviso = id
-        ? `"${c.name}" quedó en ${this.zonas.find((z) => z.id === id)?.nombre ?? 'esa zona'}`
-        : `"${c.name}" ya no tiene zona`;
+      const donde = this.pisos.flatMap((p) => p.zonas).find((z) => z.id === id);
+      this.aviso = donde ? `"${c.name}" quedó en ${donde.nombre}` : `"${c.name}" ya no tiene zona`;
     });
-  }
-
-  /** Nombre del bloque donde está una cámara, para el resumen. */
-  nombreDeZona(id: string | null): string | null {
-    return id ? this.zonas.find((z) => z.id === id)?.nombre ?? null : null;
   }
 
   // ── guardar ────────────────────────────────────────────────────────
 
   guardar(): void {
     if (this.guardando) return;
-    const sinNombre = this.zonas.find((z) => !z.nombre.trim());
+    const sinNombre = this.pisos.flatMap((p) => p.zonas).find((z) => !z.nombre.trim());
     if (sinNombre) {
-      this.error = 'Hay un bloque sin nombre. Todos tienen que llamarse de alguna forma.';
+      this.error = 'Hay un área sin nombre. Todas tienen que llamarse de alguna forma.';
       return;
     }
     this.guardando = true;
     this.error = null;
-    this.api.guardar(this.zonas).subscribe((r) => {
+    this.api.guardar(this.pisos).subscribe((r) => {
       this.guardando = false;
       if (!r.ok) {
         this.error = r.motivo ?? 'No se pudo guardar';
         return;
       }
       this.sucio = false;
-      this.aviso = `Plano guardado: ${this.zonas.length} bloque(s)`;
-      this.guardado.emit(this.zonas);
-      // Se recarga para traer los ids de los bloques nuevos, que es lo que
+      const n = this.pisos.reduce((s, p) => s + p.zonas.length, 0);
+      this.aviso = `Guardado: ${n} área(s) en ${this.pisos.length} piso(s)`;
+      this.guardado.emit(this.pisos);
+      // Se recarga para traer los ids de las áreas nuevas, que es lo que
       // necesita el selector de cámaras para poder apuntarles.
       this.cargar();
     });

@@ -249,23 +249,6 @@ export class PersonsController {
    * Lo lee también la pantalla de bienvenida, así que alcanza con el permiso
    * del kiosco: es el dibujo de la planta, no un dato de nadie.
    */
-  @Get('floorplan')
-  @RequirePermissions('kiosk:identify')
-  async verPlano(@Req() req: Request) {
-    return this.persons.plano(req.auth as AuthContext);
-  }
-
-  /** Sube o reemplaza el plano. Sólo quien administra. */
-  @Post('floorplan')
-  @RequirePermissions('persons:write')
-  async subirPlano(
-    @Req() req: Request,
-    @Body() body: { image?: string; ancho?: number; alto?: number },
-  ) {
-    if (!body?.image) throw new BadRequestException('Falta la imagen del plano');
-    await this.persons.guardarPlano(req.auth as AuthContext, body.image, body.ancho, body.alto);
-    return { ok: true };
-  }
 
   /** Reporte de presencia del pipeline: quién está en el cuadro ahora. */
   @Post('presence')
@@ -291,12 +274,12 @@ export class PersonsController {
    * y cuanta menos gente lo alcance, mejor.
    */
   /**
-   * El plano dibujado: la imagen de fondo y los bloques con su gente.
+   * El lugar entero: sus pisos, sus planos y los bloques de cada uno.
    *
    * Lo pide tanto el editor como la pantalla de bienvenida, y ésta corre con
    * el token del kiosco: por eso `kiosk:identify` y no `persons:read`. Lo que
-   * devuelve —nombres de oficinas y cuánta gente hay en cada una— es el plano
-   * del lugar, no datos de nadie en particular.
+   * devuelve —nombres de pisos y de áreas— es el plano del lugar, no datos de
+   * nadie en particular.
    */
   @Get('zones')
   @RequirePermissions('kiosk:identify')
@@ -304,12 +287,57 @@ export class PersonsController {
     return this.persons.zonas(req.auth as AuthContext);
   }
 
-  /** Guarda el plano entero tal como quedó dibujado. */
+  /** Guarda los bloques marcados sobre los planos. */
   @Post('zones')
   @RequirePermissions('persons:write')
   async guardarZonas(@Req() req: Request, @Body() body: { zonas?: unknown }) {
     if (!Array.isArray(body?.zonas)) throw new BadRequestException('Faltan las zonas');
     return this.persons.guardarZonas(req.auth as AuthContext, body.zonas as never);
+  }
+
+  /** Agrega un piso: subsuelo, planta baja, entrepiso, lo que sea. */
+  @Post('floors')
+  @RequirePermissions('persons:write')
+  async crearPiso(@Req() req: Request, @Body() body: { name?: string }) {
+    return this.persons.crearPiso(req.auth as AuthContext, String(body?.name ?? ''));
+  }
+
+  /** Le cambia el nombre a un piso, o su lugar en la lista. */
+  @Post('floors/:id')
+  @RequirePermissions('persons:write')
+  async renombrarPiso(
+    @Req() req: Request,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: { name?: string; orden?: number },
+  ) {
+    await this.persons.renombrarPiso(
+      req.auth as AuthContext,
+      id,
+      String(body?.name ?? ''),
+      Number(body?.orden ?? 0),
+    );
+    return { ok: true };
+  }
+
+  /** Sube o reemplaza el plano de un piso. */
+  @Post('floors/:id/plan')
+  @RequirePermissions('persons:write')
+  async subirPlano(
+    @Req() req: Request,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: { image?: string; ancho?: number; alto?: number },
+  ) {
+    if (!body?.image) throw new BadRequestException('Falta la imagen del plano');
+    await this.persons.guardarPlano(req.auth as AuthContext, id, body.image, body.ancho, body.alto);
+    return { ok: true };
+  }
+
+  /** Borra un piso con todo lo que tenga marcado encima. */
+  @Delete('floors/:id')
+  @RequirePermissions('persons:write')
+  async borrarPiso(@Req() req: Request, @Param('id', new ParseUUIDPipe()) id: string) {
+    await this.persons.borrarPiso(req.auth as AuthContext, id);
+    return { ok: true };
   }
 
   @Get('report/access')

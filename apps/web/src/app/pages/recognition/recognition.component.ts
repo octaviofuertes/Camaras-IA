@@ -9,11 +9,11 @@ import {
   type TipoFoto,
 } from '../../core/recognition.service';
 import { EventsService } from '../../core/events.service';
-import type { Zona } from '../../core/zonas';
+import type { Piso, Zona } from '../../core/zonas';
 import { ZonasService } from '../../core/zonas.service';
 import type { EventItem } from '../../core/models';
 
-type Modo = 'registradas' | 'detectadas' | 'manual' | 'plano';
+type Modo = 'registradas' | 'detectadas' | 'manual';
 
 /** Las tres fotos que se piden, con qué aporta cada una. */
 interface RanuraFoto {
@@ -38,8 +38,8 @@ export class RecognitionComponent implements OnInit, OnDestroy {
   private readonly eventos = inject(EventsService);
 
   modo: Modo = 'registradas';
-  /** Los bloques que dibujó la empresa en Accesos → Plano y zonas. */
-  zonas: Zona[] = [];
+  /** Los pisos con sus áreas, para el selector "Trabaja en". */
+  pisos: Piso[] = [];
 
   // ── automático ─────────────────────────────────────────────────────
   /** Caras que la cámara detectó y el sistema no conoce. */
@@ -90,37 +90,9 @@ export class RecognitionComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.cargarPendientes();
     this.cargarPersonas();
-    this.api.plano().subscribe((p) => (this.plano = p));
-    this.zonasApi.cargar().subscribe((r) => (this.zonas = r.zonas));
+    this.zonasApi.cargar().subscribe((p) => (this.pisos = p));
   }
 
-  /** El plano del lugar: es el fondo de la pantalla de bienvenida. */
-  plano: string | null = null;
-  subiendoPlano = false;
-  errorPlano: string | null = null;
-
-  elegirPlano(ev: Event): void {
-    const input = ev.target as HTMLInputElement;
-    const file = input.files?.[0];
-    if (!file) return;
-    this.errorPlano = null;
-
-    const lector = new FileReader();
-    lector.onload = () => {
-      // Se achica antes de guardarla: un plano es una imagen grande y acá sólo
-      // se usa como fondo de una pantalla.
-      void achicar(String(lector.result), 1536).then((img) => {
-        this.subiendoPlano = true;
-        this.api.subirPlano(img).subscribe((ok) => {
-          this.subiendoPlano = false;
-          if (ok) this.plano = img;
-          else this.errorPlano = 'No se pudo guardar el plano.';
-        });
-      });
-    };
-    lector.readAsDataURL(file);
-    input.value = '';
-  }
 
   ngOnDestroy(): void {
     this.cerrarCamara();
@@ -182,7 +154,13 @@ export class RecognitionComponent implements OnInit, OnDestroy {
   }
 
   nombreZona(clave: string | null): string {
-    return this.zonas.find((z) => z.clave === clave)?.nombre ?? 'Sin zona';
+    // Con varios pisos hay que decir cuál: dos plantas pueden tener cada una
+    // su "Oficina 3" y el nombre solo no alcanza para saber dónde es.
+    for (const f of this.pisos) {
+      const z = f.zonas.find((q) => q.clave === clave);
+      if (z) return this.pisos.length > 1 ? `${z.nombre} · ${f.nombre}` : z.nombre;
+    }
+    return 'Sin zona';
   }
 
   cambiarAcceso(p: Persona): void {

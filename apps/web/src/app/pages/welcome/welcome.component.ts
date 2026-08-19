@@ -4,7 +4,14 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { catchError, of } from 'rxjs';
 import { Router } from '@angular/router';
 import { AuthService } from '../../core/auth.service';
-import { LIENZO, altoLienzo, zonaPorClave, type Plano, type Zona } from '../../core/zonas';
+import {
+  LIENZO,
+  altoLienzo,
+  pisoDeZona,
+  zonaPorClave,
+  type Piso,
+  type Zona,
+} from '../../core/zonas';
 import { ZonasService } from '../../core/zonas.service';
 import { debeSaludar, vencio, type EstadoSaludo } from '../../core/saludo';
 
@@ -46,12 +53,11 @@ export class WelcomeComponent implements OnInit, OnDestroy {
   private readonly router = inject(Router);
 
   readonly ancho = LIENZO;
-  /** Los bloques que dibujó la empresa. Vienen de la base, no del código. */
-  zonas: Zona[] = [];
+  /** Los pisos del lugar, con sus planos y sus áreas. */
+  pisos: Piso[] = [];
 
   persona: Reconocido | null = null;
-  /** El plano que subió la empresa. Sin imagen se dibujan sólo los bloques. */
-  plano: Plano = { image: null, ancho: null, alto: null };
+
   /** El último saludo que hubo, esté todavía en pantalla o no. */
   private ultimo: EstadoSaludo | null = null;
   camaraLista = false;
@@ -76,12 +82,9 @@ export class WelcomeComponent implements OnInit, OnDestroy {
   async ngOnInit(): Promise<void> {
     this.actualizarHora();
     this.reloj = setInterval(() => this.actualizarHora(), 10_000);
-    // El plano y sus bloques vienen juntos: dibujar uno sin el otro sería
-    // mostrar un edificio sin habitaciones o habitaciones flotando en el aire.
-    this.zonas$.cargar().subscribe((r) => {
-      this.plano = r.plano;
-      this.zonas = r.zonas;
-    });
+    // Los pisos vienen con sus planos y sus áreas: se muestra el del piso
+    // donde trabaja quien se acaba de reconocer, no siempre el mismo.
+    this.zonas$.cargar().subscribe((p) => (this.pisos = p));
     await this.abrirCamara();
     // Un intento por segundo y medio: la persona llega, se para y espera. Más
     // rápido no la reconoce antes y carga al worker sin necesidad.
@@ -164,12 +167,22 @@ export class WelcomeComponent implements OnInit, OnDestroy {
 
   // ── presentación ───────────────────────────────────────────────────
   get zona(): Zona | undefined {
-    return zonaPorClave(this.zonas, this.persona?.workZone);
+    return zonaPorClave(this.pisos, this.persona?.workZone);
   }
 
-  /** Alto del lienzo, con la proporción real de la imagen del plano. */
+  /**
+   * El piso que se dibuja: el de la persona reconocida.
+   *
+   * Con varias plantas, mostrar siempre la primera sería mostrarle a alguien
+   * del subsuelo un plano donde su lugar no está.
+   */
+  get piso(): Piso | undefined {
+    return pisoDeZona(this.pisos, this.persona?.workZone) ?? this.pisos[0];
+  }
+
+  /** Alto del lienzo, con la proporción real de la imagen del piso. */
   get alto(): number {
-    return altoLienzo(this.plano);
+    return altoLienzo(this.piso ?? null);
   }
 
   px(v: number): number {

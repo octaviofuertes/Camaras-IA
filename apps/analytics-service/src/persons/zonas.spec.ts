@@ -27,9 +27,9 @@ function baseCon(previas: unknown[], gente: Record<string, number>) {
 
 const AUTH = { userId: 'u1', organizationId: 'o1', permissions: [] } as never;
 
-/** Un bloque válido, para no repetir las coordenadas en cada prueba. */
+/** Un área válida, para no repetir las coordenadas en cada prueba. */
 function bloque(key: string, extra: Record<string, unknown> = {}) {
-  return { key, name: key, kind: 'oficina', x: 0.1, y: 0.1, w: 0.2, h: 0.2, ...extra };
+  return { floorId: 'p1', key, name: key, kind: 'oficina', x: 0.1, y: 0.1, w: 0.2, h: 0.2, ...extra };
 }
 
 describe('guardarZonas', () => {
@@ -114,5 +114,23 @@ describe('guardarZonas', () => {
     const { servicio, guardado } = baseCon([{ key: 'a', name: 'A' }], {});
     await servicio.guardarZonas(AUTH, [] as never);
     expect(guardado.zonas).toHaveLength(0);
+  });
+
+  it('un área sin piso se rechaza', async () => {
+    // Un área sin piso no se puede ni dibujar ni encontrar: con varias plantas,
+    // "está en el 30% del ancho" no dice nada si no se sabe de qué plano.
+    const { servicio } = baseCon([], {});
+    await expect(
+      servicio.guardarZonas(AUTH, [bloque('x', { floorId: undefined })] as never),
+    ).rejects.toThrow(/no tiene piso/);
+  });
+
+  it('dos pisos pueden tener cada uno sus áreas', async () => {
+    const { servicio, guardado } = baseCon([], {});
+    await servicio.guardarZonas(AUTH, [
+      bloque('recepcion', { floorId: 'planta-baja' }),
+      bloque('archivo', { floorId: 'subsuelo' }),
+    ] as never);
+    expect(guardado.zonas).toHaveLength(2);
   });
 });

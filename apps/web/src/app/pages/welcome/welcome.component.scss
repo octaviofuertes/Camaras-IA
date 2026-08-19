@@ -175,3 +175,11 @@
     background: rgba(255, 255, 255, .09);
   }
 }
+
+/* Qué piso se está mostrando. Con una sola planta sobra, con tres es lo
+   primero que hay que saber para entender el dibujo. */
+.piso-nombre {
+  text-align: center; margin-bottom: 9px;
+  font-size: 13px; letter-spacing: .6px; text-transform: uppercase;
+  color: rgba(255, 255, 255, .45);
+}

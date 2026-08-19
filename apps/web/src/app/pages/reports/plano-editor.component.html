@@ -1,26 +1,75 @@
 <div class="editor" *ngIf="!cargando">
-  <!-- ═══ El lienzo ═══════════════════════════════════════════════════ -->
+  <!-- ═══ El piso que se está mirando ═════════════════════════════════ -->
   <section class="panel lienzo-caja">
     <header class="lienzo-cab">
-      <div>
-        <h2>Plano del lugar</h2>
-        <p>
-          Arrastrá sobre el plano para dibujar una oficina o un pasillo. Tocá un bloque para
-          moverlo, o su esquina para agrandarlo.
-        </p>
+      <div class="pisos">
+        <button
+          class="piso-tab"
+          *ngFor="let p of pisos; let i = index"
+          [class.active]="pisoActual === i"
+          (click)="verPiso(i)">
+          {{ p.nombre }}
+          <span class="marca" *ngIf="!p.image" title="Todavía no tiene plano">·</span>
+        </button>
+
+        <button class="piso-tab agregar" *ngIf="!agregandoPiso" (click)="agregandoPiso = true">
+          + Piso
+        </button>
+        <span class="piso-nuevo" *ngIf="agregandoPiso">
+          <input
+            [(ngModel)]="nombrePiso"
+            placeholder="Subsuelo, Planta baja, Piso 1…"
+            (keyup.enter)="agregarPiso()"
+            (keyup.escape)="agregandoPiso = false" />
+          <button class="btn btn-primary chico" (click)="agregarPiso()">Agregar</button>
+          <button class="btn btn-ghost chico" (click)="agregandoPiso = false">Cancelar</button>
+        </span>
       </div>
-      <div class="lienzo-acc">
+
+      <div class="lienzo-acc" *ngIf="piso as f">
         <label class="btn btn-ghost">
-          {{ plano.image ? 'Cambiar imagen' : 'Subir imagen de fondo' }}
+          {{ subiendo ? 'Subiendo…' : f.image ? 'Cambiar plano' : 'Subir plano' }}
           <input type="file" accept="image/*" hidden (change)="elegirImagen($event)" />
         </label>
         <button class="btn btn-primary" [disabled]="guardando || !sucio" (click)="guardar()">
-          {{ guardando ? 'Guardando…' : sucio ? 'Guardar plano' : 'Guardado' }}
+          {{ guardando ? 'Guardando…' : sucio ? 'Guardar áreas' : 'Guardado' }}
         </button>
       </div>
     </header>
 
+    <p class="ayuda" *ngIf="piso?.image">
+      Arrastrá sobre el plano para marcar un área y ponerle nombre. Tocá un área para moverla,
+      o su esquina para ajustarla.
+    </p>
+
+    <!-- Sin plano no hay nada sobre qué marcar: se pide la imagen. -->
+    <div class="sin-plano" *ngIf="piso && !piso.image">
+      <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.4">
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <path d="m3 15 5-5 4 4 3-3 6 6" />
+        <circle cx="8.5" cy="8.5" r="1.4" />
+      </svg>
+      <h3>Subí el plano de {{ piso.nombre }}</h3>
+      <p>
+        El render, el plano del arquitecto o una foto del plano impreso. Sobre esa imagen
+        marcás después dónde queda cada oficina y cada pasillo.
+      </p>
+      <label class="btn btn-primary">
+        Subir plano
+        <input type="file" accept="image/*" hidden (change)="elegirImagen($event)" />
+      </label>
+    </div>
+
+    <div class="sin-plano" *ngIf="!piso">
+      <h3>Todavía no hay ningún piso</h3>
+      <p>
+        Agregá el primero con <strong>+ Piso</strong>. Si el lugar tiene subsuelo o varias
+        plantas, cada una va por separado con su propio plano.
+      </p>
+    </div>
+
     <svg
+      *ngIf="piso?.image"
       class="lienzo"
       [attr.viewBox]="'0 0 ' + ancho + ' ' + alto"
       preserveAspectRatio="xMidYMid meet"
@@ -29,19 +78,13 @@
       (pointerup)="alSoltar()"
       (pointerleave)="alSoltar()">
 
-      <!-- El plano que subió la empresa. Si no hay, una grilla para no dibujar
-           a ojo sobre el vacío. -->
-      <image *ngIf="plano.image" [attr.href]="plano.image" x="0" y="0"
+      <!-- El plano tal como lo subieron. preserveAspectRatio="none" y no
+           "meet": el lienzo YA tiene la proporción de la imagen (sale de su
+           tamaño real), así que estirar a la caja es exacto, y "meet" volvería
+           a encajarla dejando franjas que correrían las marcas. -->
+      <image [attr.href]="piso!.image" x="0" y="0"
              [attr.width]="ancho" [attr.height]="alto" preserveAspectRatio="none" />
-      <g *ngIf="!plano.image" class="grilla">
-        <rect x="0" y="0" [attr.width]="ancho" [attr.height]="alto" class="fondo" />
-        <line *ngFor="let i of [1,2,3,4,5,6,7,8,9]"
-              [attr.x1]="i * ancho / 10" y1="0" [attr.x2]="i * ancho / 10" [attr.y2]="alto" />
-        <line *ngFor="let i of [1,2,3,4,5,6]"
-              x1="0" [attr.y1]="i * alto / 7" [attr.x2]="ancho" [attr.y2]="i * alto / 7" />
-      </g>
 
-      <!-- Los bloques -->
       <g *ngFor="let z of zonas; let i = index"
          class="bloque" [class.sel]="seleccionada === i" [attr.data-tipo]="z.tipo">
         <rect [attr.x]="px(z.x)" [attr.y]="py(z.y)"
@@ -50,7 +93,7 @@
         <text [attr.x]="px(z.x) + px(z.w) / 2" [attr.y]="py(z.y) + py(z.h) / 2"
               text-anchor="middle" dominant-baseline="middle">{{ z.nombre }}</text>
 
-        <!-- La manija para agrandar. Sólo en el que está seleccionado: ocho
+        <!-- La manija para ajustar. Sólo en la que está seleccionada: ocho
              manijas siempre visibles convierten el plano en un erizo. -->
         <rect *ngIf="seleccionada === i" class="manija"
               [attr.x]="px(z.x) + px(z.w) - 9" [attr.y]="py(z.y) + py(z.h) - 9"
@@ -58,10 +101,6 @@
               (pointerdown)="alBajar($event, i, true)" />
       </g>
     </svg>
-
-    <p class="pie" *ngIf="!zonas.length">
-      Todavía no hay ningún bloque. Arrastrá sobre el plano para dibujar el primero.
-    </p>
   </section>
 
   <!-- ═══ La lista ════════════════════════════════════════════════════ -->
@@ -69,26 +108,33 @@
     <div class="error" *ngIf="error">{{ error }}</div>
     <div class="ok" *ngIf="aviso && !error">{{ aviso }}</div>
 
-    <section class="panel">
-      <h3>Bloques <span class="cuenta">{{ zonas.length }}</span></h3>
+    <section class="panel" *ngIf="piso as f">
+      <h3>
+        Áreas de {{ f.nombre }} <span class="cuenta">{{ zonas.length }}</span>
+        <button class="quitar piso-borrar" (click)="borrarPiso(pisoActual)"
+                title="Borrar este piso">Borrar piso</button>
+      </h3>
 
-      <p class="vacio" *ngIf="!zonas.length">
-        Cada bloque es una parte del lugar: una oficina, un pasillo, la recepción. Después se
-        le asigna a cada persona en cuál puede estar, y a cada cámara en cuál está parada.
+      <p class="vacio" *ngIf="!zonas.length && f.image">
+        Marcá sobre el plano dónde queda cada oficina y cada pasillo. Después se le asigna a
+        cada persona en cuál puede estar, y a cada cámara en cuál está parada.
+      </p>
+      <p class="vacio" *ngIf="!f.image">
+        Primero subí el plano de este piso.
       </p>
 
       <ul class="lista">
         <li *ngFor="let z of zonas; let i = index"
             [class.sel]="seleccionada === i" (click)="seleccionada = i">
           <input class="nombre" [value]="z.nombre" (input)="renombrar(i, $any($event.target).value)"
-                 placeholder="Nombre del bloque" />
+                 placeholder="Nombre del área" />
           <select class="tipo" [value]="z.tipo" (change)="cambiarTipo(i, $any($event.target).value)">
             <option *ngFor="let t of tipos" [value]="t.valor">{{ t.label }}</option>
           </select>
           <span class="gente" *ngIf="z.personas" [title]="z.personas + ' persona(s) asignada(s)'">
             {{ z.personas }}
           </span>
-          <button class="quitar" (click)="borrar(i); $event.stopPropagation()" title="Borrar bloque">×</button>
+          <button class="quitar" (click)="borrar(i); $event.stopPropagation()" title="Borrar área">×</button>
         </li>
       </ul>
     </section>
@@ -96,23 +142,27 @@
     <!-- ═══ Dónde está cada cámara ══════════════════════════════════ -->
     <section class="panel">
       <h3>Dónde está cada cámara</h3>
-      <p class="ayuda">
-        Decirle a una cámara en qué bloque está hace que el registro diga
+      <p class="ayuda-chica">
+        Decirle a una cámara en qué área está hace que el registro diga
         <em>"entró por Recepción"</em> en vez del nombre de la cámara.
       </p>
 
-      <p class="vacio" *ngIf="!zonas.length">
-        Primero dibujá y guardá al menos un bloque.
+      <p class="vacio" *ngIf="!todasLasZonas.length">
+        Primero marcá y guardá al menos un área.
       </p>
 
-      <ul class="camaras" *ngIf="zonas.length">
+      <ul class="camaras" *ngIf="todasLasZonas.length">
         <li *ngFor="let c of camaras">
           <span class="cam-nombre">{{ c.name }}</span>
           <select [value]="camaraEnZona(c)" (change)="ponerCamara(c, $event)">
             <option value="">Sin ubicar</option>
-            <option *ngFor="let z of zonas" [value]="z.id || ''" [disabled]="!z.id">
-              {{ z.nombre }}{{ z.id ? '' : ' (guardá primero)' }}
-            </option>
+            <!-- Agrupadas por piso: con varias plantas, dos áreas se pueden
+                 llamar igual y el nombre solo no alcanza para elegir. -->
+            <optgroup *ngFor="let g of todasLasZonas" [label]="g.piso">
+              <option *ngFor="let z of g.zonas" [value]="z.id || ''" [disabled]="!z.id">
+                {{ z.nombre }}{{ z.id ? '' : ' (guardá primero)' }}
+              </option>
+            </optgroup>
           </select>
         </li>
         <li class="vacio" *ngIf="!camaras.length">No hay cámaras cargadas.</li>

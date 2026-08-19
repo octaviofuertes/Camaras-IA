@@ -39,38 +39,6 @@
   </div>
 
   <!-- En vivo: quién está siendo detectado en este momento -->
-  <section class="panel vivo">
-    <div class="vivo-head">
-      <span class="punto" [class.apagado]="!haySenalEnVivo"></span>
-      <h2>En el cuadro ahora</h2>
-      <span class="vivo-n">{{ presentes.length }}</span>
-    </div>
-
-    <div class="vivo-nadie" *ngIf="!presentes.length">
-      <ng-container *ngIf="haySenalEnVivo">
-        No hay nadie identificado frente a la cámara en este momento.
-      </ng-container>
-      <ng-container *ngIf="!haySenalEnVivo">
-        Sin señal en vivo: ninguna cámara con el módulo de ingreso de personas está reportando.
-        No es lo mismo que no haya nadie — es que nadie está mirando.
-      </ng-container>
-    </div>
-
-    <div class="vivo-lista" *ngIf="presentes.length">
-      <div class="vivo-persona" *ngFor="let p of presentes" [class.sin-acceso]="!p.hasAccess">
-        <div class="vp-nombre">
-          {{ p.displayName }}
-          <span class="vp-alerta" *ngIf="!p.hasAccess">SIN ACCESO</span>
-        </div>
-        <div class="vp-detalle">
-          {{ desdeHace(p) }}
-          <span class="vp-via" [class.deducido]="!p.seenByFace">
-            · {{ p.seenByFace ? 'se le vio la cara' : 'deducido por continuidad' }}
-          </span>
-        </div>
-      </div>
-    </div>
-  </section>
 
   <div class="loading" *ngIf="cargando"><span class="spinner"></span> Buscando…</div>
 

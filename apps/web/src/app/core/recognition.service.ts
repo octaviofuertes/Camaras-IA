@@ -89,20 +89,6 @@ export class RecognitionService {
       .pipe(map(() => true), catchError(() => of(false)));
   }
 
-  /** El plano del lugar que subió la empresa. */
-  plano(): Observable<string | null> {
-    return this.http
-      .get<{ image: string | null }>(`${this.base}/floorplan`)
-      .pipe(map((r) => r.image), catchError(() => of(null)));
-  }
-
-  /** Sube o reemplaza el plano. */
-  subirPlano(image: string): Observable<boolean> {
-    return this.http
-      .post(`${this.base}/floorplan`, { image })
-      .pipe(map(() => true), catchError(() => of(false)));
-  }
-
   /** Asigna la zona del plano donde trabaja. */
   cambiarZona(personId: string, workZone: string | null): Observable<boolean> {
     return this.http

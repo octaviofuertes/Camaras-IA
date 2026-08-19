@@ -39,9 +39,12 @@ export interface PersonaDto {
  */
 const TOLERANCIA_UNIR_SEGUNDOS = 300;
 
-/** El plano de fondo y su tamaño natural. */
-export interface Plano {
-  image: string;
+/** Un piso del lugar, con su plano. */
+export interface PisoFila {
+  id: string;
+  name: string;
+  orden: number;
+  image: string | null;
   ancho: number | null;
   alto: number | null;
 }
@@ -49,6 +52,7 @@ export interface Plano {
 /** Un bloque del plano, como sale de la base. */
 export interface ZonaFila {
   id: string;
+  floorId: string;
   key: string;
   name: string;
   kind: string;
@@ -60,6 +64,7 @@ export interface ZonaFila {
 
 /** Un bloque como llega desde el editor. */
 export interface ZonaEntrada {
+  floorId: string;
   key: string;
   name: string;
   kind: string;
@@ -317,32 +322,68 @@ export class PersonsRepository {
     return rows[0]?.id ?? null;
   }
 
-  /** El plano del lugar, tal como lo subió esta empresa. */
-  async plano(client: PoolClient): Promise<Plano | null> {
-    const { rows } = await client.query<{ image: string; width: number | null; height: number | null }>(
-      `SELECT image, width, height FROM floor_plans LIMIT 1`,
-    );
-    const f = rows[0];
-    return f ? { image: f.image, ancho: f.width, alto: f.height } : null;
+  /** Los pisos del lugar, de abajo hacia arriba. */
+  async pisos(client: PoolClient): Promise<PisoFila[]> {
+    const { rows } = await client.query<{
+      id: string; name: string; orden: number; image: string | null; width: number | null; height: number | null;
+    }>(`SELECT id, name, orden, image, width, height FROM floors ORDER BY orden, name`);
+    return rows.map((r) => ({
+      id: r.id, name: r.name, orden: r.orden,
+      image: r.image, ancho: r.width, alto: r.height,
+    }));
   }
 
-  /** Reemplaza el plano. Hay uno solo por empresa. */
-  async guardarPlano(
+  /** Un piso nuevo, vacío, esperando su plano. */
+  async crearPiso(
     client: PoolClient,
     organizationId: string,
-    image: string,
+    name: string,
+    orden: number,
     userId: string,
+  ): Promise<PisoFila> {
+    const { rows } = await client.query<{ id: string }>(
+      `INSERT INTO floors (organization_id, name, orden, updated_by)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [organizationId, name, orden, userId],
+    );
+    return { id: rows[0].id, name, orden, image: null, ancho: null, alto: null };
+  }
+
+  /** Cambia el nombre o el orden de un piso. */
+  async renombrarPiso(
+    client: PoolClient,
+    floorId: string,
+    name: string,
+    orden: number,
+  ): Promise<boolean> {
+    const r = await client.query(
+      `UPDATE floors SET name = $2, orden = $3, updated_at = now() WHERE id = $1`,
+      [floorId, name, orden],
+    );
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  /** Sube o reemplaza el plano de un piso. */
+  async guardarPlanoDePiso(
+    client: PoolClient,
+    floorId: string,
+    image: string,
     ancho: number | null,
     alto: number | null,
-  ): Promise<void> {
-    await client.query(
-      `INSERT INTO floor_plans (organization_id, image, width, height, updated_by, updated_at)
-       VALUES ($1, $2, $3, $4, $5, now())
-       ON CONFLICT (organization_id)
-       DO UPDATE SET image = EXCLUDED.image, width = EXCLUDED.width, height = EXCLUDED.height,
-                     updated_by = EXCLUDED.updated_by, updated_at = now()`,
-      [organizationId, image, ancho, alto, userId],
+    userId: string,
+  ): Promise<boolean> {
+    const r = await client.query(
+      `UPDATE floors SET image = $2, width = $3, height = $4, updated_by = $5, updated_at = now()
+        WHERE id = $1`,
+      [floorId, image, ancho, alto, userId],
     );
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  /** Borra un piso. Se lleva sus bloques por cascada. */
+  async borrarPiso(client: PoolClient, floorId: string): Promise<boolean> {
+    const r = await client.query(`DELETE FROM floors WHERE id = $1`, [floorId]);
+    return (r.rowCount ?? 0) > 0;
   }
 
   // ── Los bloques del plano ────────────────────────────────────────────
@@ -350,7 +391,8 @@ export class PersonsRepository {
   /** Los bloques dibujados, de arriba a abajo y de izquierda a derecha. */
   async zonas(client: PoolClient): Promise<ZonaFila[]> {
     const { rows } = await client.query<ZonaFila>(
-      `SELECT id, key, name, kind, x, y, w, h FROM floor_zones ORDER BY y, x`,
+      `SELECT id, floor_id AS "floorId", key, name, kind, x, y, w, h
+         FROM floor_zones ORDER BY y, x`,
     );
     return rows;
   }
@@ -386,12 +428,13 @@ export class PersonsRepository {
     );
     for (const z of zonas) {
       await client.query(
-        `INSERT INTO floor_zones (organization_id, key, name, kind, x, y, w, h)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `INSERT INTO floor_zones (organization_id, floor_id, key, name, kind, x, y, w, h)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          ON CONFLICT (organization_id, key)
-         DO UPDATE SET name = EXCLUDED.name, kind = EXCLUDED.kind, x = EXCLUDED.x,
-                       y = EXCLUDED.y, w = EXCLUDED.w, h = EXCLUDED.h, updated_at = now()`,
-        [organizationId, z.key, z.name, z.kind, z.x, z.y, z.w, z.h],
+         DO UPDATE SET floor_id = EXCLUDED.floor_id, name = EXCLUDED.name,
+                       kind = EXCLUDED.kind, x = EXCLUDED.x, y = EXCLUDED.y,
+                       w = EXCLUDED.w, h = EXCLUDED.h, updated_at = now()`,
+        [organizationId, z.floorId, z.key, z.name, z.kind, z.x, z.y, z.w, z.h],
       );
     }
   }

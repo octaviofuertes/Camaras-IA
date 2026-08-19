@@ -88,9 +88,12 @@ biométricos ya cargados, sin pantalla ni endpoint para eliminarlos.
 
 ### El plano del lugar
 
-En **Accesos → Plano y zonas** se arma el lugar con bloques: se arrastra sobre el plano
-para dibujar una oficina o un pasillo, se le pone nombre y se elige si es oficina, pasillo
-u otra cosa. Tocando un bloque se lo mueve; tocando su esquina, se lo agranda.
+En **Accesos → Plano y zonas**. El plano no se dibuja: se sube. Cada piso tiene el suyo
+—el render, el plano del arquitecto o una foto del plano impreso— y encima se marca con un
+rectángulo dónde queda cada área y cómo se llama.
+
+Si el lugar tiene subsuelo o varias plantas, cada una va por separado con **+ Piso** y su
+propia imagen. Los nombres los ponés vos: "Subsuelo", "Entrepiso", "Planta 2 - Producción".
 
 Con los bloques dibujados se hacen dos cosas:
 
@@ -100,11 +103,11 @@ Con los bloques dibujados se hacen dos cosas:
   contexto a lo que ve: el registro puede decir dónde pasó algo sin que nadie recuerde a
   qué parte del lugar apunta cada cámara.
 
-Se puede subir una imagen de fondo (el render o el plano de la oficina). Los bloques se
-guardan como fracciones del plano, no como píxeles, así que la imagen puede tener cualquier
-proporción y los bloques siguen cayendo donde corresponde.
+Las marcas se guardan como fracciones del plano, no como píxeles, así que la imagen puede
+tener cualquier proporción y las áreas siguen cayendo sobre la misma habitación.
 
-Borrar un bloque donde hay gente asignada se rechaza, con el nombre y cuántas personas son.
+Borrar un área —o un piso entero— donde hay gente asignada se rechaza, con el nombre y
+cuántas personas son.
 Es a propósito: vaciarle la zona a alguien en silencio no se nota hasta semanas después,
 cuando la pantalla de bienvenida deja de decirle dónde le toca.
 

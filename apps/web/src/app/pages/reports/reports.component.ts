@@ -1,4 +1,4 @@
-import { Component, OnDestroy, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { PageHeaderComponent } from '../../shared/page-header.component';
@@ -6,7 +6,6 @@ import { PlanoEditorComponent } from './plano-editor.component';
 import {
   ReportsService,
   type Paso,
-  type Presente,
   type RegistroAccesos,
 } from '../../core/reports.service';
 
@@ -19,18 +18,13 @@ type Rango = 'hoy' | 'ayer' | 'semana' | 'mes';
   templateUrl: './reports.component.html',
   styleUrls: ['./reports.component.scss'],
 })
-export class ReportsComponent implements OnInit, OnDestroy {
+export class ReportsComponent implements OnInit {
   private readonly api = inject(ReportsService);
 
   /** Qué mitad de la pantalla se está mirando. */
   vista: 'registro' | 'plano' = 'registro';
 
   registro: RegistroAccesos | null = null;
-  /** Quién está en el cuadro ahora mismo. */
-  presentes: Presente[] = [];
-  /** false = el worker no está reportando; no es lo mismo que "no hay nadie". */
-  haySenalEnVivo = false;
-  private timer?: ReturnType<typeof setInterval>;
   cargando = true;
   rango: Rango = 'hoy';
   /** Mostrar sólo los pasos de gente sin acceso. */
@@ -45,29 +39,6 @@ export class ReportsComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.cargar();
-    this.refrescarVivo();
-    // El registro del día cambia poco; quién está adentro, todo el tiempo.
-    // Rápido a propósito: el worker reporta una vez por frame y lo que se
-    // muestra tiene que ser el presente, no lo de hace un rato.
-    this.timer = setInterval(() => this.refrescarVivo(), 1500);
-  }
-
-  ngOnDestroy(): void {
-    if (this.timer) clearInterval(this.timer);
-  }
-
-  refrescarVivo(): void {
-    this.api.enVivo().subscribe((r) => {
-      this.presentes = r.presentes;
-      this.haySenalEnVivo = r.enVivo;
-    });
-  }
-
-  /** Hace cuánto que está. */
-  desdeHace(p: Presente): string {
-    const min = (Date.now() - new Date(p.desde).getTime()) / 60000;
-    if (min < 1) return 'recién';
-    return `hace ${this.duracion(min)}`;
   }
 
   setRango(r: Rango): void {
