@@ -2,6 +2,8 @@ import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { catchError, of } from 'rxjs';
+import { Router } from '@angular/router';
+import { AuthService } from '../../core/auth.service';
 import { PLANO, ZONAS, zonaPorClave, type Zona } from '../../core/zonas';
 import { debeSaludar, vencio, type EstadoSaludo } from '../../core/saludo';
 
@@ -38,6 +40,8 @@ interface Reconocido {
 })
 export class WelcomeComponent implements OnInit, OnDestroy {
   private readonly http = inject(HttpClient);
+  private readonly auth = inject(AuthService);
+  private readonly router = inject(Router);
 
   readonly medidas = PLANO;
   readonly zonas = ZONAS;
@@ -187,6 +191,23 @@ export class WelcomeComponent implements OnInit, OnDestroy {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return '';
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+
+  /**
+   * Cierra la pantalla y vuelve al login.
+   *
+   * Es la única forma de salir sin tocar el teclado ni la URL: esta pantalla
+   * se dibuja sin menú a propósito, así que quien la encendió en una máquina
+   * de la entrada quedaba encerrado ahí.
+   *
+   * Se cierra la sesión, no se navega y listo. El token del kiosco dura doce
+   * horas y quedaría vivo en el navegador de una máquina que está en la puerta
+   * —sirve para poco, pero no hay motivo para dejarlo— y además, sin cerrarla,
+   * el guard del login vería una sesión válida de kiosco y rebotaría para acá.
+   */
+  volverAlLogin(): void {
+    this.auth.logout();
+    void this.router.navigateByUrl('/login');
   }
 
   esSuZona(z: Zona): boolean {

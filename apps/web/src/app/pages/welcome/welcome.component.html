@@ -8,6 +8,17 @@
 
   <div class="hora">{{ hora }}</div>
 
+  <!-- La salida. Discreta y abajo: quien está enfrente no tiene nada que hacer
+       acá, pero quien encendió la pantalla tiene que poder apagarla sin
+       aprenderse una URL. -->
+  <button class="salida" (click)="volverAlLogin()" title="Cerrar la pantalla y volver al login">
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <path d="m16 17 5-5-5-5M21 12H9" />
+    </svg>
+    <span>Volver al inicio de sesión</span>
+  </button>
+
   <!-- Nadie enfrente -->
   <div class="centro" *ngIf="!persona && !errorModulo">
     <div class="esperando">
