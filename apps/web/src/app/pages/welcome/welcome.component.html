@@ -72,24 +72,29 @@
 
     <!-- El plano, con su zona iluminada -->
     <div class="plano-caja">
-      <svg class="plano" [class.con-imagen]="!!plano"
-           [attr.viewBox]="'0 0 ' + medidas.ancho + ' ' + medidas.alto"
+      <svg class="plano" [class.con-imagen]="!!plano.image"
+           [attr.viewBox]="'0 0 ' + ancho + ' ' + alto"
            preserveAspectRatio="xMidYMid meet">
-        <!-- El plano de la empresa, si lo subió. Las zonas se dibujan encima. -->
-        <image *ngIf="plano" [attr.href]="plano" x="0" y="0"
-               [attr.width]="medidas.ancho" [attr.height]="medidas.alto"
-               preserveAspectRatio="xMidYMid meet" />
+        <!-- El plano de la empresa, si lo subió. Los bloques se dibujan encima.
+             preserveAspectRatio="none" y no "meet": el lienzo YA tiene la
+             proporción de la imagen (sale de su tamaño real), así que estirar
+             a la caja es exacto, y "meet" volvería a encajarla dejando franjas
+             que correrían los bloques respecto de lo que se ve. -->
+        <image *ngIf="plano.image" [attr.href]="plano.image" x="0" y="0"
+               [attr.width]="ancho" [attr.height]="alto"
+               preserveAspectRatio="none" />
 
-        <!-- Sin plano cargado se dibuja el esquema, para que la pantalla sirva
-             igual mientras alguien lo sube. -->
-        <rect class="edificio" *ngIf="!plano" x="20" y="20" [attr.width]="medidas.ancho - 40"
-              [attr.height]="medidas.alto - 40" rx="10" />
+        <!-- Sin plano cargado se dibuja el contorno, para que los bloques no
+             queden flotando en el vacío mientras alguien sube la imagen. -->
+        <rect class="edificio" *ngIf="!plano.image" x="8" y="8" [attr.width]="ancho - 16"
+              [attr.height]="alto - 16" rx="10" />
 
         <g *ngFor="let z of zonas">
-          <rect class="zona" [class.suya]="esSuZona(z)" [class.sobre-imagen]="!!plano"
-                [attr.x]="z.x" [attr.y]="z.y" [attr.width]="z.w" [attr.height]="z.h" rx="6" />
-          <text class="etiqueta" [class.suya]="esSuZona(z)" [class.sobre-imagen]="!!plano"
-                [attr.x]="z.x + z.w / 2" [attr.y]="z.y + z.h / 2"
+          <rect class="zona" [class.suya]="esSuZona(z)" [class.sobre-imagen]="!!plano.image"
+                [attr.x]="px(z.x)" [attr.y]="py(z.y)"
+                [attr.width]="px(z.w)" [attr.height]="py(z.h)" rx="6" />
+          <text class="etiqueta" [class.suya]="esSuZona(z)" [class.sobre-imagen]="!!plano.image"
+                [attr.x]="px(z.x) + px(z.w) / 2" [attr.y]="py(z.y) + py(z.h) / 2"
                 text-anchor="middle" dominant-baseline="middle">
             {{ z.nombre }}
           </text>

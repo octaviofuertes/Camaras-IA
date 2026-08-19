@@ -9,7 +9,8 @@ import {
   type TipoFoto,
 } from '../../core/recognition.service';
 import { EventsService } from '../../core/events.service';
-import { ZONAS } from '../../core/zonas';
+import type { Zona } from '../../core/zonas';
+import { ZonasService } from '../../core/zonas.service';
 import type { EventItem } from '../../core/models';
 
 type Modo = 'registradas' | 'detectadas' | 'manual' | 'plano';
@@ -33,10 +34,12 @@ interface RanuraFoto {
 })
 export class RecognitionComponent implements OnInit, OnDestroy {
   private readonly api = inject(RecognitionService);
+  private readonly zonasApi = inject(ZonasService);
   private readonly eventos = inject(EventsService);
 
   modo: Modo = 'registradas';
-  readonly zonas = ZONAS;
+  /** Los bloques que dibujó la empresa en Accesos → Plano y zonas. */
+  zonas: Zona[] = [];
 
   // ── automático ─────────────────────────────────────────────────────
   /** Caras que la cámara detectó y el sistema no conoce. */
@@ -88,6 +91,7 @@ export class RecognitionComponent implements OnInit, OnDestroy {
     this.cargarPendientes();
     this.cargarPersonas();
     this.api.plano().subscribe((p) => (this.plano = p));
+    this.zonasApi.cargar().subscribe((r) => (this.zonas = r.zonas));
   }
 
   /** El plano del lugar: es el fondo de la pantalla de bienvenida. */

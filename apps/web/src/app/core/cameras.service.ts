@@ -16,6 +16,8 @@ export interface ApiCamera {
   height: number | null;
   fps: number | null;
   moduleCount: number;
+  /** En qué bloque del plano está parada. Null = todavía no se dijo. */
+  floorZoneId: string | null;
 }
 
 /** Módulo del catálogo (tabla ai_modules). */

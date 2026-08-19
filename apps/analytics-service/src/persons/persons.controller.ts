@@ -258,9 +258,12 @@ export class PersonsController {
   /** Sube o reemplaza el plano. Sólo quien administra. */
   @Post('floorplan')
   @RequirePermissions('persons:write')
-  async subirPlano(@Req() req: Request, @Body() body: { image?: string }) {
+  async subirPlano(
+    @Req() req: Request,
+    @Body() body: { image?: string; ancho?: number; alto?: number },
+  ) {
     if (!body?.image) throw new BadRequestException('Falta la imagen del plano');
-    await this.persons.guardarPlano(req.auth as AuthContext, body.image);
+    await this.persons.guardarPlano(req.auth as AuthContext, body.image, body.ancho, body.alto);
     return { ok: true };
   }
 
@@ -287,6 +290,28 @@ export class PersonsController {
    * todos los días es un dato sobre su vida, no sobre la seguridad del lugar,
    * y cuanta menos gente lo alcance, mejor.
    */
+  /**
+   * El plano dibujado: la imagen de fondo y los bloques con su gente.
+   *
+   * Lo pide tanto el editor como la pantalla de bienvenida, y ésta corre con
+   * el token del kiosco: por eso `kiosk:identify` y no `persons:read`. Lo que
+   * devuelve —nombres de oficinas y cuánta gente hay en cada una— es el plano
+   * del lugar, no datos de nadie en particular.
+   */
+  @Get('zones')
+  @RequirePermissions('kiosk:identify')
+  async verZonas(@Req() req: Request) {
+    return this.persons.zonas(req.auth as AuthContext);
+  }
+
+  /** Guarda el plano entero tal como quedó dibujado. */
+  @Post('zones')
+  @RequirePermissions('persons:write')
+  async guardarZonas(@Req() req: Request, @Body() body: { zonas?: unknown }) {
+    if (!Array.isArray(body?.zonas)) throw new BadRequestException('Faltan las zonas');
+    return this.persons.guardarZonas(req.auth as AuthContext, body.zonas as never);
+  }
+
   @Get('report/access')
   @RequirePermissions('reports:identified')
   async registro(

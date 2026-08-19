@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { DatabaseService } from '../db/database.service';
-import { PersonsRepository, type PersonaDto } from './persons.repository';
+import { PersonsRepository, type PersonaDto, type ZonaEntrada, type ZonaFila } from './persons.repository';
 import type { AuthContext } from '../auth/auth.types';
 
 export interface AltaConRostro {
@@ -500,20 +500,95 @@ export class PersonsService {
   }
 
   /** El plano del lugar. Null si esta empresa todavía no subió ninguno. */
-  async plano(auth: AuthContext): Promise<{ image: string | null }> {
-    const image = await this.db.withTenant(auth.organizationId, (c) => this.repo.plano(c));
-    return { image };
+  async plano(auth: AuthContext): Promise<{ image: string | null; ancho: number | null; alto: number | null }> {
+    const f = await this.db.withTenant(auth.organizationId, (c) => this.repo.plano(c));
+    return { image: f?.image ?? null, ancho: f?.ancho ?? null, alto: f?.alto ?? null };
   }
 
   /** Guarda el plano que subió un administrador. */
-  async guardarPlano(auth: AuthContext, image: string): Promise<void> {
+  async guardarPlano(
+    auth: AuthContext,
+    image: string,
+    ancho?: number | null,
+    alto?: number | null,
+  ): Promise<void> {
     if (!image?.startsWith('data:image/')) {
       throw new BadRequestException('El plano tiene que ser una imagen');
     }
     await this.db.withTenant(auth.organizationId, (c) =>
-      this.repo.guardarPlano(c, auth.organizationId, image, auth.userId),
+      this.repo.guardarPlano(c, auth.organizationId, image, auth.userId, ancho ?? null, alto ?? null),
     );
     this.logger.log(`plano actualizado por ${auth.userId}`);
+  }
+
+  // ── Los bloques del plano ────────────────────────────────────────────
+
+  /** El plano dibujado: la imagen de fondo y los bloques, con su gente. */
+  async zonas(auth: AuthContext): Promise<{
+    plano: { image: string | null; ancho: number | null; alto: number | null };
+    zonas: (ZonaFila & { personas: number })[];
+  }> {
+    return this.db.withTenant(auth.organizationId, async (c) => {
+      const [f, filas, gente] = await Promise.all([
+        this.repo.plano(c),
+        this.repo.zonas(c),
+        this.repo.personasPorZona(c),
+      ]);
+      return {
+        plano: { image: f?.image ?? null, ancho: f?.ancho ?? null, alto: f?.alto ?? null },
+        // Cuánta gente hay en cada bloque viaja con el bloque porque es lo que
+        // decide si se puede borrar, y la pantalla necesita saberlo ANTES de
+        // que alguien apriete borrar.
+        zonas: filas.map((z) => ({ ...z, personas: gente[z.key] ?? 0 })),
+      };
+    });
+  }
+
+  /**
+   * Guarda el plano dibujado.
+   *
+   * Borrar un bloque que tiene gente asignada se rechaza en vez de vaciarle la
+   * zona a esa gente en silencio. Alguien que arrastra bloques en una pantalla
+   * no está pensando en el padrón de empleados, y una asignación que
+   * desaparece sola no se nota hasta que la pantalla de bienvenida deja de
+   * mostrarle a alguien dónde le toca.
+   */
+  async guardarZonas(auth: AuthContext, zonas: ZonaEntrada[]): Promise<{ ok: true }> {
+    if (!Array.isArray(zonas)) throw new BadRequestException('Faltan las zonas');
+    if (zonas.length > 200) throw new BadRequestException('Demasiadas zonas (máximo 200)');
+
+    const claves = new Set<string>();
+    for (const z of zonas) {
+      const key = String(z?.key ?? '').trim();
+      const name = String(z?.name ?? '').trim();
+      if (!key || !name) throw new BadRequestException('Cada bloque necesita nombre');
+      if (claves.has(key)) throw new BadRequestException(`Hay dos bloques con la clave "${key}"`);
+      claves.add(key);
+      if (!['oficina', 'pasillo', 'otro'].includes(z.kind)) {
+        throw new BadRequestException(`Tipo de bloque desconocido: "${z.kind}"`);
+      }
+      const fuera =
+        !(z.x >= 0) || !(z.y >= 0) || !(z.w > 0) || !(z.h > 0) ||
+        z.x + z.w > 1.0001 || z.y + z.h > 1.0001;
+      if (fuera) throw new BadRequestException(`El bloque "${name}" queda fuera del plano`);
+    }
+
+    return this.db.withTenant(auth.organizationId, async (c) => {
+      const gente = await this.repo.personasPorZona(c);
+      const previas = await this.repo.zonas(c);
+      const conGente = previas
+        .filter((z) => !claves.has(z.key) && (gente[z.key] ?? 0) > 0)
+        .map((z) => `${z.name} (${gente[z.key]})`);
+      if (conGente.length) {
+        throw new BadRequestException(
+          `No se puede borrar ${conGente.join(', ')}: hay personas asignadas. ` +
+            'Cambiales la zona desde Reconocimiento y volvé a guardar.',
+        );
+      }
+      await this.repo.guardarZonas(c, auth.organizationId, zonas);
+      this.logger.log(`plano guardado con ${zonas.length} bloques por ${auth.userId}`);
+      return { ok: true as const };
+    });
   }
 
   /** Asigna la zona del plano donde trabaja una persona. */

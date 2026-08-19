@@ -4,6 +4,20 @@
 />
 
 <div class="page">
+  <nav class="pestanas">
+    <button class="tab" [class.active]="vista === 'registro'" (click)="vista = 'registro'">
+      Registro del día
+    </button>
+    <button class="tab" [class.active]="vista === 'plano'" (click)="vista = 'plano'">
+      Plano y zonas
+    </button>
+  </nav>
+
+  <!-- El editor del plano: se arma acá el lugar con bloques, y esos bloques
+       son los que después se le asignan a cada persona y a cada cámara. -->
+  <px-plano-editor *ngIf="vista === 'plano'" />
+
+  <ng-container *ngIf="vista === 'registro'">
   <div class="filtros">
     <button
       class="chip"
@@ -159,4 +173,5 @@
       </section>
     </ng-container>
   </ng-container>
+</ng-container>
 </div>

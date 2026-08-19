@@ -4,7 +4,8 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { catchError, of } from 'rxjs';
 import { Router } from '@angular/router';
 import { AuthService } from '../../core/auth.service';
-import { PLANO, ZONAS, zonaPorClave, type Zona } from '../../core/zonas';
+import { LIENZO, altoLienzo, zonaPorClave, type Plano, type Zona } from '../../core/zonas';
+import { ZonasService } from '../../core/zonas.service';
 import { debeSaludar, vencio, type EstadoSaludo } from '../../core/saludo';
 
 /** A quién reconoció la cámara de esta pantalla. */
@@ -41,14 +42,16 @@ interface Reconocido {
 export class WelcomeComponent implements OnInit, OnDestroy {
   private readonly http = inject(HttpClient);
   private readonly auth = inject(AuthService);
+  private readonly zonas$ = inject(ZonasService);
   private readonly router = inject(Router);
 
-  readonly medidas = PLANO;
-  readonly zonas = ZONAS;
+  readonly ancho = LIENZO;
+  /** Los bloques que dibujó la empresa. Vienen de la base, no del código. */
+  zonas: Zona[] = [];
 
   persona: Reconocido | null = null;
-  /** El plano que subió la empresa. Null = se dibuja el esquema. */
-  plano: string | null = null;
+  /** El plano que subió la empresa. Sin imagen se dibujan sólo los bloques. */
+  plano: Plano = { image: null, ancho: null, alto: null };
   /** El último saludo que hubo, esté todavía en pantalla o no. */
   private ultimo: EstadoSaludo | null = null;
   camaraLista = false;
@@ -73,10 +76,12 @@ export class WelcomeComponent implements OnInit, OnDestroy {
   async ngOnInit(): Promise<void> {
     this.actualizarHora();
     this.reloj = setInterval(() => this.actualizarHora(), 10_000);
-    this.http
-      .get<{ image: string | null }>('/analytics/api/v1/persons/floorplan')
-      .pipe(catchError(() => of({ image: null })))
-      .subscribe((r) => (this.plano = r.image));
+    // El plano y sus bloques vienen juntos: dibujar uno sin el otro sería
+    // mostrar un edificio sin habitaciones o habitaciones flotando en el aire.
+    this.zonas$.cargar().subscribe((r) => {
+      this.plano = r.plano;
+      this.zonas = r.zonas;
+    });
     await this.abrirCamara();
     // Un intento por segundo y medio: la persona llega, se para y espera. Más
     // rápido no la reconoce antes y carga al worker sin necesidad.
@@ -159,7 +164,20 @@ export class WelcomeComponent implements OnInit, OnDestroy {
 
   // ── presentación ───────────────────────────────────────────────────
   get zona(): Zona | undefined {
-    return zonaPorClave(this.persona?.workZone);
+    return zonaPorClave(this.zonas, this.persona?.workZone);
+  }
+
+  /** Alto del lienzo, con la proporción real de la imagen del plano. */
+  get alto(): number {
+    return altoLienzo(this.plano);
+  }
+
+  px(v: number): number {
+    return v * LIENZO;
+  }
+
+  py(v: number): number {
+    return v * this.alto;
   }
 
   urlFoto(b64?: string | null): string {

@@ -210,3 +210,18 @@ tr.negado {
   animation: none;
   box-shadow: none;
 }
+
+/* Las dos mitades de Accesos: lo que pasó, y el mapa donde pasa. */
+.pestanas {
+  display: flex; gap: 4px; margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+
+  .tab {
+    background: none; border: none; border-bottom: 2px solid transparent;
+    color: var(--text-mute); font-size: 13px; font-family: inherit;
+    padding: 9px 15px; cursor: pointer; margin-bottom: -1px;
+
+    &:hover { color: var(--text); }
+    &.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+  }
+}

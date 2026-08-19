@@ -86,6 +86,28 @@ La única excepción es **borrar una persona**, que sigue funcionando con el mó
 desasignado. Es a propósito: si no, quitar el módulo dejaría encerrados los datos
 biométricos ya cargados, sin pantalla ni endpoint para eliminarlos.
 
+### El plano del lugar
+
+En **Accesos → Plano y zonas** se arma el lugar con bloques: se arrastra sobre el plano
+para dibujar una oficina o un pasillo, se le pone nombre y se elige si es oficina, pasillo
+u otra cosa. Tocando un bloque se lo mueve; tocando su esquina, se lo agranda.
+
+Con los bloques dibujados se hacen dos cosas:
+
+- **A cada persona** se le asigna en qué bloque trabaja, desde Reconocimiento. Es lo que la
+  pantalla de bienvenida ilumina en verde cuando la reconoce.
+- **A cada cámara** se le dice en qué bloque está parada, en el mismo editor. Eso le da
+  contexto a lo que ve: el registro puede decir dónde pasó algo sin que nadie recuerde a
+  qué parte del lugar apunta cada cámara.
+
+Se puede subir una imagen de fondo (el render o el plano de la oficina). Los bloques se
+guardan como fracciones del plano, no como píxeles, así que la imagen puede tener cualquier
+proporción y los bloques siguen cayendo donde corresponde.
+
+Borrar un bloque donde hay gente asignada se rechaza, con el nombre y cuántas personas son.
+Es a propósito: vaciarle la zona a alguien en silencio no se nota hasta semanas después,
+cuando la pantalla de bienvenida deja de decirle dónde le toca.
+
 ### Las cámaras actuales
 
 Hay **dos webcams configuradas como fuentes independientes**:

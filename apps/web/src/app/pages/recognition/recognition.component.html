@@ -45,8 +45,8 @@
           <input type="file" accept="image/*" hidden (change)="elegirPlano($event)" />
         </label>
         <span class="cierre-ayuda">
-          Las zonas se dibujan encima con esta distribución:
-          {{ zonas.length }} sectores (oficinas, sala de reuniones, recepción y pasillos).
+          Los bloques del plano se dibujan y se nombran en
+          <strong>Accesos → Plano y zonas</strong>. Ahora hay {{ zonas.length }}.
         </span>
       </div>
       <div class="error" *ngIf="errorPlano">{{ errorPlano }}</div>

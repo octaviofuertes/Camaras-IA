@@ -1,0 +1,124 @@
+<div class="editor" *ngIf="!cargando">
+  <!-- ═══ El lienzo ═══════════════════════════════════════════════════ -->
+  <section class="panel lienzo-caja">
+    <header class="lienzo-cab">
+      <div>
+        <h2>Plano del lugar</h2>
+        <p>
+          Arrastrá sobre el plano para dibujar una oficina o un pasillo. Tocá un bloque para
+          moverlo, o su esquina para agrandarlo.
+        </p>
+      </div>
+      <div class="lienzo-acc">
+        <label class="btn btn-ghost">
+          {{ plano.image ? 'Cambiar imagen' : 'Subir imagen de fondo' }}
+          <input type="file" accept="image/*" hidden (change)="elegirImagen($event)" />
+        </label>
+        <button class="btn btn-primary" [disabled]="guardando || !sucio" (click)="guardar()">
+          {{ guardando ? 'Guardando…' : sucio ? 'Guardar plano' : 'Guardado' }}
+        </button>
+      </div>
+    </header>
+
+    <svg
+      class="lienzo"
+      [attr.viewBox]="'0 0 ' + ancho + ' ' + alto"
+      preserveAspectRatio="xMidYMid meet"
+      (pointerdown)="alBajar($event)"
+      (pointermove)="alMover($event)"
+      (pointerup)="alSoltar()"
+      (pointerleave)="alSoltar()">
+
+      <!-- El plano que subió la empresa. Si no hay, una grilla para no dibujar
+           a ojo sobre el vacío. -->
+      <image *ngIf="plano.image" [attr.href]="plano.image" x="0" y="0"
+             [attr.width]="ancho" [attr.height]="alto" preserveAspectRatio="none" />
+      <g *ngIf="!plano.image" class="grilla">
+        <rect x="0" y="0" [attr.width]="ancho" [attr.height]="alto" class="fondo" />
+        <line *ngFor="let i of [1,2,3,4,5,6,7,8,9]"
+              [attr.x1]="i * ancho / 10" y1="0" [attr.x2]="i * ancho / 10" [attr.y2]="alto" />
+        <line *ngFor="let i of [1,2,3,4,5,6]"
+              x1="0" [attr.y1]="i * alto / 7" [attr.x2]="ancho" [attr.y2]="i * alto / 7" />
+      </g>
+
+      <!-- Los bloques -->
+      <g *ngFor="let z of zonas; let i = index"
+         class="bloque" [class.sel]="seleccionada === i" [attr.data-tipo]="z.tipo">
+        <rect [attr.x]="px(z.x)" [attr.y]="py(z.y)"
+              [attr.width]="px(z.w)" [attr.height]="py(z.h)"
+              (pointerdown)="alBajar($event, i)" />
+        <text [attr.x]="px(z.x) + px(z.w) / 2" [attr.y]="py(z.y) + py(z.h) / 2"
+              text-anchor="middle" dominant-baseline="middle">{{ z.nombre }}</text>
+
+        <!-- La manija para agrandar. Sólo en el que está seleccionado: ocho
+             manijas siempre visibles convierten el plano en un erizo. -->
+        <rect *ngIf="seleccionada === i" class="manija"
+              [attr.x]="px(z.x) + px(z.w) - 9" [attr.y]="py(z.y) + py(z.h) - 9"
+              width="18" height="18" rx="3"
+              (pointerdown)="alBajar($event, i, true)" />
+      </g>
+    </svg>
+
+    <p class="pie" *ngIf="!zonas.length">
+      Todavía no hay ningún bloque. Arrastrá sobre el plano para dibujar el primero.
+    </p>
+  </section>
+
+  <!-- ═══ La lista ════════════════════════════════════════════════════ -->
+  <aside class="costado">
+    <div class="error" *ngIf="error">{{ error }}</div>
+    <div class="ok" *ngIf="aviso && !error">{{ aviso }}</div>
+
+    <section class="panel">
+      <h3>Bloques <span class="cuenta">{{ zonas.length }}</span></h3>
+
+      <p class="vacio" *ngIf="!zonas.length">
+        Cada bloque es una parte del lugar: una oficina, un pasillo, la recepción. Después se
+        le asigna a cada persona en cuál puede estar, y a cada cámara en cuál está parada.
+      </p>
+
+      <ul class="lista">
+        <li *ngFor="let z of zonas; let i = index"
+            [class.sel]="seleccionada === i" (click)="seleccionada = i">
+          <input class="nombre" [value]="z.nombre" (input)="renombrar(i, $any($event.target).value)"
+                 placeholder="Nombre del bloque" />
+          <select class="tipo" [value]="z.tipo" (change)="cambiarTipo(i, $any($event.target).value)">
+            <option *ngFor="let t of tipos" [value]="t.valor">{{ t.label }}</option>
+          </select>
+          <span class="gente" *ngIf="z.personas" [title]="z.personas + ' persona(s) asignada(s)'">
+            {{ z.personas }}
+          </span>
+          <button class="quitar" (click)="borrar(i); $event.stopPropagation()" title="Borrar bloque">×</button>
+        </li>
+      </ul>
+    </section>
+
+    <!-- ═══ Dónde está cada cámara ══════════════════════════════════ -->
+    <section class="panel">
+      <h3>Dónde está cada cámara</h3>
+      <p class="ayuda">
+        Decirle a una cámara en qué bloque está hace que el registro diga
+        <em>"entró por Recepción"</em> en vez del nombre de la cámara.
+      </p>
+
+      <p class="vacio" *ngIf="!zonas.length">
+        Primero dibujá y guardá al menos un bloque.
+      </p>
+
+      <ul class="camaras" *ngIf="zonas.length">
+        <li *ngFor="let c of camaras">
+          <span class="cam-nombre">{{ c.name }}</span>
+          <select [value]="camaraEnZona(c)" (change)="ponerCamara(c, $event)">
+            <option value="">Sin ubicar</option>
+            <option *ngFor="let z of zonas" [value]="z.id || ''" [disabled]="!z.id">
+              {{ z.nombre }}{{ z.id ? '' : ' (guardá primero)' }}
+            </option>
+          </select>
+        </li>
+        <li class="vacio" *ngIf="!camaras.length">No hay cámaras cargadas.</li>
+      </ul>
+    </section>
+  </aside>
+</div>
+
+<div class="cargando" *ngIf="cargando">Cargando el plano…</div>

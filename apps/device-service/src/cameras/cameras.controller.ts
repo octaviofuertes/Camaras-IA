@@ -127,6 +127,28 @@ export class CamerasController {
   }
 
   // ── asignaciones ───────────────────────────────────────────────────
+  /**
+   * Dónde está parada esta cámara, dentro del plano del lugar.
+   *
+   * Vive acá y no en analytics porque la columna es de `cameras`, y una cámara
+   * la administra device-service. El editor del plano es de otra pantalla, pero
+   * el dato es de la cámara.
+   */
+  @Post('cameras/:id/floor-zone')
+  @RequirePermissions('cameras:write')
+  async ponerZona(
+    @Req() req: Request,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: { floorZoneId?: string | null },
+  ): Promise<{ ok: true }> {
+    const zona = body?.floorZoneId ? String(body.floorZoneId) : null;
+    const ok = await this.db.withTenant(this.auth(req).organizationId, (c) =>
+      this.repo.ponerZona(c, id, zona),
+    );
+    if (!ok) throw new NotFoundException('Cámara no encontrada');
+    return { ok: true };
+  }
+
   @Get('camera-module-configs')
   @RequirePermissions('camera-module-configs:read')
   async assignments(@Req() req: Request): Promise<{ items: AssignmentDto[] }> {

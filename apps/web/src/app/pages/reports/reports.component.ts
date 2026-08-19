@@ -2,6 +2,7 @@ import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { PageHeaderComponent } from '../../shared/page-header.component';
+import { PlanoEditorComponent } from './plano-editor.component';
 import {
   ReportsService,
   type Paso,
@@ -14,12 +15,15 @@ type Rango = 'hoy' | 'ayer' | 'semana' | 'mes';
 @Component({
   selector: 'px-reports',
   standalone: true,
-  imports: [CommonModule, FormsModule, PageHeaderComponent],
+  imports: [CommonModule, FormsModule, PageHeaderComponent, PlanoEditorComponent],
   templateUrl: './reports.component.html',
   styleUrls: ['./reports.component.scss'],
 })
 export class ReportsComponent implements OnInit, OnDestroy {
   private readonly api = inject(ReportsService);
+
+  /** Qué mitad de la pantalla se está mirando. */
+  vista: 'registro' | 'plano' = 'registro';
 
   registro: RegistroAccesos | null = null;
   /** Quién está en el cuadro ahora mismo. */

@@ -39,6 +39,36 @@ export interface PersonaDto {
  */
 const TOLERANCIA_UNIR_SEGUNDOS = 300;
 
+/** El plano de fondo y su tamaño natural. */
+export interface Plano {
+  image: string;
+  ancho: number | null;
+  alto: number | null;
+}
+
+/** Un bloque del plano, como sale de la base. */
+export interface ZonaFila {
+  id: string;
+  key: string;
+  name: string;
+  kind: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Un bloque como llega desde el editor. */
+export interface ZonaEntrada {
+  key: string;
+  name: string;
+  kind: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 @Injectable()
 export class PersonsRepository {
   /**
@@ -288,11 +318,12 @@ export class PersonsRepository {
   }
 
   /** El plano del lugar, tal como lo subió esta empresa. */
-  async plano(client: PoolClient): Promise<string | null> {
-    const { rows } = await client.query<{ image: string }>(
-      `SELECT image FROM floor_plans LIMIT 1`,
+  async plano(client: PoolClient): Promise<Plano | null> {
+    const { rows } = await client.query<{ image: string; width: number | null; height: number | null }>(
+      `SELECT image, width, height FROM floor_plans LIMIT 1`,
     );
-    return rows[0]?.image ?? null;
+    const f = rows[0];
+    return f ? { image: f.image, ancho: f.width, alto: f.height } : null;
   }
 
   /** Reemplaza el plano. Hay uno solo por empresa. */
@@ -301,15 +332,68 @@ export class PersonsRepository {
     organizationId: string,
     image: string,
     userId: string,
+    ancho: number | null,
+    alto: number | null,
   ): Promise<void> {
     await client.query(
-      `INSERT INTO floor_plans (organization_id, image, updated_by, updated_at)
-       VALUES ($1, $2, $3, now())
+      `INSERT INTO floor_plans (organization_id, image, width, height, updated_by, updated_at)
+       VALUES ($1, $2, $3, $4, $5, now())
        ON CONFLICT (organization_id)
-       DO UPDATE SET image = EXCLUDED.image, updated_by = EXCLUDED.updated_by,
-                     updated_at = now()`,
-      [organizationId, image, userId],
+       DO UPDATE SET image = EXCLUDED.image, width = EXCLUDED.width, height = EXCLUDED.height,
+                     updated_by = EXCLUDED.updated_by, updated_at = now()`,
+      [organizationId, image, ancho, alto, userId],
     );
+  }
+
+  // ── Los bloques del plano ────────────────────────────────────────────
+
+  /** Los bloques dibujados, de arriba a abajo y de izquierda a derecha. */
+  async zonas(client: PoolClient): Promise<ZonaFila[]> {
+    const { rows } = await client.query<ZonaFila>(
+      `SELECT id, key, name, kind, x, y, w, h FROM floor_zones ORDER BY y, x`,
+    );
+    return rows;
+  }
+
+  /** Cuánta gente tiene asignado cada bloque. */
+  async personasPorZona(client: PoolClient): Promise<Record<string, number>> {
+    const { rows } = await client.query<{ work_zone: string; n: string }>(
+      `SELECT work_zone, count(*)::text AS n FROM persons
+        WHERE work_zone IS NOT NULL AND active GROUP BY work_zone`,
+    );
+    return Object.fromEntries(rows.map((r) => [r.work_zone, Number(r.n)]));
+  }
+
+  /**
+   * Reemplaza el plano entero por el que quedó dibujado.
+   *
+   * Se guarda todo junto y no bloque por bloque porque el editor es una sola
+   * pantalla con un botón de guardar: si cada arrastre fuera un PUT, un
+   * navegador que se cierra a la mitad dejaría medio plano nuevo y medio viejo.
+   *
+   * `key` se conserva para los bloques que ya existían —es lo que guardan las
+   * personas— y sólo se inventa para los nuevos.
+   */
+  async guardarZonas(
+    client: PoolClient,
+    organizationId: string,
+    zonas: ZonaEntrada[],
+  ): Promise<void> {
+    const vivos = zonas.map((z) => z.key);
+    await client.query(
+      `DELETE FROM floor_zones WHERE NOT (key = ANY($1::text[]))`,
+      [vivos],
+    );
+    for (const z of zonas) {
+      await client.query(
+        `INSERT INTO floor_zones (organization_id, key, name, kind, x, y, w, h)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (organization_id, key)
+         DO UPDATE SET name = EXCLUDED.name, kind = EXCLUDED.kind, x = EXCLUDED.x,
+                       y = EXCLUDED.y, w = EXCLUDED.w, h = EXCLUDED.h, updated_at = now()`,
+        [organizationId, z.key, z.name, z.kind, z.x, z.y, z.w, z.h],
+      );
+    }
   }
 
   /** Asigna la zona del plano donde trabaja. */

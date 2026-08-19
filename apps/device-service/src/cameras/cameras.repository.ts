@@ -15,6 +15,8 @@ export interface CameraDto {
   fps: number | null;
   enabled: boolean;
   moduleCount: number;
+  /** En qué bloque del plano está parada. Null = todavía no se dijo. */
+  floorZoneId: string | null;
   createdAt: string;
 }
 
@@ -43,6 +45,7 @@ export interface AssignmentDto {
 }
 
 const CAM_COLS = `c.id, c.organization_id, c.site_id, c.name, c.location, c.status, c.created_at,
+  c.floor_zone_id,
   s.rtsp_url, s.width, s.height, s.fps,
   (SELECT count(*) FROM camera_module_configs m WHERE m.camera_id = c.id AND m.enabled) AS module_count`;
 
@@ -54,6 +57,7 @@ interface CamRow {
   location: string | null;
   status: string;
   created_at: Date;
+  floor_zone_id: string | null;
   rtsp_url: string | null;
   width: number | null;
   height: number | null;
@@ -76,6 +80,7 @@ function toCamera(r: CamRow): CameraDto {
     fps: r.fps === null ? null : Number(r.fps),
     enabled: r.status !== 'disabled',
     moduleCount: Number(r.module_count ?? 0),
+    floorZoneId: r.floor_zone_id ?? null,
     createdAt: r.created_at.toISOString(),
   };
 }
@@ -215,6 +220,21 @@ export class CamerasRepository {
       configSchema: r.config_schema ?? {},
       status: r.status,
     }));
+  }
+
+  /**
+   * Dice en qué parte del lugar está parada una cámara.
+   *
+   * No valida que la zona exista: de eso se encarga la clave foránea, que
+   * además garantiza que sea una zona de esta misma organización porque la
+   * consulta corre con la RLS puesta.
+   */
+  async ponerZona(client: PoolClient, cameraId: string, zoneId: string | null): Promise<boolean> {
+    const r = await client.query(
+      `UPDATE cameras SET floor_zone_id = $2, updated_at = now() WHERE id = $1`,
+      [cameraId, zoneId],
+    );
+    return (r.rowCount ?? 0) > 0;
   }
 
   // ── asignaciones cámara ↔ módulo ───────────────────────────────────
