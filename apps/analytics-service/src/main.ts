@@ -16,7 +16,9 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.useBodyParser('json', { limit: LIMITE_CUERPO });
   app.setGlobalPrefix('api/v1');
-  const port = Number(process.env.PORT ?? 3005);
+  // Su propia variable antes que `PORT`, como el resto de los servicios: con
+  // `PORT` a secas, dos servicios levantados juntos se pisan.
+  const port = Number(process.env.ANALYTICS_SERVICE_PORT ?? process.env.PORT ?? 3005);
   await app.listen(port);
   // eslint-disable-next-line no-console
   console.log(`[analytics-service] escuchando en :${port}`);
