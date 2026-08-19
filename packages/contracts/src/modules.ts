@@ -49,3 +49,18 @@ export interface ModuleManifest {
     targetFps?: number;
   };
 }
+
+/**
+ * Clave del módulo de ingreso de personas.
+ *
+ * Está acá y no suelta en cada servicio porque tres lugares distintos tienen
+ * que coincidir en el string exacto: analytics-service (que cierra los
+ * endpoints de personas), identity-service (que decide si emite la sesión de
+ * la pantalla de bienvenida) y el frontend (que muestra u oculta el menú). Si
+ * alguno se desfasa, la función queda medio prendida: menú visible con
+ * endpoints que rechazan, o al revés.
+ *
+ * El valor tiene que ser igual al `moduleKey` de modules/person-entry/module.json
+ * y a `ai_modules.module_key` en la base (migración 0013).
+ */
+export const MODULO_INGRESO_DE_PERSONAS = 'person-entry';

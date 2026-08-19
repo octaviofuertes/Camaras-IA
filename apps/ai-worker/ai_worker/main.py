@@ -35,6 +35,10 @@ SERVICE_TOKEN = os.environ.get("SERVICE_TOKEN", "")
 DEVICE = os.environ.get("AI_WORKER_DEVICE", "cpu")
 ASSIGNMENTS_FILE = Path(os.environ.get("ASSIGNMENTS_FILE", "./assignments.json"))
 PIPELINE_FPS = float(os.environ.get("PIPELINE_FPS", "3"))
+# Clave del módulo de ingreso de personas. Igual que en
+# packages/contracts/src/modules.ts y en modules/person-entry/module.json.
+MODULO_INGRESO = "person-entry"
+
 # Cada cuánto se revisa si cambiaron las asignaciones en el dashboard.
 SYNC_SECONDS = float(os.environ.get("ASSIGNMENT_SYNC_SECONDS", "15"))
 
@@ -69,7 +73,7 @@ def preparar_modulo(a: dict) -> dict:
 
     Antes no había capas: se usaba la config de la base tal cual y, para lo que
     faltara, un valor adivinado a partir del NOMBRE del módulo —de
-    'person-identification' salía el evento 'person.detected', que ese módulo no
+    'person-entry' salía el evento 'person.detected', que ese módulo no
     emite—. Una asignación con config vacía quedaba corriendo con reglas que no
     eran de nadie, y la alerta se descartaba sin dejar rastro.
     """
@@ -221,9 +225,10 @@ def _arrancar_pipelines() -> None:
                 log.warning("[%s] el módulo %s no está disponible", a.camera_id, m["moduleKey"])
                 continue
 
-            # Dependencias entre módulos. `workstation-activity` declara que
-            # necesita `person-identification`: sin él sólo puede medir el
-            # puesto, no atribuirle el tiempo a nadie.
+            # Dependencias entre módulos: un manifiesto puede declarar en
+            # `requires` que necesita otro módulo asignado a la MISMA cámara.
+            # Es el mismo criterio que usa el producto entero —una función
+            # existe donde su módulo está asignado— aplicado entre plugins.
             requiere = list(disc.manifest.get("requires") or [])
             faltan = [r for r in requiere if r not in asignados]
             if faltan:
@@ -404,17 +409,22 @@ def _detector_de_caras():
     """El detector con el que se analizan las fotos que llegan por HTTP.
 
     Se prefiere la instancia que ya tiene cargada un pipeline: es el mismo
-    modelo y evita ocupar memoria dos veces. Pero si no hay ninguna —porque las
-    cámaras están apagadas o el módulo no está asignado— se carga una propia.
+    modelo y evita ocupar memoria dos veces. Pero si no hay ninguna —porque la
+    cámara está apagada o todavía no arrancó su pipeline— se carga una propia.
 
     Antes esto devolvía un error y dejaba sin funcionar el alta de personas y la
     pantalla de bienvenida cada vez que se caía una cámara, que es justamente
     cuando alguien puede estar cargando gente.
+
+    Que exista este respaldo NO abre la función cuando el módulo no está
+    asignado: quien decide eso es analytics-service, que contesta 409 antes de
+    llegar hasta acá. Este detector sólo cubre el hueco entre "el módulo está
+    asignado" y "el pipeline de esa cámara ya está andando".
     """
     global _app_fotos
 
     inst = next(
-        (v for k, v in _instances.items() if k.endswith(":person-identification")), None
+        (v for k, v in _instances.items() if k.endswith(f":{MODULO_INGRESO}")), None
     )
     propia = getattr(inst, "_app", None) if inst is not None else None
     if propia is not None:

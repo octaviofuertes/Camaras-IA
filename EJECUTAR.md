@@ -65,6 +65,27 @@ se guarda en la base y `media-service` la detecta y empieza a capturar en menos 
 sin reiniciar nada. Para asignarle capacidades, arrastrá un módulo del catálogo sobre
 ella: eso escribe `camera_module_configs` y el `ai-worker` lo levanta en su próximo ciclo.
 
+### Un módulo asignado es lo que enciende una función
+
+Asignar no es sólo "esta cámara además hace esto": para algunos módulos es lo que hace
+existir la función en toda la aplicación.
+
+**Ingreso de personas** es el primero que funciona así. Sin ninguna cámara que lo tenga
+asignado:
+
+- las secciones **Reconocimiento** y **Accesos** no aparecen en el menú, y entrar por
+  la URL a mano rebota a Cámaras con el motivo escrito;
+- la **pantalla de bienvenida** no se puede abrir: el botón "Panel de cámara" del login
+  contesta que falta asignar el módulo, y ni siquiera se emite la sesión del kiosco;
+- los endpoints de `/api/v1/persons` contestan **409** con el mismo motivo.
+
+Se apaga y se prende arrastrando el módulo, sin reiniciar nada: el menú reacciona al
+instante y el backend en menos de diez segundos.
+
+La única excepción es **borrar una persona**, que sigue funcionando con el módulo
+desasignado. Es a propósito: si no, quitar el módulo dejaría encerrados los datos
+biométricos ya cargados, sin pantalla ni endpoint para eliminarlos.
+
 ### Las cámaras actuales
 
 Hay **dos webcams configuradas como fuentes independientes**:

@@ -146,3 +146,11 @@
   color: rgba(255, 255, 255, .58);
   strong { color: rgba(255, 255, 255, .9); font-variant-numeric: tabular-nums; }
 }
+
+/* Lo que se muestra cuando la pantalla no está habilitada. Sobrio: es un
+   problema de configuración, no una alarma para quien está enfrente. */
+.aviso {
+  max-width: 46ch; text-align: center;
+  h1 { font-size: 30px; font-weight: 600; letter-spacing: -.4px; margin-bottom: 14px; }
+  p { font-size: 16px; line-height: 1.65; color: rgba(255, 255, 255, .62); }
+}

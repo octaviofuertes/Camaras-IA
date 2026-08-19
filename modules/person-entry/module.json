@@ -1,8 +1,8 @@
 {
   "schemaVersion": "1.0.0",
-  "moduleKey": "person-identification",
-  "name": "Control de accesos",
-  "description": "Reconoce a las personas dadas de alta, registra a qué hora pasó cada una y avisa cuando entra alguien sin acceso. Requiere consentimiento expreso registrado por persona. A quien no está dado de alta no se le guarda ningún dato biométrico.",
+  "moduleKey": "person-entry",
+  "name": "Ingreso de personas",
+  "description": "Reconoce a las personas dadas de alta cuando entran, registra a qué hora pasó cada una y avisa cuando entra alguien sin acceso. Incluye la pantalla de bienvenida que saluda a quien llega y le muestra su zona en el plano. Requiere consentimiento expreso registrado por persona. A quien no está dado de alta no se le guarda ningún dato biométrico.",
   "version": "1.0.0",
   "pluginApiVersion": "1.0.0",
   "category": "security",

@@ -6,6 +6,10 @@ import type { ModuleCategory } from './models';
  * Si aparece un módulo nuevo sin entrada propia, cae al ícono de su categoría.
  */
 export const ICON_BY_KEY: Record<string, { icon: string; color: string }> = {
+  // Sin esta entrada el módulo cae al ícono genérico de 'security' (rojo) en
+  // la pantalla de Cámaras, mientras que en Eventos y Dashboard sale celeste
+  // con gente: el mismo módulo con dos caras según dónde se lo mire.
+  'person-entry': { icon: 'people', color: '#0ea5e9' },
   'person-detection': { icon: 'people', color: '#3b82f6' },
   'people-counting': { icon: 'people', color: '#3b82f6' },
   'helmet-detection': { icon: 'helmet', color: '#f59e0b' },

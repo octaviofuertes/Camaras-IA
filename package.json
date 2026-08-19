@@ -20,7 +20,7 @@
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down",
     "infra:logs": "docker compose logs -f",
-    "db:migrate": "docker compose exec -T postgres psql -U percepta -d percepta -v ON_ERROR_STOP=1 -f /migrations/0001_init.sql -f /migrations/0003_rls_hardening.sql -f /migrations/0007_personas.sql -f /migrations/0002_seed.sql -f /migrations/0004_admin_user.sql -f /migrations/0005_fall_feedback.sql -f /migrations/0008_control_accesos.sql -f /migrations/0009_foto_persona.sql -f /migrations/0010_zona_de_trabajo.sql -f /migrations/0011_kiosco.sql -f /migrations/0012_plano.sql",
+    "db:migrate": "docker compose exec -T postgres psql -U percepta -d percepta -v ON_ERROR_STOP=1 -f /migrations/0001_init.sql -f /migrations/0003_rls_hardening.sql -f /migrations/0007_personas.sql -f /migrations/0002_seed.sql -f /migrations/0004_admin_user.sql -f /migrations/0005_fall_feedback.sql -f /migrations/0008_control_accesos.sql -f /migrations/0009_foto_persona.sql -f /migrations/0010_zona_de_trabajo.sql -f /migrations/0011_kiosco.sql -f /migrations/0012_plano.sql -f /migrations/0013_modulo_ingreso.sql",
     "db:reset": "docker compose exec -T postgres psql -U percepta -d postgres -c \"DROP DATABASE IF EXISTS percepta WITH (FORCE);\" -c \"CREATE DATABASE percepta OWNER percepta;\" && pnpm db:migrate",
     "smoke": "tsc -p tools/smoke/tsconfig.json && node tools/smoke/build/tools/smoke/smoke.js",
     "start": "node tools/start-all.js"

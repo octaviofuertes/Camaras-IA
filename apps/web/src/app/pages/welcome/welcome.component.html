@@ -9,7 +9,7 @@
   <div class="hora">{{ hora }}</div>
 
   <!-- Nadie enfrente -->
-  <div class="centro" *ngIf="!persona">
+  <div class="centro" *ngIf="!persona && !errorModulo">
     <div class="esperando">
       <svg viewBox="0 0 24 24" width="52" height="52" fill="none" stroke="currentColor" stroke-width="1.4">
         <circle cx="12" cy="9" r="3.6" />
@@ -18,6 +18,15 @@
       <h1>Acercate a la cámara</h1>
       <p *ngIf="!errorCamara">Mirá de frente y te digo dónde te toca hoy.</p>
       <p class="error" *ngIf="errorCamara">{{ errorCamara }}</p>
+    </div>
+  </div>
+
+  <!-- La pantalla no está habilitada. Se dice acá y no en un log: quien la
+       encendió está parado enfrente esperando que haga algo. -->
+  <div class="centro" *ngIf="errorModulo">
+    <div class="aviso">
+      <h1>Pantalla no habilitada</h1>
+      <p>{{ errorModulo }}</p>
     </div>
   </div>
 

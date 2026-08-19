@@ -1,5 +1,5 @@
 import type { Routes } from '@angular/router';
-import { sesionRequerida, soloPersonas } from './core/auth.guard';
+import { moduloIngresoAsignado, sesionRequerida, soloPersonas } from './core/auth.guard';
 
 export const APP_ROUTES: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'login' },
@@ -35,14 +35,14 @@ export const APP_ROUTES: Routes = [
   },
   {
     path: 'reconocimiento',
-    canActivate: [soloPersonas],
+    canActivate: [soloPersonas, moduloIngresoAsignado],
     title: 'Reconocimiento — VisionAI',
     loadComponent: () =>
       import('./pages/recognition/recognition.component').then((m) => m.RecognitionComponent),
   },
   {
     path: 'accesos',
-    canActivate: [soloPersonas],
+    canActivate: [soloPersonas, moduloIngresoAsignado],
     title: 'Registro de accesos — VisionAI',
     loadComponent: () => import('./pages/reports/reports.component').then((m) => m.ReportsComponent),
   },

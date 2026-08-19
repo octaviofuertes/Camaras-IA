@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { filter } from 'rxjs';
 import { AuthService } from './core/auth.service';
+import { MODULO_INGRESO, ModulosService } from './core/modulos.service';
 
 @Component({
   selector: 'px-root',
@@ -52,7 +53,12 @@ import { AuthService } from './core/auth.service';
             </svg>
             <span>Eventos</span>
           </a>
-          <a class="nav-item" routerLink="/reconocimiento" routerLinkActive="active">
+          <!-- Reconocimiento y Accesos son las dos pantallas del módulo
+               "Ingreso de personas": aparecen sólo si hay una cámara con el
+               módulo asignado. Si no se pudo averiguar, se muestran igual (ver
+               ModulosService): esconderlas por un servicio caído sería peor. -->
+          <a class="nav-item" *ngIf="hayIngresoDePersonas"
+             routerLink="/reconocimiento" routerLinkActive="active">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
               <circle cx="12" cy="10" r="2.5" />
@@ -60,7 +66,8 @@ import { AuthService } from './core/auth.service';
             </svg>
             <span>Reconocimiento</span>
           </a>
-          <a class="nav-item" routerLink="/accesos" routerLinkActive="active">
+          <a class="nav-item" *ngIf="hayIngresoDePersonas"
+             routerLink="/accesos" routerLinkActive="active">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M3 3v18h18" />
               <path d="M7 15l3.5-4 3 3L20 7" />
@@ -217,7 +224,17 @@ export class AppComponent {
   /** La ruta actual es la pantalla de kiosco: se dibuja sin ningún marco. */
   soloKiosco = false;
 
+  /**
+   * ¿Hay alguna cámara con el módulo de ingreso de personas?
+   *
+   * Arranca en true a propósito: mientras no se sepa, la función se muestra.
+   * Al revés el menú parpadearía —se dibuja completo, se achica— y quien lo
+   * mire va a creer que perdió una sección.
+   */
+  hayIngresoDePersonas = true;
+
   private readonly auth = inject(AuthService);
+  private readonly modulos = inject(ModulosService);
 
   nombreUsuario(): string {
     const u = this.auth.user;
@@ -231,6 +248,8 @@ export class AppComponent {
   /** Cierra la sesión y vuelve al login. */
   salir(): void {
     this.auth.logout();
+    // Lo que tenga esta organización asignado no vale para la próxima.
+    this.modulos.olvidar();
     void this.router.navigateByUrl('/login');
   }
 
@@ -244,5 +263,20 @@ export class AppComponent {
     this.router.events
       .pipe(filter((e): e is NavigationEnd => e instanceof NavigationEnd))
       .subscribe((e) => (this.soloKiosco = sinMarco(e.urlAfterRedirects)));
+
+    // El menú sigue al estado compartido, así no se contradice con el guard.
+    this.modulos.cambios().subscribe((mapa) => {
+      this.hayIngresoDePersonas = mapa[MODULO_INGRESO] !== false;
+    });
+
+    // Se pregunta al entrar al panel, no al arrancar la aplicación: en el
+    // login y en el kiosco no hay sesión que pueda consultarlo.
+    this.router.events
+      .pipe(filter((e): e is NavigationEnd => e instanceof NavigationEnd))
+      .subscribe((e) => {
+        if (!sinMarco(e.urlAfterRedirects) && this.modulos.asignado(MODULO_INGRESO) === null) {
+          this.modulos.refrescar().subscribe();
+        }
+      });
   }
 }

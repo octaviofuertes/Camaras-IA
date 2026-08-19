@@ -1,6 +1,8 @@
 import { inject } from '@angular/core';
 import { Router, type CanActivateFn } from '@angular/router';
+import { map } from 'rxjs';
 import { AuthService } from './auth.service';
+import { MODULO_INGRESO, ModulosService } from './modulos.service';
 
 /**
  * Sin sesión no se entra: manda al login.
@@ -27,4 +29,27 @@ export const soloPersonas: CanActivateFn = () => {
   const router = inject(Router);
   if (!auth.hasValidToken()) return router.createUrlTree(['/login']);
   return auth.esKiosco() ? router.createUrlTree(['/bienvenida']) : true;
+};
+
+/**
+ * Las pantallas del módulo de ingreso de personas sólo existen donde el módulo
+ * esté asignado a una cámara.
+ *
+ * Esconder el ítem del menú no alcanza: la URL se escribe a mano y queda
+ * guardada en los favoritos de cualquiera que la usó cuando sí estaba. Sin
+ * esto, la pantalla se abriría y se llenaría de errores 409 sin explicar de
+ * dónde salen.
+ *
+ * Manda a Cámaras y no al Dashboard porque Cámaras es donde se arregla: el que
+ * entró buscando esta función necesita saber que le falta asignar el módulo,
+ * no aterrizar en otro lado sin explicación.
+ */
+export const moduloIngresoAsignado: CanActivateFn = () => {
+  const modulos = inject(ModulosService);
+  const router = inject(Router);
+  return modulos
+    .disponible(MODULO_INGRESO)
+    .pipe(map((hay) => (hay ? true : router.createUrlTree(['/camaras'], {
+      queryParams: { falta: MODULO_INGRESO },
+    }))));
 };

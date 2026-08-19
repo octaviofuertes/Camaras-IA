@@ -273,6 +273,14 @@
   border: 1px solid rgba(239, 68, 68, 0.3);
   color: #fca5a5;
 }
+/* No es un error: es una instrucción. Ámbar y no rojo, porque no se rompió
+   nada — falta un paso de configuración y está a la vista, abajo. */
+.banner.aviso {
+  background: rgba(245, 158, 11, 0.09);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fcd34d;
+  strong { color: #fde68a; }
+}
 .banner svg { flex-shrink: 0; margin-top: 1px; }
 code { background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
 .loading { display: flex; align-items: center; gap: 10px; padding: 30px; color: var(--text-dim); font-size: 13px; }

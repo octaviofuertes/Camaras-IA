@@ -20,8 +20,8 @@ export const AI_MODULES: AiModule[] = [
   },
   {
     id: 'm-access',
-    moduleKey: 'person-identification',
-    name: 'Control de accesos',
+    moduleKey: 'person-entry',
+    name: 'Ingreso de personas',
     description: 'Reconoce quién entra, registra a qué hora y alerta si no tiene acceso',
     category: 'security',
     color: '#0ea5e9',

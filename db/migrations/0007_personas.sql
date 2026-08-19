@@ -63,21 +63,11 @@ CREATE TABLE IF NOT EXISTS person_faces (
 CREATE INDEX IF NOT EXISTS person_faces_person_idx ON person_faces (person_id);
 CREATE INDEX IF NOT EXISTS person_faces_org_idx ON person_faces (organization_id);
 
--- ── Actividad nominal ──────────────────────────────────────────────────────
--- Va en su propia tabla y no como columna de `activity_samples` para no mezclar
--- dos cosas distintas: aquélla mide el PUESTO y sigue valiendo aunque no haya
--- nadie identificado. Ésta atribuye tiempo a una persona.
---
--- `person_id` nulo significa "había alguien y no se pudo identificar". Ese
--- tiempo se reporta aparte y NO se reparte entre los identificados: repartirlo
--- le sumaría a un empleado minutos que quizá fueron de un visitante.
-CREATE INDEX IF NOT EXISTS person_activity_persona_idx
-CREATE INDEX IF NOT EXISTS person_activity_org_idx
-
 -- ── Aislamiento entre empresas ─────────────────────────────────────────────
 DO $$
 DECLARE t text;
 BEGIN
+    FOREACH t IN ARRAY ARRAY['persons', 'person_faces'] LOOP
         EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
         EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
         EXECUTE format('DROP POLICY IF EXISTS %I_select ON %I', t, t);

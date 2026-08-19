@@ -2,6 +2,7 @@ import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import type { Permission } from '@percepta/contracts';
+import { MODULO_INGRESO_DE_PERSONAS } from '@percepta/contracts';
 import { DatabaseService } from '../db/database.service';
 
 export interface LoginResult {
@@ -119,6 +120,37 @@ export class AuthService {
     });
     if (!user || user.status !== 'active') {
       throw new UnauthorizedException('La pantalla de bienvenida no está habilitada');
+    }
+
+    // La pantalla de bienvenida es una pieza del módulo "Ingreso de personas".
+    // Si la organización no tiene ninguna cámara con ese módulo asignado, la
+    // pantalla no existe, y la sesión que la enciende no se emite.
+    //
+    // El corte va acá y no sólo en el frontend porque este endpoint no pide
+    // credenciales: es la llave que abre el kiosco, y una llave que se entrega
+    // a cualquiera que la pida tiene que verificar ella misma que haya algo
+    // detrás de la puerta. Esconder el botón deja la llave igual de repartida.
+    //
+    // El filtro por organización va explícito porque `asAdmin` no pasa por la
+    // RLS: acá no hay nadie que recorte las filas por nosotros.
+    const asignado = await this.db.asAdmin(async (client) => {
+      const { rows } = await client.query<{ hay: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1
+             FROM camera_module_configs cmc
+             JOIN ai_modules m ON m.id = cmc.ai_module_id
+            WHERE m.module_key = $1 AND cmc.enabled
+              AND cmc.organization_id = $2
+         ) AS hay`,
+        [MODULO_INGRESO_DE_PERSONAS, user.organization_id],
+      );
+      return rows[0]?.hay === true;
+    });
+    if (!asignado) {
+      throw new UnauthorizedException(
+        'La pantalla de bienvenida necesita que el módulo "Ingreso de personas" esté ' +
+          'asignado a una cámara. Asignalo desde la sección Cámaras.',
+      );
     }
 
     const permissions = await this.permissionsOf(user.id);

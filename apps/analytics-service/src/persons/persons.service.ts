@@ -430,8 +430,10 @@ export class PersonsService {
       if (err instanceof BadRequestException) throw err;
       this.logger.error(`no se pudo hablar con el worker para analizar la foto: ${err}`);
       throw new BadRequestException(
-        'El servicio de reconocimiento no responde. Revisá que el módulo de control de ' +
-          'accesos esté asignado a una cámara y que el worker esté corriendo.',
+        // Ya no menciona la asignación del módulo: si no estuviera asignado,
+        // el pedido no habría llegado hasta acá — lo corta el guard antes.
+        // Mezclar las dos causas mandaba a revisar lo que estaba bien.
+        'El servicio de reconocimiento no responde. Revisá que el worker esté corriendo.',
       );
     }
 

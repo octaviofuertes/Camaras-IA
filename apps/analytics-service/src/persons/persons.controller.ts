@@ -14,11 +14,26 @@ import {
 import type { Request } from 'express';
 import { JwtGuard } from '../auth/jwt.guard';
 import { PermissionsGuard, RequirePermissions } from '../auth/permissions.guard';
+import { ModuloAsignadoGuard, RequiereModulo, SinModulo } from '../auth/modulo.guard';
+import { MODULO_INGRESO_DE_PERSONAS } from '@percepta/contracts';
 import { PersonsService } from './persons.service';
 import type { AuthContext } from '../auth/auth.types';
 
+/**
+ * Todo lo que sabe el sistema sobre quién entra y a qué hora.
+ *
+ * El controlador entero pertenece al módulo "Ingreso de personas": sin una
+ * cámara que lo tenga asignado, esta función no existe para la organización y
+ * los endpoints contestan 409. No es una restricción de permisos —un
+ * administrador los tiene todos igual— sino de finalidad: no corresponde
+ * guardar la cara de un empleado si no hay ninguna cámara que vaya a
+ * reconocerla.
+ *
+ * Las excepciones están marcadas una por una con @SinModulo() y su motivo.
+ */
 @Controller('persons')
-@UseGuards(JwtGuard, PermissionsGuard)
+@UseGuards(JwtGuard, PermissionsGuard, ModuloAsignadoGuard)
+@RequiereModulo(MODULO_INGRESO_DE_PERSONAS)
 export class PersonsController {
   constructor(private readonly persons: PersonsService) {}
 
@@ -103,6 +118,12 @@ export class PersonsController {
    */
   @Delete(':id')
   @RequirePermissions('persons:write')
+  // Queda FUERA del módulo a propósito. Si alguien saca el módulo de todas las
+  // cámaras, la gente que ya se dio de alta tiene que poder borrarse igual: si
+  // no, desasignar el módulo dejaría la biometría encerrada, sin pantalla ni
+  // endpoint que la elimine. Borrar nunca puede depender de tener contratada
+  // la función que creó el dato.
+  @SinModulo()
   async baja(@Req() req: Request, @Param('id', new ParseUUIDPipe()) id: string) {
     await this.persons.baja(req.auth as AuthContext, id);
     return { ok: true };
@@ -111,6 +132,12 @@ export class PersonsController {
   /** Alta de un paso, desde el pipeline. */
   @Post('sightings')
   @RequirePermissions('events:ingest')
+  // Fuera del módulo: lo postea el pipeline, que ya sólo corre donde el módulo
+  // está asignado. Ponerle la puerta acá agregaría una carrera —el worker se
+  // entera de la asignación cada 15 s y el guard recuerda 10 s— que perdería
+  // pasos reales justo después de asignar el módulo. La puerta de este
+  // endpoint es `events:ingest`, que ningún rol humano tiene.
+  @SinModulo()
   async paso(
     @Req() req: Request,
     @Body() body: Record<string, unknown>,
@@ -240,6 +267,8 @@ export class PersonsController {
   /** Reporte de presencia del pipeline: quién está en el cuadro ahora. */
   @Post('presence')
   @RequirePermissions('events:ingest')
+  // Fuera del módulo, por el mismo motivo que `sightings`: viene del pipeline.
+  @SinModulo()
   async presencia(
     @Body() body: { cameraId?: string; presentes?: unknown[] },
   ): Promise<{ ok: true }> {

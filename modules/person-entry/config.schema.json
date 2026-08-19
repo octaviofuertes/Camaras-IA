@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Configuración de Identificación de personas",
+  "title": "Configuración de Ingreso de personas",
   "description": "Reconoce a los empleados dados de alta con consentimiento registrado. De quien no está dado de alta no se guarda nada persistente.",
   "type": "object",
   "properties": {

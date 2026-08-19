@@ -37,7 +37,7 @@
         No hay nadie identificado frente a la cámara en este momento.
       </ng-container>
       <ng-container *ngIf="!haySenalEnVivo">
-        Sin señal en vivo: ninguna cámara con el módulo de accesos está reportando.
+        Sin señal en vivo: ninguna cámara con el módulo de ingreso de personas está reportando.
         No es lo mismo que no haya nadie — es que nadie está mirando.
       </ng-container>
     </div>
@@ -107,9 +107,10 @@
       <div class="panel vacio" *ngIf="!reg.pasos.length">
         <h3>No hay pasos registrados en este rango</h3>
         <p>
-          El registro se llena con el módulo <strong>Control de accesos</strong>. Para que
-          aparezcan datos, asignalo a una cámara desde la sección Cámaras y dá de alta a las
-          personas respondiendo las preguntas que aparecen en Eventos.
+          El registro se llena con el módulo <strong>Ingreso de personas</strong>, que ya
+          está asignado a una cámara. Para que aparezcan datos, dá de alta a las personas
+          desde la sección <strong>Reconocimiento</strong>: hasta que el sistema no sepa
+          quién es cada uno, ve gente pero no puede anotar quién pasó.
         </p>
       </div>
 

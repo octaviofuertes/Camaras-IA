@@ -1,6 +1,6 @@
 import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { catchError, of } from 'rxjs';
 import { PLANO, ZONAS, zonaPorClave, type Zona } from '../../core/zonas';
 import { debeSaludar, vencio, type EstadoSaludo } from '../../core/saludo';
@@ -49,6 +49,16 @@ export class WelcomeComponent implements OnInit, OnDestroy {
   private ultimo: EstadoSaludo | null = null;
   camaraLista = false;
   errorCamara: string | null = null;
+  /**
+   * Por qué esta pantalla no puede funcionar.
+   *
+   * El caso que importa es que el módulo "Ingreso de personas" no esté
+   * asignado a ninguna cámara. La pantalla no puede preguntarlo por su cuenta
+   * —su sesión tiene un solo permiso y no llega al servicio de dispositivos—
+   * así que se entera por la respuesta del mismo pedido que ya hace: el
+   * servidor contesta 409 y explica qué falta.
+   */
+  errorModulo: string | null = null;
   buscando = false;
 
   private stream?: MediaStream;
@@ -120,11 +130,20 @@ export class WelcomeComponent implements OnInit, OnDestroy {
       .post<{ reconocido: Reconocido | null }>('/analytics/api/v1/persons/identify', {
         image: canvas.toDataURL('image/jpeg', 0.85),
       })
-      .pipe(catchError(() => of({ reconocido: null })))
+      .pipe(
+        catchError((err: HttpErrorResponse) => {
+          // 409 = el módulo no está asignado a ninguna cámara. Es lo único que
+          // esta pantalla puede diagnosticar de sí misma, y lo dice en vez de
+          // quedarse mirando una cámara que nunca va a reconocer a nadie.
+          this.errorModulo = err?.status === 409 ? String(err?.error?.message ?? '') : null;
+          return of({ reconocido: null });
+        }),
+      )
       .subscribe((r) => {
         this.buscando = false;
         const quien = r.reconocido;
         if (!quien) return;
+        this.errorModulo = null;
 
         const ahora = Date.now();
         if (!debeSaludar(this.ultimo, quien.personId, ahora)) return;

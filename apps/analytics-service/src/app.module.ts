@@ -6,6 +6,7 @@ import { DatabaseService } from './db/database.service';
 import { PersonsController } from './persons/persons.controller';
 import { PersonsService } from './persons/persons.service';
 import { PersonsRepository } from './persons/persons.repository';
+import { ModuloAsignadoGuard } from './auth/modulo.guard';
 
 @Module({
   imports: [
@@ -20,6 +21,9 @@ import { PersonsRepository } from './persons/persons.repository';
   providers: [
     DatabaseService,
     PersonsService, PersonsRepository,
+    // El guard consulta la base, así que Nest lo tiene que construir él (los
+    // que se listan en @UseGuards por clase se instancian con inyección).
+    ModuloAsignadoGuard,
   ],
 })
 export class AppModule {}

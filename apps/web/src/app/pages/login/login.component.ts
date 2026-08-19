@@ -52,12 +52,13 @@ export class LoginComponent {
     this.entrando = true;
     this.error = null;
 
-    this.auth.entrarComoKiosco().subscribe((ok) => {
+    this.auth.entrarComoKiosco().subscribe((r) => {
       this.entrando = false;
-      if (!ok) {
+      if (!r.ok) {
         this.error =
+          r.motivo ??
           'No se pudo abrir la pantalla de bienvenida. Revisá que el servicio de identidad ' +
-          'esté corriendo.';
+            'esté corriendo.';
         return;
       }
       void this.router.navigateByUrl('/bienvenida');

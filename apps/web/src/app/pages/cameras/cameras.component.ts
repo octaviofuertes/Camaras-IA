@@ -16,6 +16,9 @@ import {
 } from '../../core/cameras.service';
 import { CATEGORY_LABEL, type ModuleCategory } from '../../core/models';
 import { ICON_BY_CATEGORY, ICON_BY_KEY } from '../../core/module-visuals';
+import { ModulosService } from '../../core/modulos.service';
+import { ActivatedRoute } from '@angular/router';
+import { AI_MODULES } from '../../core/catalog';
 
 type FilterKey = 'all' | ModuleCategory;
 
@@ -51,6 +54,11 @@ export interface CameraView extends ApiCamera {
 })
 export class CamerasComponent implements OnInit, OnDestroy {
   private readonly api = inject(CamerasService);
+  private readonly modulos = inject(ModulosService);
+  private readonly ruta = inject(ActivatedRoute);
+
+  /** Nombre del módulo que hace falta asignar para la pantalla que se pidió. */
+  faltaModulo: string | null = null;
   private subs = new Subscription();
 
   readonly filters = FILTERS;
@@ -77,6 +85,16 @@ export class CamerasComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.reload();
+
+    // Alguien intentó entrar a una pantalla cuyo módulo no está asignado y el
+    // guard lo trajo acá. Sin este cartel el rebote es mudo: aterrizás en
+    // Cámaras sin saber por qué, y la conclusión razonable es que la
+    // aplicación se rompió.
+    const falta = this.ruta.snapshot.queryParamMap.get('falta');
+    if (falta) {
+      const nombre = AI_MODULES.find((m) => m.moduleKey === falta)?.name ?? falta;
+      this.faltaModulo = nombre;
+    }
     // Estado de captura y detecciones en vivo
     this.subs.add(
       interval(4000).pipe(startWith(0), switchMap(() => this.api.mediaStatus())).subscribe((ms) => {
@@ -169,6 +187,7 @@ export class CamerasComponent implements OnInit, OnDestroy {
         if (ok) {
           this.flash(`"${mod.name}" asignado a ${camera.name}. Reiniciá el ai-worker para que lo tome.`, 'ok');
           this.reload(true);
+          this.avisarQueCambioElMenu();
         } else {
           this.flash('No se pudo asignar el módulo', 'error');
         }
@@ -178,6 +197,18 @@ export class CamerasComponent implements OnInit, OnDestroy {
         this.flash(`No se pudo asignar: ${e?.message ?? e}`, 'error');
       },
     });
+  }
+
+  /**
+   * Asignar o quitar un módulo enciende y apaga funciones del producto.
+   *
+   * Esta pantalla es la única desde donde eso cambia, así que es la única que
+   * puede avisar. Sin esto, alguien asigna "Ingreso de personas" y el menú
+   * sigue igual hasta que recarga la página — y lo razonable es concluir que
+   * no funcionó y volver a arrastrarlo.
+   */
+  private avisarQueCambioElMenu(): void {
+    this.modulos.refrescar().subscribe();
   }
 
   /** Valores por defecto tomados del JSON Schema del módulo (CONTRACTS §4). */
@@ -197,6 +228,7 @@ export class CamerasComponent implements OnInit, OnDestroy {
       if (ok) {
         this.flash(`"${a.moduleName}" quitado de ${camera.name}`, 'ok');
         this.reload(true);
+        this.avisarQueCambioElMenu();
       } else {
         this.flash('No se pudo quitar el módulo', 'error');
       }

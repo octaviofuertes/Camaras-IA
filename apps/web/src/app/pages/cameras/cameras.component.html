@@ -10,6 +10,16 @@
 <div class="page">
   <div class="flash" *ngIf="notice" [class.err]="notice.kind === 'error'">{{ notice.text }}</div>
 
+  <div class="banner aviso" *ngIf="faltaModulo">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16v.5" />
+    </svg>
+    <span>
+      Esa pantalla es del módulo <strong>{{ faltaModulo }}</strong> y todavía no está asignado
+      a ninguna cámara. Arrastralo del catálogo de abajo sobre la cámara que mira la entrada.
+    </span>
+  </div>
+
   <div class="banner err" *ngIf="apiDown">
     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
       <path d="M12 3 2 20h20L12 3Z" /><path d="M12 10v4M12 17.5v.5" />

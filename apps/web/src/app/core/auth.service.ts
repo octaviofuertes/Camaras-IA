@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Observable, of, tap } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 
@@ -82,11 +82,18 @@ export class AuthService {
    * devuelve tiene un solo permiso —mandar una foto y recibir un saludo— así
    * que dejarlo en ese dispositivo no expone nada más.
    */
-  entrarComoKiosco(): Observable<boolean> {
+  entrarComoKiosco(): Observable<{ ok: boolean; motivo?: string }> {
     return this.http.post<LoginResponse>(`${this.api}/auth/kiosk`, {}).pipe(
       tap((r) => this.store(r)),
-      map(() => true),
-      catchError(() => of(false)),
+      map(() => ({ ok: true })),
+      // El motivo viaja hasta la pantalla en vez de perderse. El caso normal
+      // no es "falló": es que el módulo de ingreso de personas no está
+      // asignado a ninguna cámara, y eso el servidor lo dice con todas las
+      // letras. Tragárselo dejaría al usuario probando el botón sin saber que
+      // le falta asignar un módulo.
+      catchError((err: HttpErrorResponse) =>
+        of({ ok: false, motivo: err?.error?.message as string | undefined }),
+      ),
     );
   }
 

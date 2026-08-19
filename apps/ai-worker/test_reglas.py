@@ -51,7 +51,7 @@ def test_la_pregunta_por_un_desconocido_llega():
     """El caso que estaba roto: la clase no se llama 'person'."""
     p = pipeline()
     dispara, fuertes = p._evaluate(
-        modulo("person-identification", classes=["person.unknown"], minConfidence=0.45,
+        modulo("person-entry", classes=["person.unknown"], minConfidence=0.45,
                minPersistenceFrames=1, cooldownSeconds=3),
         [deteccion("person.unknown", 0.88)], _ModuleState(), now=1000.0,
     )
@@ -102,7 +102,7 @@ def test_sin_confirmar_si_espera_persistencia():
 def test_el_enfriamiento_no_deja_repetir():
     p = pipeline()
     st = _ModuleState()
-    cfg = modulo("person-identification", classes=["person.unknown"], minPersistenceFrames=1,
+    cfg = modulo("person-entry", classes=["person.unknown"], minPersistenceFrames=1,
                  cooldownSeconds=3)
     assert p._evaluate(cfg, [deteccion("person.unknown")], st, 1000.0)[0]
     st.last_event_ts = 1000.0
@@ -114,7 +114,7 @@ def test_la_confianza_baja_no_pregunta():
     """Una cara borrosa da un recorte que nadie puede reconocer."""
     p = pipeline()
     dispara, _ = p._evaluate(
-        modulo("person-identification", classes=["person.unknown"], minConfidence=0.45,
+        modulo("person-entry", classes=["person.unknown"], minConfidence=0.45,
                minPersistenceFrames=1),
         [deteccion("person.unknown", 0.2)], _ModuleState(), now=1000.0,
     )
@@ -136,7 +136,7 @@ def test_el_descarte_por_lista_blanca_se_registra(capsys=None):
     log.addHandler(espia)
     try:
         pipeline()._evaluate(
-            modulo("person-identification", classes=["person"]),
+            modulo("person-entry", classes=["person"]),
             [deteccion("person.unknown", 0.9)], _ModuleState(), now=1000.0,
         )
     finally:
@@ -150,11 +150,11 @@ def test_el_descarte_por_lista_blanca_se_registra(capsys=None):
 # ── lo que el módulo declara vs lo que el worker adivinaba ──────────
 
 def test_el_tipo_de_evento_sale_del_manifiesto():
-    """'person-identification' daba 'person.detected', un evento que no emite."""
+    """El worker adivinaba 'person.detected', un evento que este modulo no emite."""
     from ai_worker.main import _tipo_declarado
 
-    assert _tipo_declarado("person-identification", "type", "?") == "person.unknown"
-    assert _tipo_declarado("person-identification", "defaultSeverity", "?") == "low"
+    assert _tipo_declarado("person-entry", "type", "?") == "person.unknown"
+    assert _tipo_declarado("person-entry", "defaultSeverity", "?") == "low"
     assert _tipo_declarado("fall-detection", "type", "?") == "person.fall"
 
 
@@ -162,7 +162,7 @@ def test_los_defaults_del_schema_se_aplican():
     """Una asignación con config vacía tiene que comportarse como la del formulario."""
     from ai_worker.main import _defaults_del_modulo
 
-    d = _defaults_del_modulo("person-identification")
+    d = _defaults_del_modulo("person-entry")
     # Las dos alertas del módulo: la pregunta por un desconocido y el aviso de
     # que entró alguien sin acceso.
     assert d.get("classes") == ["person.unknown", "access.denied"], d
@@ -174,7 +174,7 @@ def test_una_asignacion_con_config_vacia_queda_usable():
     """Es la asignación que estaba rota: `{}` en la base, sin pasar por el formulario."""
     from ai_worker.main import preparar_modulo
 
-    m = preparar_modulo({"moduleKey": "person-identification", "aiModuleId": "id-1", "config": {}})
+    m = preparar_modulo({"moduleKey": "person-entry", "aiModuleId": "id-1", "config": {}})
     assert m["eventType"] == "person.unknown", m["eventType"]
     assert m["severity"] == "low"
     assert m["config"]["classes"] == ["person.unknown", "access.denied"]
@@ -207,7 +207,7 @@ def test_lo_que_configuro_la_camara_le_gana_al_modulo():
     from ai_worker.main import preparar_modulo
 
     m = preparar_modulo({
-        "moduleKey": "person-identification", "aiModuleId": "id-1",
+        "moduleKey": "person-entry", "aiModuleId": "id-1",
         "config": {"severity": "high", "minConfidence": 0.9},
     })
     assert m["severity"] == "high"
@@ -225,7 +225,7 @@ def test_cada_alerta_va_con_su_propio_tipo_de_evento():
     """
     from ai_worker.main import preparar_modulo
 
-    m = preparar_modulo({"moduleKey": "person-identification", "aiModuleId": "id-1", "config": {}})
+    m = preparar_modulo({"moduleKey": "person-entry", "aiModuleId": "id-1", "config": {}})
     grupos = pipeline()._por_tipo(m, [deteccion("person.unknown"), deteccion("access.denied")])
     por_tipo = {cfg["eventType"]: (cfg, dets) for cfg, dets in grupos}
 
@@ -241,7 +241,7 @@ def test_una_alerta_no_bloquea_a_la_otra_por_enfriamiento():
     from ai_worker.main import preparar_modulo
 
     p = pipeline()
-    m = preparar_modulo({"moduleKey": "person-identification", "aiModuleId": "id-1", "config": {}})
+    m = preparar_modulo({"moduleKey": "person-entry", "aiModuleId": "id-1", "config": {}})
     estados = {}
     disparos = []
     for cfg, dets in p._por_tipo(m, [deteccion("person.unknown"), deteccion("access.denied")]):
@@ -291,7 +291,7 @@ def _armar_payload(p, det):
     real = mod.requests.post
     mod.requests.post = post_falso
     try:
-        p._emit({"moduleKey": "person-identification", "aiModuleId": "id", "eventType":
+        p._emit({"moduleKey": "person-entry", "aiModuleId": "id", "eventType":
                  "access.denied", "severity": "high", "config": {}}, [det], 1000.0)
     finally:
         mod.requests.post = real
