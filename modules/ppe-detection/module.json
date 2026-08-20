@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "1.0.0",
+  "moduleKey": "ppe-detection",
+  "name": "Elementos de protección (EPP)",
+  "description": "Avisa cuando a una persona le falta un elemento de protección obligatorio en esa cámara: casco, chaleco, antiparras o guantes. Qué se exige se configura por cámara. Es una ayuda para que alguien mire, no un veredicto sobre nadie.",
+  "version": "1.0.0",
+  "pluginApiVersion": "1.0.0",
+  "category": "security",
+  "vendor": "percepta-core",
+  "model": {
+    "backend": "yolo",
+    "artifactRef": "training/models/epp.pt",
+    "classes": [
+      "Boots", "Gloves", "Goggles", "Hardhat", "NO-Gloves", "NO-Goggles",
+      "NO-Hardhat", "NO-Safety Vest", "None", "Person", "Safety Vest"
+    ]
+  },
+  "input": { "requiresZones": false, "minFps": 1, "maxFps": 6, "colorSpace": "bgr" },
+  "configSchemaRef": "./config.schema.json",
+  "configSchemaVersion": "1.0.0",
+  "eventTypes": [
+    { "type": "ppe.helmet_missing",  "defaultSeverity": "high",   "eventClass": "alert" },
+    { "type": "ppe.vest_missing",    "defaultSeverity": "medium", "eventClass": "alert" },
+    { "type": "ppe.goggles_missing", "defaultSeverity": "medium", "eventClass": "alert" },
+    { "type": "ppe.gloves_missing",  "defaultSeverity": "low",    "eventClass": "alert" }
+  ],
+  "resources": { "gpu": false, "vramMb": 0, "targetFps": 3 }
+}
