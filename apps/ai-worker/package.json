@@ -1,0 +1,9 @@
+{
+  "_nota": "ai-worker es Python. Este package.json existe sólo para que turbo lo incluya en `pnpm dev`: sin él, el dashboard arrancaba y el proxy contestaba ECONNREFUSED en /ai.",
+  "name": "@percepta/ai-worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "node ../../tools/dev-python.js ai-worker"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "_nota": "media-service es Python. Este package.json existe sólo para que turbo lo incluya en `pnpm dev`: sin él, el dashboard arrancaba y el proxy contestaba ECONNREFUSED en /media.",
+  "name": "@percepta/media-service",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "node ../../tools/dev-python.js media"
+  }
+}
