@@ -364,6 +364,25 @@ def detections() -> dict:
     return {p.a.camera_id: p.last_detections for p in _pipelines}
 
 
+@app.get("/live/{camera_id}")
+def live(camera_id: str) -> dict:
+    """Quién se ve en esta cámara ahora mismo, con su contorno y su identidad.
+
+    Lo consume la vista ampliada del dashboard para marcar a una persona sobre
+    el video. Es el presente y nada más: no hay historia acá, y si el módulo no
+    está corriendo en esa cámara la respuesta es una lista vacía, no un error
+    —la pantalla tiene que poder mostrar el video igual.
+    """
+    inst = _instances.get(f"{camera_id}:{MODULO_INGRESO}")
+    if inst is None or not hasattr(inst, "en_vivo"):
+        return {"ts": 0, "siluetas": False, "personas": [], "modulo": False}
+    try:
+        return {**inst.en_vivo(), "modulo": True}
+    except Exception as exc:  # noqa: BLE001
+        log.error("no se pudo leer el estado en vivo de %s: %r", camera_id, exc)
+        return {"ts": 0, "siluetas": False, "personas": [], "modulo": False}
+
+
 @app.get("/modules/{module_key}/state")
 def module_state(module_key: str, camera: str | None = None) -> dict:
     """Estado interno de un módulo. Sirve para ver en vivo cómo razona.

@@ -4,6 +4,8 @@ import { RouterLink } from '@angular/router';
 import { Subscription, interval, startWith, switchMap } from 'rxjs';
 import { PageHeaderComponent } from '../../shared/page-header.component';
 import { CameraFeedComponent } from '../../shared/camera-feed.component';
+import { CameraLiveComponent } from '../../shared/camera-live.component';
+import { ZonasService } from '../../core/zonas.service';
 import { ModuleIconComponent } from '../../shared/module-icon.component';
 import { AI_MODULES } from '../../core/catalog';
 import { EVENTS_BY_HOUR, EVENTS_BY_TYPE, TOP_MODULES } from '../../core/demo-data';
@@ -23,13 +25,15 @@ interface DonutSlice {
 @Component({
   selector: 'px-dashboard',
   standalone: true,
-  imports: [CommonModule, RouterLink, PageHeaderComponent, CameraFeedComponent, ModuleIconComponent],
+  imports: [CommonModule, RouterLink, PageHeaderComponent, CameraFeedComponent,
+    CameraLiveComponent, ModuleIconComponent],
   templateUrl: './dashboard.component.html',
   styleUrls: ['./dashboard.component.scss'],
 })
 export class DashboardComponent implements OnInit, OnDestroy {
   private readonly camsApi = inject(CamerasService);
   private readonly eventsApi = inject(EventsService);
+  private readonly zonasApi = inject(ZonasService);
   private subs = new Subscription();
 
   cameras: (ApiCamera & { media?: MediaStatus })[] = [];
@@ -66,6 +70,13 @@ export class DashboardComponent implements OnInit, OnDestroy {
   readonly linePath = this.buildLine(EVENTS_BY_HOUR);
 
   ngOnInit(): void {
+    // Los nombres de las áreas, para poder decir "tiene acceso a Recepción" en
+    // vez de "tiene acceso" a secas.
+    this.zonasApi.cargar().subscribe((pisos) => {
+      const mapa: Record<string, string> = {};
+      for (const f of pisos) for (const z of f.zonas) if (z.id) mapa[z.id] = z.nombre;
+      this.zonasPorId = mapa;
+    });
     // Cámaras reales (device-service) cada 8 s
     this.subs.add(
       interval(8000)
@@ -120,6 +131,32 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   detectionsFor(cam: ApiCamera): LiveDetection[] {
     return this.detections[cam.id] ?? [];
+  }
+
+  /**
+   * La cámara que se está mirando en grande. Null = ninguna.
+   *
+   * Vive acá y no adentro de la tarjeta porque el visor tapa la pantalla
+   * entera: si cada tarjeta abriera el suyo, dos clics rápidos dejarían dos
+   * visores superpuestos.
+   */
+  ampliada: (ApiCamera & { media?: MediaStatus }) | null = null;
+
+  /** id del área del plano → su nombre, para decir dónde está cada cámara. */
+  private zonasPorId: Record<string, string> = {};
+
+  ampliar(cam: ApiCamera & { media?: MediaStatus }): void {
+    this.ampliada = cam;
+  }
+
+  cerrarAmpliada(): void {
+    this.ampliada = null;
+  }
+
+  /** En qué parte del lugar está la cámara que se está mirando. */
+  zonaDe(cam: ApiCamera | null): string | null {
+    if (!cam?.floorZoneId) return null;
+    return this.zonasPorId[cam.floorZoneId] ?? null;
   }
 
   isOnline(cam: ApiCamera & { media?: MediaStatus }): boolean {

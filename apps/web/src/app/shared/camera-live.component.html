@@ -1,0 +1,71 @@
+<div class="visor" (click)="cerrar.emit()">
+  <!-- El clic de adentro no cierra: sólo el fondo. -->
+  <div class="caja" (click)="$event.stopPropagation()">
+    <header class="barra">
+      <div class="titulo">
+        <span class="punto" [class.off]="fallo"></span>
+        {{ nombreCamara || 'Cámara' }}
+        <span class="zona" *ngIf="zona">· {{ zona }}</span>
+      </div>
+      <div class="derecha">
+        <span class="cuantos" *ngIf="hayModulo">
+          {{ personas.length }} {{ personas.length === 1 ? 'persona' : 'personas' }} en cuadro
+        </span>
+        <button class="cerrar" (click)="cerrar.emit()" title="Cerrar (Esc)">×</button>
+      </div>
+    </header>
+
+    <!-- El video, con la proporción real para que lo dibujado caiga encima -->
+    <div class="video-caja" [style.aspect-ratio]="proporcion">
+      <img class="video" [src]="stream" alt="Cámara en vivo"
+           (load)="alCargar($event)" (error)="alFallar()" />
+
+      <div class="fallo" *ngIf="fallo">
+        Sin señal de esta cámara. Revisá que esté conectada y que media-service esté corriendo.
+      </div>
+
+      <!-- Las personas. El viewBox es de mil por mil y se estira a la caja:
+           las coordenadas que manda el worker son fracciones del cuadro. -->
+      <svg class="capa" viewBox="0 0 1000 1000" preserveAspectRatio="none">
+        <!-- Las clases van una por una y NO con [attr.class]: escribir el
+             atributo entero pisa los bindings de clase de Angular, y la capa
+             de color al seleccionar no llegaba a aplicarse nunca. -->
+        <g *ngFor="let p of personas" class="persona"
+           [class.con-acceso]="p.tieneAcceso === true"
+           [class.sin-acceso]="p.tieneAcceso === false"
+           [class.sin-saber]="p.tieneAcceso === null || p.tieneAcceso === undefined"
+           [class.elegida]="estaElegida(p)" (click)="tocar(p)">
+
+          <!-- El contorno del cuerpo. Sólo se pinta al seleccionar; sin
+               seleccionar es apenas una línea que dice "acá hay alguien". -->
+          <polygon *ngIf="p.silueta?.length" [attr.points]="puntos(p)" />
+
+          <!-- Sin modelo de segmentación queda la caja, que es lo que hay. -->
+          <rect *ngIf="!p.silueta?.length"
+                [attr.x]="p.bbox[0] * 1000" [attr.y]="p.bbox[1] * 1000"
+                [attr.width]="p.bbox[2] * 1000" [attr.height]="p.bbox[3] * 1000" rx="6" />
+        </g>
+      </svg>
+
+      <!-- La ficha, sobre el video, del que se tocó -->
+      <div class="ficha" *ngIf="elegida as p" [attr.data-acceso]="clase(p)">
+        <div class="f-linea"><span>Nombre:</span> <strong>{{ nombreDe(p) }}</strong></div>
+        <div class="f-linea"><span>En el lugar:</span> <strong>{{ haceCuanto(p) }}</strong></div>
+        <div class="f-linea"><span>Acceso:</span> <strong>{{ acceso(p) }}</strong></div>
+      </div>
+
+      <div class="aviso" *ngIf="!hayModulo && !fallo">
+        Esta cámara no tiene asignado el módulo <strong>Ingreso de personas</strong>, así que no
+        puede decir quién es cada uno. Asignáselo desde Cámaras.
+      </div>
+      <div class="aviso suave" *ngIf="hayModulo && !haySiluetas && personas.length">
+        Marcando con recuadro: esta cámara está configurada con el modelo de detección, que no
+        recorta el contorno del cuerpo.
+      </div>
+    </div>
+
+    <p class="pie" *ngIf="hayModulo">
+      Tocá a una persona para ver quién es. Se pinta de verde si puede estar acá y de rojo si no.
+    </p>
+  </div>
+</div>

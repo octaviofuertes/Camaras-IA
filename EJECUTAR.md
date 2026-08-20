@@ -86,6 +86,26 @@ La única excepción es **borrar una persona**, que sigue funcionando con el mó
 desasignado. Es a propósito: si no, quitar el módulo dejaría encerrados los datos
 biométricos ya cargados, sin pantalla ni endpoint para eliminarlos.
 
+### Ver una cámara en grande
+
+En **Dashboard**, el botón de las flechas en cada cámara la abre a pantalla completa, con el
+video en vivo (MJPEG, sin recortar).
+
+Ahí cada persona que ve la cámara queda marcada con el contorno de su cuerpo. Tocando a una:
+
+- aparece su ficha con **nombre**, **hace cuánto está en el lugar** y **si tiene acceso**;
+- se la cubre con una capa **verde** si puede estar ahí y **roja** si no.
+
+La capa aparece sólo al seleccionar. Con todos pintados todo el tiempo el video deja de verse
+y el rojo deja de significar algo.
+
+A quien el sistema no reconoció no se lo pinta ni de verde ni de rojo, sino de gris: no se sabe
+si puede estar ahí, y un color afirmaría algo que no se sabe.
+
+El contorno sale del modelo de segmentación (`yolov8n-seg.pt`), que cuesta alrededor del doble
+de CPU por frame que el de detección. Se puede volver al anterior poniendo `personWeights:
+"yolov8n.pt"` en la configuración del módulo: ahí la marca pasa a ser un recuadro.
+
 ### El plano del lugar
 
 En **Accesos → Plano y zonas**. El plano no se dibuja: se sube. Cada piso tiene el suyo

@@ -149,6 +149,16 @@ class Galeria:
     def actualizar(self, personas: list[Persona]) -> None:
         self.personas = personas
 
+    def por_id(self, persona_id: str) -> Persona | None:
+        """La ficha de alguien ya identificado.
+
+        Sirve para preguntar por su acceso ACTUAL: el que se le dio o se le
+        quitó desde el panel hace un minuto, no el que tenía cuando entró.
+        """
+        if not persona_id:
+            return None
+        return next((p for p in self.personas if p.id == persona_id), None)
+
     def buscar(self, vector: list[float], cfg: ConfigRostros) -> tuple[Persona | None, float, float]:
         """Devuelve (persona, parecido, parecido_del_segundo).
 

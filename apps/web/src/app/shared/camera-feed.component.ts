@@ -209,8 +209,8 @@ export class CameraFeedComponent implements AfterViewInit, OnDestroy {
   private loading = false;
 
   ngAfterViewInit(): void {
-    // Ya no retornamos temprano si snapshotUrl no está listo, 
-    // porque tick() lo validará en cada iteración.
+    // No se corta si todavía no hay snapshotUrl: tick() lo valida en cada
+    // vuelta, así la tarjeta empieza a mostrar imagen apenas la cámara conecta.
     this.zone.runOutsideAngular(() => {
       this.tick();
       this.timer = setInterval(() => this.tick(), Math.max(1000 / this.fps, 80));
@@ -232,7 +232,6 @@ export class CameraFeedComponent implements AfterViewInit, OnDestroy {
     const url = `${this.snapshotUrl}?t=${Date.now()}`;
     const pre = new Image();
     pre.onload = () => {
-      console.log('Imagen cargada OK', url);
       el.src = url;
       this.failed = false;
       this.loading = false;

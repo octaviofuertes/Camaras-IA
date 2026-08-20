@@ -51,6 +51,7 @@ from percepta_contracts import (
 
 sys.path.insert(0, str(Path(__file__).parent))
 from accesos import RegistroDePasos  # noqa: E402
+from siluetas import siluetas_de  # noqa: E402
 from rostros import (  # noqa: E402
     ConfigRostros,
     Identificador,
@@ -84,6 +85,10 @@ class PersonIdentificationModule(PerceptaModule):
         self._poses_medidas = 0
         self._pose = None
         self._pasos = RegistroDePasos()
+        # Lo último que vio la cámara, listo para dibujar en pantalla. Vive sólo
+        # en memoria y se pisa en cada frame: es el presente, no un registro.
+        self._en_vivo: list[dict] = []
+        self._en_vivo_ts: float = 0.0
         # persona -> si tiene acceso. Se refresca con la galería.
         self._acceso_de: dict[str, bool] = {}
         self._alertas_acceso = 0
@@ -125,8 +130,16 @@ class PersonIdentificationModule(PerceptaModule):
                     log.warning("config: %s inválido, se usa el valor por omisión", campo)
         self._sostenida = IdentidadSostenida(cfg_cont)
 
-        self._yolo = YOLO(str(ctx.config.get("personWeights", "yolov8n.pt")))
+        # Con el modelo de segmentación cada persona viene además con su
+        # contorno, que es lo que permite marcarla en pantalla sin pintar
+        # también la pared de atrás. Cuesta alrededor del doble de CPU por
+        # frame, así que se puede volver al de detección con `personWeights`.
+        pesos = str(ctx.config.get("personWeights", "yolov8n-seg.pt"))
+        self._yolo = YOLO(pesos)
         self._yolo.to("cpu" if ctx.device.startswith("cpu") else ctx.device)
+        self._hay_siluetas = "-seg" in pesos
+        if not self._hay_siluetas:
+            log.info("sin siluetas: %s no segmenta, se marca con la caja", pesos)
 
         # Sólo detección y reconocimiento. `buffalo_l` trae además estimación de
         # edad, género y puntos faciales: cuesta tiempo de CPU y produce
@@ -353,6 +366,7 @@ class PersonIdentificationModule(PerceptaModule):
         # 1. Cuerpos con identidad de seguimiento. Es lo que permite sostener
         #    quién es alguien cuando se da vuelta.
         cuerpos: list[tuple[int, tuple[float, float, float, float]]] = []
+        siluetas: dict[int, Any] = {}
         for r in self._yolo.track(
             frame.image, classes=[0], conf=0.35, persist=True,
             tracker="bytetrack.yaml", verbose=False, device="cpu",
@@ -360,12 +374,17 @@ class PersonIdentificationModule(PerceptaModule):
             cajas = getattr(r, "boxes", None)
             if cajas is None:
                 continue
+            ids_del_resultado: list[int] = []
             for b in cajas:
                 tid = int(b.id.item()) if getattr(b, "id", None) is not None else -1
+                ids_del_resultado.append(tid)
                 if tid < 0:
                     continue
                 x1, y1, x2, y2 = (float(v) for v in b.xyxy[0].tolist())
                 cuerpos.append((tid, (x1 / w, y1 / h, (x2 - x1) / w, (y2 - y1) / h)))
+            # Los contornos vienen en el mismo orden que las cajas, incluidas
+            # las que no tienen track: por eso se pasa la lista completa.
+            siluetas.update(siluetas_de(r, ids_del_resultado))
 
         # 2. Caras visibles en este frame.
         rostros: list[Rostro] = []
@@ -397,6 +416,10 @@ class PersonIdentificationModule(PerceptaModule):
         # partir una visita en pedazos, y la vista en vivo no puede tolerar
         # nada. Son dos preguntas distintas y necesitan dos respuestas.
         en_cuadro: dict[str, tuple[str, bool]] = {}
+        # Quién es cada cuerpo que se ve. Se llena en los dos caminos —por cara
+        # y por continuidad— porque la pantalla tiene que poder marcar también
+        # a quien está de espaldas, que es la mitad de la jornada.
+        quien_es: dict[int, tuple[str, str]] = {}
 
         # 3. Las caras reconocidas ANCLAN su identidad al cuerpo que las lleva.
         for res in identificaciones:
@@ -415,6 +438,7 @@ class PersonIdentificationModule(PerceptaModule):
                 anclados.add(tid)
                 self._identificados += 1
                 en_cuadro[res.persona_id] = (res.nombre or "", True)
+                quien_es[tid] = (res.persona_id, res.nombre or "")
                 detecciones += self._registrar_paso(
                     res.persona_id, res.nombre or "", caja,
                     ahora=frame.captured_at, parecido=res.parecido, por_rostro=True,
@@ -470,6 +494,7 @@ class PersonIdentificationModule(PerceptaModule):
             )
             if r.persona_id:
                 self._identificados += 1
+                quien_es[tid] = (r.persona_id, r.nombre or "")
                 if r.persona_id not in en_cuadro:
                     en_cuadro[r.persona_id] = (r.nombre or "", False)
                 detecciones += self._registrar_paso(
@@ -491,6 +516,13 @@ class PersonIdentificationModule(PerceptaModule):
         # Los pasos que terminaron se emiten para que queden registrados.
         for paso in self._pasos.cerrar_vencidos(frame.captured_at):
             detecciones.append(self._a_deteccion_paso(paso))
+
+        # Lo que va a dibujar la pantalla: cada cuerpo con su contorno y, si se
+        # sabe, quién es. Se rehace entero en cada frame en vez de acumularse:
+        # una silueta que sobrevive al frame en el que se vio es una marca verde
+        # pegada a una pared vacía.
+        self._en_vivo = self._armar_en_vivo(cuerpos, siluetas, quien_es, frame.captured_at)
+        self._en_vivo_ts = frame.captured_at
 
         # Y en cada frame, quién está en el cuadro ahora. Va SIEMPRE, aunque no
         # haya nadie: es lo que hace que la lista se vacíe apenas se van, en vez
@@ -665,6 +697,51 @@ class PersonIdentificationModule(PerceptaModule):
         recorte = imagen[y1:y2, x1:x2]
         ok, buf = cv2.imencode(".jpg", recorte, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
         return base64.b64encode(buf.tobytes()).decode("ascii") if ok else ""
+
+    def _armar_en_vivo(
+        self,
+        cuerpos: list[tuple[int, tuple[float, float, float, float]]],
+        siluetas: dict[int, Any],
+        quien_es: dict[int, tuple[str, str]],
+        ahora: float,
+    ) -> list[dict]:
+        """Lo que se ve en la cámara ahora mismo, listo para dibujar.
+
+        Va todo el mundo, tenga nombre o no: alguien sin identificar igual está
+        ahí y la pantalla tiene que poder mostrarlo. Lo que cambia es que sin
+        identidad no hay acceso que informar ni hora de llegada que contar.
+        """
+        salida: list[dict] = []
+        for tid, caja in cuerpos:
+            persona_id, nombre = quien_es.get(tid, ("", ""))
+            desde = self._pasos.desde_de(persona_id) if persona_id else None
+            tiene_acceso: bool | None = None
+            if persona_id and self._ident is not None:
+                p = self._ident.galeria.por_id(persona_id)
+                if p is not None:
+                    tiene_acceso = bool(p.tiene_acceso)
+            sil = siluetas.get(tid)
+            salida.append({
+                "trackId": tid,
+                "personId": persona_id,
+                "nombre": nombre,
+                # None y False no son lo mismo: None es "no sé quién es", False
+                # es "sé quién es y no tendría que estar acá".
+                "tieneAcceso": tiene_acceso,
+                # Hace cuánto está, en segundos. La pantalla lo redacta.
+                "haceSegundos": round(ahora - desde, 1) if desde else None,
+                "bbox": [round(v, 4) for v in caja],
+                "silueta": sil.como_lista() if sil is not None else None,
+            })
+        return salida
+
+    def en_vivo(self) -> dict:
+        """Lo último que vio la cámara. Lo consume la pantalla del dashboard."""
+        return {
+            "ts": self._en_vivo_ts,
+            "siluetas": bool(getattr(self, "_hay_siluetas", False)),
+            "personas": self._en_vivo,
+        }
 
     def health(self) -> dict[str, Any]:
         return {

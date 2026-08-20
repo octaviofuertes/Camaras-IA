@@ -1,0 +1,148 @@
+/* La cámara en grande, encima de todo lo demás. */
+.visor {
+  position: fixed; inset: 0; z-index: 90;
+  display: grid; place-items: center;
+  padding: 26px;
+  background: rgba(3, 6, 12, .82);
+  backdrop-filter: blur(3px);
+}
+
+.caja {
+  width: min(1400px, 96vw);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 26px 70px rgba(0, 0, 0, .55);
+}
+
+.barra {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; padding: 13px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.titulo {
+  display: flex; align-items: center; gap: 9px;
+  font-size: 14px; font-weight: 600;
+
+  .zona { color: var(--text-mute); font-weight: 400; }
+}
+
+.punto {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #22c55e; box-shadow: 0 0 0 3px rgba(34, 197, 94, .18);
+  &.off { background: #ef4444; box-shadow: 0 0 0 3px rgba(239, 68, 68, .18); }
+}
+
+.derecha { display: flex; align-items: center; gap: 14px; }
+.cuantos { font-size: 12px; color: var(--text-mute); }
+
+.cerrar {
+  background: none; border: none; color: var(--text-mute);
+  font-size: 24px; line-height: 1; cursor: pointer;
+  padding: 0 6px; border-radius: 6px;
+  &:hover { color: var(--text); background: rgba(255, 255, 255, .07); }
+}
+
+/* ─── El video ──────────────────────────────────────────────────── */
+.video-caja {
+  position: relative;
+  width: 100%;
+  max-height: 74vh;
+  margin: 0 auto;
+  background: #000;
+}
+
+.video {
+  width: 100%; height: 100%; display: block;
+  /* `contain` y no `cover`: lo que se dibuja encima son fracciones del cuadro
+     completo, y recortar la imagen las correría respecto del cuerpo. */
+  object-fit: contain;
+}
+
+.capa { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+/* ─── Las personas ──────────────────────────────────────────────── */
+.persona {
+  cursor: pointer;
+
+  polygon, rect {
+    fill: transparent;
+    stroke: rgba(255, 255, 255, .5);
+    stroke-width: 3;
+    transition: fill .12s ease;
+  }
+
+  &:hover polygon, &:hover rect {
+    stroke: rgba(255, 255, 255, .9);
+    fill: rgba(255, 255, 255, .08);
+  }
+}
+
+/* La capa de color aparece SÓLO al seleccionar. Con todos pintados todo el
+   tiempo, el video deja de verse y el rojo deja de significar algo. */
+.persona.elegida {
+  &.con-acceso polygon, &.con-acceso rect {
+    fill: rgba(34, 197, 94, .38);
+    stroke: #22c55e;
+    stroke-width: 4;
+  }
+  &.sin-acceso polygon, &.sin-acceso rect {
+    fill: rgba(239, 68, 68, .38);
+    stroke: #ef4444;
+    stroke-width: 4;
+  }
+  /* A quien no se identificó no se lo pinta ni de verde ni de rojo: el sistema
+     no sabe si puede estar acá, y un color afirmaría algo que no sabe. */
+  &.sin-saber polygon, &.sin-saber rect {
+    fill: rgba(148, 163, 184, .3);
+    stroke: #cbd5e1;
+    stroke-width: 4;
+  }
+}
+
+/* ─── La ficha ──────────────────────────────────────────────────── */
+.ficha {
+  position: absolute; left: 16px; bottom: 16px;
+  min-width: 250px; max-width: 46ch;
+  padding: 13px 16px;
+  border-radius: var(--radius-sm);
+  background: rgba(6, 10, 18, .9);
+  border: 1px solid rgba(255, 255, 255, .14);
+  backdrop-filter: blur(6px);
+
+  &[data-acceso='con-acceso'] { border-color: rgba(34, 197, 94, .55); }
+  &[data-acceso='sin-acceso'] { border-color: rgba(239, 68, 68, .6); }
+}
+
+.f-linea {
+  display: flex; gap: 7px; align-items: baseline;
+  font-size: 13px; line-height: 1.75;
+
+  span { color: rgba(255, 255, 255, .5); flex-shrink: 0; }
+  strong { color: #fff; font-weight: 600; }
+}
+
+.ficha[data-acceso='sin-acceso'] .f-linea:last-child strong { color: #fca5a5; }
+.ficha[data-acceso='con-acceso'] .f-linea:last-child strong { color: #86efac; }
+
+/* ─── Avisos ────────────────────────────────────────────────────── */
+.fallo, .aviso {
+  position: absolute; left: 16px; right: 16px; top: 16px;
+  padding: 11px 14px; border-radius: var(--radius-sm);
+  font-size: 12.5px; line-height: 1.55;
+  background: rgba(6, 10, 18, .9);
+  border: 1px solid rgba(239, 68, 68, .4);
+  color: #fca5a5;
+}
+.aviso {
+  border-color: rgba(245, 158, 11, .45); color: #fcd34d;
+  strong { color: #fde68a; }
+  &.suave { border-color: rgba(255, 255, 255, .14); color: rgba(255, 255, 255, .6); }
+}
+
+.pie {
+  padding: 11px 16px; font-size: 12px; color: var(--text-mute);
+  border-top: 1px solid var(--border);
+}
