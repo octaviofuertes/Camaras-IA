@@ -85,7 +85,12 @@ export interface EventsResult {
 
 /** Títulos legibles por tipo de evento (los emite el manifest de cada módulo). */
 const TITLES: Record<string, string> = {
-  'ppe.helmet_missing': 'Sin uso de casco',
+  // Se dice "no se le ve" y no "no tiene": el sistema vio una cabeza sin
+  // casco, y quien lea la alerta tiene que ir a mirar, no a sancionar.
+  'ppe.helmet_missing': 'No se le ve el casco',
+  'ppe.vest_missing': 'No se le ve el chaleco',
+  'ppe.goggles_missing': 'No se le ven las antiparras',
+  'ppe.gloves_missing': 'No se le ven los guantes',
   'zone.restricted_entry': 'Zona restringida',
   'object.abandoned': 'Objeto abandonado',
   'person.loitering': 'Merodeo detectado',

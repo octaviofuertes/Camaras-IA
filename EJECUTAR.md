@@ -86,6 +86,32 @@ La única excepción es **borrar una persona**, que sigue funcionando con el mó
 desasignado. Es a propósito: si no, quitar el módulo dejaría encerrados los datos
 biométricos ya cargados, sin pantalla ni endpoint para eliminarlos.
 
+### Elementos de protección (EPP)
+
+Detecta **casco, chaleco, antiparras y guantes** y avisa cuando a alguien le falta uno que
+en esa cámara es obligatorio. Qué se exige se configura al asignar el módulo, porque depende
+del lugar: en un obrador casco y chaleco, en un laboratorio antiparras y guantes.
+
+El modelo no viene con el repositorio: se entrena acá, con un dataset público
+([CC BY 4.0](https://universe.roboflow.com/himanshu-bharati/ppe_dectection-dtt4q)).
+
+```bash
+python training/ppe/descargar.py && python training/ppe/verificar.py && python training/ppe/entrenar.py
+```
+
+`verificar.py` no es opcional. El primer dataset que probé tenía las clases corridas y no
+había forma de notarlo leyendo su documentación: entrenaba perfecto y aprendía lo que no era.
+La verificación mide dónde cae cada clase —un casco arriba y chico, un chaleco en el medio y
+grande, las botas abajo— y se planta si algo no cae donde va.
+
+En CPU el entrenamiento tarda unas 5 horas. Deja `training/models/epp.pt` y las métricas por
+clase en `training/models/epp.json`. Ninguno de los dos va al repositorio: son artefactos, se
+regeneran con el comando de arriba.
+
+**Lo que el módulo NO hace:** avisar porque no vio el elemento. Sólo avisa cuando el modelo
+vio la ausencia —el dataset tiene las cabezas sin casco anotadas a mano—. La diferencia es lo
+que separa un módulo que se usa de uno que se apaga a la semana por avisar de más.
+
 ### Ver una cámara en grande
 
 En **Dashboard**, el botón de las flechas en cada cámara la abre a pantalla completa, con el

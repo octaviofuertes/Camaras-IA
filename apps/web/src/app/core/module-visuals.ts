@@ -12,6 +12,9 @@ export const ICON_BY_KEY: Record<string, { icon: string; color: string }> = {
   'person-entry': { icon: 'people', color: '#0ea5e9' },
   'person-detection': { icon: 'people', color: '#3b82f6' },
   'people-counting': { icon: 'people', color: '#3b82f6' },
+  'ppe-detection': { icon: 'helmet', color: '#f59e0b' },
+  // El de casco quedó deprecado y no se puede asignar, pero sus eventos
+  // viejos siguen en la pantalla de Eventos y necesitan ícono.
   'helmet-detection': { icon: 'helmet', color: '#f59e0b' },
   'restricted-zone': { icon: 'zone', color: '#22c55e' },
   'abandoned-object': { icon: 'bag', color: '#f59e0b' },
