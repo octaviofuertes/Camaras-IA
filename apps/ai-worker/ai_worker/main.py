@@ -38,6 +38,8 @@ PIPELINE_FPS = float(os.environ.get("PIPELINE_FPS", "3"))
 # Clave del módulo de ingreso de personas. Igual que en
 # packages/contracts/src/modules.ts y en modules/person-entry/module.json.
 MODULO_INGRESO = "person-entry"
+# Clave del módulo de elementos de protección personal.
+MODULO_EPP = "ppe-detection"
 
 # Cada cuánto se revisa si cambiaron las asignaciones en el dashboard.
 SYNC_SECONDS = float(os.environ.get("ASSIGNMENT_SYNC_SECONDS", "15"))
@@ -373,14 +375,34 @@ def live(camera_id: str) -> dict:
     está corriendo en esa cámara la respuesta es una lista vacía, no un error
     —la pantalla tiene que poder mostrar el video igual.
     """
+    salida: dict = {
+        "ts": 0, "siluetas": False, "personas": [], "modulo": False,
+        "epp": [], "exigidos": [], "moduloEpp": False,
+    }
+
+    # Los dos módulos son independientes: una cámara puede tener uno, el otro,
+    # los dos o ninguno. Cada uno aporta lo suyo y la pantalla dibuja lo que
+    # haya, en vez de quedarse en blanco porque falta el que no está asignado.
     inst = _instances.get(f"{camera_id}:{MODULO_INGRESO}")
-    if inst is None or not hasattr(inst, "en_vivo"):
-        return {"ts": 0, "siluetas": False, "personas": [], "modulo": False}
-    try:
-        return {**inst.en_vivo(), "modulo": True}
-    except Exception as exc:  # noqa: BLE001
-        log.error("no se pudo leer el estado en vivo de %s: %r", camera_id, exc)
-        return {"ts": 0, "siluetas": False, "personas": [], "modulo": False}
+    if inst is not None and hasattr(inst, "en_vivo"):
+        try:
+            salida.update({**inst.en_vivo(), "modulo": True})
+        except Exception as exc:  # noqa: BLE001
+            log.error("no se pudo leer el ingreso de personas de %s: %r", camera_id, exc)
+
+    epp = _instances.get(f"{camera_id}:{MODULO_EPP}")
+    if epp is not None and hasattr(epp, "en_vivo"):
+        try:
+            v = epp.en_vivo()
+            salida.update({
+                "epp": v.get("elementos", []),
+                "exigidos": v.get("exigidos", []),
+                "moduloEpp": True,
+            })
+        except Exception as exc:  # noqa: BLE001
+            log.error("no se pudo leer el EPP de %s: %r", camera_id, exc)
+
+    return salida
 
 
 @app.get("/modules/{module_key}/state")

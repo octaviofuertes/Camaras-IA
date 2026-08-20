@@ -8,7 +8,7 @@ import {
   inject,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { VivoService, type PersonaEnVivo } from '../core/vivo.service';
+import { VivoService, type ElementoEpp, type PersonaEnVivo } from '../core/vivo.service';
 
 /** Cada cuánto se le pregunta al worker quién está en el cuadro. */
 const REFRESCO_MS = 700;
@@ -54,6 +54,10 @@ export class CameraLiveComponent implements OnInit, OnDestroy {
   personas: PersonaEnVivo[] = [];
   hayModulo = false;
   haySiluetas = false;
+  /** Los elementos de protección que ve la cámara ahora. */
+  epp: ElementoEpp[] = [];
+  hayEpp = false;
+  exigidos: string[] = [];
   /** El track seleccionado. Se sigue por track, no por persona: quien no está
    *  identificado igual se puede tocar para ver que el sistema no sabe quién es. */
   seleccion: number | null = null;
@@ -82,6 +86,9 @@ export class CameraLiveComponent implements OnInit, OnDestroy {
       this.hayModulo = v.modulo;
       this.haySiluetas = v.siluetas;
       this.personas = v.personas;
+      this.hayEpp = v.moduloEpp;
+      this.exigidos = v.exigidos;
+      this.epp = v.epp;
       // Si el seleccionado se fue del cuadro, se suelta la selección: dejarla
       // pegada mostraría la ficha de alguien que ya no está.
       if (this.seleccion !== null && !v.personas.some((p) => p.trackId === this.seleccion)) {
@@ -130,6 +137,43 @@ export class CameraLiveComponent implements OnInit, OnDestroy {
     if (p.tieneAcceso === true) return 'con-acceso';
     if (p.tieneAcceso === false) return 'sin-acceso';
     return 'sin-saber';
+  }
+
+  // ── elementos de protección ────────────────────────────────────────
+
+  /**
+   * Cómo se pinta cada elemento.
+   *
+   * Verde lo que está puesto, rojo lo que falta, y gris lo que se ve pero en
+   * esta cámara no se exige: mostrarlo igual deja ver que el módulo está
+   * mirando, y con un color aparte no se confunde con algo que va a alertar.
+   */
+  claseEpp(e: ElementoEpp): string {
+    if (!e.exigido) return 'no-exigido';
+    return e.tiene ? 'puesto' : 'falta';
+  }
+
+  /** El rótulo del recuadro: "casco" o "sin casco". */
+  rotulo(e: ElementoEpp): string {
+    return e.tiene ? e.nombre : `sin ${e.nombre}`;
+  }
+
+  /** Qué le falta a la persona seleccionada, para la ficha. */
+  faltantesDe(indice: number): string[] {
+    return this.epp
+      .filter((e) => e.persona === indice && e.exigido && !e.tiene)
+      .map((e) => e.nombre);
+  }
+
+  /** Qué tiene puesto la persona seleccionada. */
+  puestosDe(indice: number): string[] {
+    return this.epp
+      .filter((e) => e.persona === indice && e.tiene)
+      .map((e) => e.nombre);
+  }
+
+  indiceDe(p: PersonaEnVivo): number {
+    return this.personas.indexOf(p);
   }
 
   // ── textos ─────────────────────────────────────────────────────────

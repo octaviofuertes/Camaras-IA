@@ -45,6 +45,15 @@
                 [attr.x]="p.bbox[0] * 1000" [attr.y]="p.bbox[1] * 1000"
                 [attr.width]="p.bbox[2] * 1000" [attr.height]="p.bbox[3] * 1000" rx="6" />
         </g>
+
+        <!-- Los elementos de protección: un recuadro por cada uno, con su
+             nombre. Van siempre visibles, no sólo al seleccionar: es lo que
+             deja ver que el módulo está mirando. -->
+        <g *ngFor="let e of epp" [attr.class]="'epp ' + claseEpp(e)">
+          <rect [attr.x]="e.bbox[0] * 1000" [attr.y]="e.bbox[1] * 1000"
+                [attr.width]="e.bbox[2] * 1000" [attr.height]="e.bbox[3] * 1000" rx="4" />
+          <text [attr.x]="e.bbox[0] * 1000" [attr.y]="e.bbox[1] * 1000 - 6">{{ rotulo(e) }}</text>
+        </g>
       </svg>
 
       <!-- La ficha, sobre el video, del que se tocó -->
@@ -52,6 +61,12 @@
         <div class="f-linea"><span>Nombre:</span> <strong>{{ nombreDe(p) }}</strong></div>
         <div class="f-linea"><span>En el lugar:</span> <strong>{{ haceCuanto(p) }}</strong></div>
         <div class="f-linea"><span>Acceso:</span> <strong>{{ acceso(p) }}</strong></div>
+        <div class="f-linea" *ngIf="hayEpp && faltantesDe(indiceDe(p)).length">
+          <span>Le falta:</span> <strong class="malo">{{ faltantesDe(indiceDe(p)).join(', ') }}</strong>
+        </div>
+        <div class="f-linea" *ngIf="hayEpp && puestosDe(indiceDe(p)).length">
+          <span>Lleva:</span> <strong>{{ puestosDe(indiceDe(p)).join(', ') }}</strong>
+        </div>
       </div>
 
       <div class="aviso" *ngIf="!hayModulo && !fallo">
@@ -64,6 +79,11 @@
       </div>
     </div>
 
+    <p class="pie" *ngIf="hayEpp">
+      Protección obligatoria acá:
+      <strong>{{ exigidos.length ? exigidos.join(', ') : 'nada configurado' }}</strong>.
+      Lo que falte genera una alerta en Eventos.
+    </p>
     <p class="pie" *ngIf="hayModulo">
       Tocá a una persona para ver quién es. Se pinta de verde si puede estar acá y de rojo si no.
     </p>

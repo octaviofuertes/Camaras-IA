@@ -146,3 +146,24 @@
   padding: 11px 16px; font-size: 12px; color: var(--text-mute);
   border-top: 1px solid var(--border);
 }
+
+/* ─── Elementos de protección ───────────────────────────────────── */
+/* Van siempre visibles, no sólo al seleccionar: un módulo que no alerta y uno
+   que está roto se ven exactamente igual si no se dibuja nada. */
+.epp {
+  pointer-events: none;
+
+  rect { fill: none; stroke-width: 2.5; }
+  text {
+    font-size: 21px; font-weight: 700;
+    paint-order: stroke; stroke: rgba(0, 0, 0, .75); stroke-width: 4px;
+  }
+
+  &.puesto { rect { stroke: #22c55e; } text { fill: #86efac; } }
+  &.falta  { rect { stroke: #ef4444; stroke-dasharray: 6 4; } text { fill: #fca5a5; } }
+  /* Lo que se ve pero acá no se exige: se muestra apagado para que no parezca
+     que va a generar una alerta. */
+  &.no-exigido { rect { stroke: rgba(255, 255, 255, .3); } text { fill: rgba(255, 255, 255, .45); } }
+}
+
+.f-linea strong.malo { color: #fca5a5; }

@@ -44,7 +44,13 @@ from percepta_contracts import (
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from reglas import ConfigEpp, VigiladorEpp, POR_CLAVE  # noqa: E402
+from reglas import (  # noqa: E402
+    ELEMENTOS,
+    POR_CLAVE,
+    ConfigEpp,
+    VigiladorEpp,
+    de_quien_es,
+)
 
 log = logging.getLogger("ppe-detection")
 
@@ -66,6 +72,10 @@ class PpeDetectionModule(PerceptaModule):
         self._personas_vistas = 0
         self._cargado_en: float | None = None
         self._pesos = ""
+        # Lo último que vio la cámara, para dibujarlo en pantalla. Vive sólo en
+        # memoria y se pisa en cada cuadro: es el presente, no un registro.
+        self._en_vivo: list[dict] = []
+        self._en_vivo_ts: float = 0.0
 
     # ── ciclo de vida ────────────────────────────────────────────────
     def load(self, ctx: ModuleContext) -> None:
@@ -160,6 +170,14 @@ class PpeDetectionModule(PerceptaModule):
 
         self._personas_vistas += len(personas)
 
+        # Lo que va a dibujar la pantalla: cada elemento con su nombre en
+        # castellano y si está puesto o falta. Va TODO lo detectado, no sólo lo
+        # que genera alerta: ver "casco" verde sobre alguien es lo que le dice
+        # al operador que el módulo está mirando y funcionando. Sin eso, un
+        # módulo que no alerta y uno que está roto se ven exactamente igual.
+        self._en_vivo = self._armar_en_vivo(personas, elementos)
+        self._en_vivo_ts = frame.captured_at
+
         detecciones: list[Detection] = []
         for falta in self._vigilador.ver(personas, elementos, frame.captured_at, ids):
             self._faltas += 1
@@ -184,6 +202,40 @@ class PpeDetectionModule(PerceptaModule):
             detections=detecciones,
             inference_ms=(time.perf_counter() - t0) * 1000.0,
         )
+
+    def _armar_en_vivo(
+        self,
+        personas: list[tuple[float, float, float, float]],
+        elementos: list[tuple[str, tuple[float, float, float, float], float]],
+    ) -> list[dict]:
+        """Cada elemento detectado, listo para dibujar con su nombre."""
+        cfg = self._vigilador.cfg if self._vigilador else None
+        salida: list[dict] = []
+        for clase, caja, conf in elementos:
+            elem = next((e for e in ELEMENTOS if clase in (e.puesto, e.falta)), None)
+            if elem is None:
+                continue
+            salida.append({
+                "clave": elem.clave,
+                "nombre": elem.nombre,
+                # True = lo tiene puesto; False = se ve que le falta.
+                "tiene": clase == elem.puesto,
+                # Si en esta cámara no se exige, se dibuja igual pero apagado:
+                # sirve para ver qué hay sin que parezca que va a alertar.
+                "exigido": bool(cfg and elem.clave in cfg.exigidos),
+                "conf": round(conf, 3),
+                "bbox": [round(v, 4) for v in caja],
+                "persona": de_quien_es(caja, personas, cfg.solapeMinimo if cfg else 0.55),
+            })
+        return salida
+
+    def en_vivo(self) -> dict:
+        """Lo último que vio la cámara. Lo consume la vista ampliada."""
+        return {
+            "ts": self._en_vivo_ts,
+            "exigidos": list(self._vigilador.cfg.exigidos) if self._vigilador else [],
+            "elementos": self._en_vivo,
+        }
 
     # ── diagnóstico ──────────────────────────────────────────────────
     def health(self) -> dict[str, Any]:

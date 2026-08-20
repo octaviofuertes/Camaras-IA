@@ -24,15 +24,38 @@ export interface PersonaEnVivo {
   silueta: [number, number][] | null;
 }
 
+/** Un elemento de protección visto en el cuadro. */
+export interface ElementoEpp {
+  clave: string;
+  /** Cómo se llama en pantalla: "casco", "chaleco"… */
+  nombre: string;
+  /** true = lo tiene puesto; false = se ve que le falta. */
+  tiene: boolean;
+  /** Si en esta cámara es obligatorio. Lo que no se exige se dibuja apagado. */
+  exigido: boolean;
+  conf: number;
+  bbox: [number, number, number, number];
+  /** Índice de la persona a la que pertenece, o null si no se pudo saber. */
+  persona: number | null;
+}
+
 export interface VistaEnVivo {
   /** false = el módulo de ingreso de personas no está corriendo en esta cámara. */
   modulo: boolean;
   /** false = se está usando el modelo de detección: hay caja, no contorno. */
   siluetas: boolean;
   personas: PersonaEnVivo[];
+  /** false = esta cámara no tiene asignado el módulo de EPP. */
+  moduloEpp: boolean;
+  /** Qué elementos son obligatorios en esta cámara. */
+  exigidos: string[];
+  epp: ElementoEpp[];
 }
 
-const VACIO: VistaEnVivo = { modulo: false, siluetas: false, personas: [] };
+const VACIO: VistaEnVivo = {
+  modulo: false, siluetas: false, personas: [],
+  moduloEpp: false, exigidos: [], epp: [],
+};
 
 /**
  * Quién se ve en una cámara, en este momento.
@@ -51,6 +74,9 @@ export class VivoService {
         modulo: !!r?.modulo,
         siluetas: !!r?.siluetas,
         personas: r?.personas ?? [],
+        moduloEpp: !!r?.moduloEpp,
+        exigidos: r?.exigidos ?? [],
+        epp: r?.epp ?? [],
       })),
       // Que el worker no conteste no puede tapar el video: se sigue viendo la
       // cámara, sólo que sin nadie marcado.
