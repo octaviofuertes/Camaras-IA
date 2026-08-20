@@ -29,11 +29,56 @@ SYNC_SECONDS = float(os.environ.get("CAMERA_SYNC_SECONDS", "10"))
 
 
 def _parse_source(raw: str | int) -> str | int:
-    """'0' -> índice de webcam USB; 'rtsp://…' -> URL de cámara IP."""
+    """De cómo se guarda una cámara a lo que entiende OpenCV.
+
+    `0` y `'0'` son el índice de una webcam USB; `'rtsp://…'` es una cámara IP.
+
+    `usb://0` también es el índice 0: así se guarda en la base para
+    distinguir un índice de una URL, y device-service le saca el esquema antes
+    de exponerlo. Se acepta igual acá porque si alguna vez llega crudo —un
+    archivo de respaldo escrito a mano, una consulta directa— quedaba como el
+    texto "usb://0", OpenCV intentaba abrirlo como si fuera una dirección de
+    red y la cámara no arrancaba nunca. Fallaba en silencio: el hilo de captura
+    se quedaba sin abrir el dispositivo y la pantalla decía "Sin señal", que es
+    lo mismo que dice una cámara desenchufada.
+    """
     if isinstance(raw, int):
         return raw
     s = str(raw).strip()
+    for prefijo in ("usb://", "usb:", "cam://"):
+        if s.lower().startswith(prefijo):
+            resto = s[len(prefijo):]
+            if resto.isdigit():
+                return int(resto)
     return int(s) if s.isdigit() else s
+
+
+def decidir_camaras(
+    de_la_api: list[dict] | None,
+    ya_contesto_alguna_vez: bool,
+    del_archivo: list[dict],
+) -> list[dict] | None:
+    """Con qué lista de cámaras quedarse.
+
+    `None` significa "no cambiar nada", y es la respuesta importante: si la API
+    ya contestó alguna vez, que ahora no conteste es un hueco de red, no un
+    cambio de configuración.
+
+    Sin esto pasaba lo siguiente, y es feo. device-service se caía un segundo;
+    media-service se pasaba al archivo de respaldo, cuyas cámaras tienen OTROS
+    identificadores; la cámara real dejaba de estar en la lista deseada y se la
+    daba de baja. A partir de ahí cada pedido de imagen devolvía 404 y el panel
+    mostraba "Sin señal" para siempre, aunque device-service volviera: la
+    cámara del respaldo ya se había quedado con el mismo dispositivo USB.
+
+    El archivo sólo sirve para arrancar sin API. Una vez que la API habló, ella
+    manda, y su ausencia no borra nada.
+    """
+    if de_la_api is not None:
+        return de_la_api
+    if ya_contesto_alguna_vez:
+        return None
+    return del_archivo
 
 
 class CameraRegistry:
@@ -45,6 +90,8 @@ class CameraRegistry:
         self._thread: threading.Thread | None = None
         self.last_sync_error: str | None = None
         self.using_api = False
+        # Si la API contestó alguna vez, su silencio posterior no borra cámaras.
+        self._api_respondio = False
 
     # ── origen de la configuración ───────────────────────────────────
     def _from_api(self) -> list[dict] | None:
@@ -86,17 +133,27 @@ class CameraRegistry:
         cfg = json.loads(SOURCES_FILE.read_text(encoding="utf-8"))
         return [c for c in cfg if c.get("enabled", True) and "id" in c]
 
-    def _desired(self) -> list[dict]:
+    def _desired(self) -> list[dict] | None:
         api = self._from_api()
         if api is not None:
             self.using_api = True
+            self._api_respondio = True
             return api
         self.using_api = False
-        return self._from_file()
+        return decidir_camaras(api, self._api_respondio, self._from_file())
 
     # ── sincronización ───────────────────────────────────────────────
     def sync_once(self) -> None:
-        desired = {c["id"]: c for c in self._desired() if c.get("enabled", True)}
+        elegidas = self._desired()
+        if elegidas is None:
+            # No se sabe qué hay: se deja todo como está. Apagar cámaras porque
+            # no se pudo preguntar es peor que seguir mostrando las de recién.
+            log.warning(
+                "no se pudo consultar device-service (%s): se conservan las %d cámara(s) actuales",
+                self.last_sync_error, len(self.sources),
+            )
+            return
+        desired = {c["id"]: c for c in elegidas if c.get("enabled", True)}
 
         with self._lock:
             # Cámaras nuevas: arrancar captura.
