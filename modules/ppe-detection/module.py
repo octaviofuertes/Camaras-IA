@@ -108,6 +108,10 @@ class PpeDetectionModule(PerceptaModule):
         self._en_vivo: list[dict] = []
         self._en_vivo_personas: list[dict] = []
         self._en_vivo_ts: float = 0.0
+        # A quién le toca la segunda mirada. Ver abajo por qué es de a uno.
+        self._turno = 0
+        self._segundas = 0
+        self._segunda_activa = True
 
     # ── ciclo de vida ────────────────────────────────────────────────
     def load(self, ctx: ModuleContext) -> None:
@@ -172,6 +176,10 @@ class PpeDetectionModule(PerceptaModule):
             framesSeguidos=int(cfg.get("framesSeguidos", 4)),
             repetirSegundos=float(cfg.get("repetirSegundos", 120.0)),
         ))
+        # Cuesta alrededor de un 77% más de CPU por cuadro. Vale la pena
+        # —sin ella el de atrás no recibe veredicto— pero en una máquina justa
+        # se apaga y el módulo sigue andando con el cuadro entero.
+        self._segunda_activa = bool(cfg.get("segundaMirada", True))
         self._cargado_en = time.time()
         log.info(
             "EPP cargado desde %s; se exige: %s; se alerta de: %s",
@@ -227,6 +235,26 @@ class PpeDetectionModule(PerceptaModule):
 
         self._personas_vistas += len(personas)
 
+        # Segunda mirada, de a una persona por cuadro.
+        #
+        # En una escena real la gente está a distintas distancias: el que está
+        # cerca ocupa media pantalla y el del fondo, cincuenta píxeles. Mirando
+        # el cuadro entero el modelo resuelve al de adelante y se pierde a los
+        # de atrás — se ve como "detecta a uno solo de los tres".
+        #
+        # Recortar a la persona y ampliarla le da al de atrás el mismo tamaño
+        # que al de adelante. Medido sobre el split de prueba: las detecciones
+        # de "sin chaleco" pasan de 38 a 45, y cada persona recibe un veredicto
+        # propio en vez de depender de que el modelo la vea entre las demás.
+        #
+        # Va de a UNA por cuadro y no todas, porque cada recorte es otra
+        # inferencia: con cuatro personas serían cinco pasadas por cuadro y el
+        # pipeline no llegaría. Como el EPP no cambia de un cuadro al otro,
+        # turnarse alcanza: con tres personas cada una se revisa una vez por
+        # segundo, y el estado se sostiene entre medio.
+        if personas and self._segunda_activa:
+            elementos += self._segunda_mirada(frame.image, personas)
+
         # Lo que va a dibujar la pantalla: cada elemento con su nombre en
         # castellano y si está puesto o falta. Va TODO lo detectado, no sólo lo
         # que genera alerta: ver "casco" verde sobre alguien es lo que le dice
@@ -259,6 +287,60 @@ class PpeDetectionModule(PerceptaModule):
             detections=detecciones,
             inference_ms=(time.perf_counter() - t0) * 1000.0,
         )
+
+    def _segunda_mirada(
+        self,
+        imagen: Any,
+        personas: list[tuple[float, float, float, float]],
+    ) -> list[tuple[str, tuple[float, float, float, float], float]]:
+        """Mira de cerca a una persona y devuelve lo que encuentre, en
+        coordenadas del cuadro completo."""
+        if self._modelo is None:
+            return []
+        h, w = imagen.shape[:2]
+        self._turno = (self._turno + 1) % len(personas)
+        px, py, pw, ph = personas[self._turno]
+
+        # Un poco de margen: un casco asoma por arriba de la caja del cuerpo, y
+        # sin margen se recorta justo lo que se quiere ver.
+        margen = 0.12 * pw
+        x1 = max(0, int((px - margen) * w))
+        y1 = max(0, int((py - margen) * h))
+        x2 = min(w, int((px + pw + margen) * w))
+        y2 = min(h, int((py + ph + margen) * h))
+        if x2 - x1 < 32 or y2 - y1 < 32:
+            return []
+
+        recorte = imagen[y1:y2, x1:x2]
+        try:
+            r = self._modelo.predict(
+                recorte, verbose=False, device="cpu", imgsz=384, conf=0.25,
+            )[0]
+        except Exception as exc:  # noqa: BLE001
+            log.error("falló la segunda mirada: %r", exc)
+            return []
+        self._segundas += 1
+
+        salida: list[tuple[str, tuple[float, float, float, float], float]] = []
+        for b in getattr(r, "boxes", []) or []:
+            clase = self._nombres.get(int(b.cls.item()), "")
+            if clase == CLASE_PERSONA:
+                continue
+            bx1, by1, bx2, by2 = (float(v) for v in b.xyxy[0].tolist())
+            # De coordenadas del recorte a las del cuadro completo. Si esto se
+            # equivocara, las cajas aparecerían corridas y se le atribuirían a
+            # la persona de al lado.
+            salida.append((
+                clase,
+                (
+                    (x1 + bx1) / w,
+                    (y1 + by1) / h,
+                    (bx2 - bx1) / w,
+                    (by2 - by1) / h,
+                ),
+                float(b.conf.item()),
+            ))
+        return salida
 
     def _armar_en_vivo(
         self,
@@ -346,6 +428,7 @@ class PpeDetectionModule(PerceptaModule):
                          if k not in (self._vigilador.cfg.sinAlertar if self._vigilador else ())],
             "umbralesMedidos": dict(self._vigilador.cfg.umbralPorElemento) if self._vigilador else {},
             "cuadrosProcesados": self._cuadros,
+            "segundasMiradas": self._segundas,
             "personasVistas": self._personas_vistas,
             "faltasAvisadas": self._faltas,
             **(self._vigilador.estado() if self._vigilador else {}),

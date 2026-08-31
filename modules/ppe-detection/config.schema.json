@@ -136,6 +136,12 @@
       "title": "Vigilar pero no alertar",
       "description": "Lo que está acá se sigue detectando y dibujando en la cámara, pero no manda alertas a Eventos. Es para el elemento cuyo modelo todavía no distingue la ausencia con precisión suficiente: mejor mostrarlo sin acusar a nadie que llenar Eventos de alertas falsas.",
       "default": []
+    },
+    "segundaMirada": {
+      "type": "boolean",
+      "title": "Mirar de cerca a cada persona, por turnos",
+      "description": "En una escena real la gente está a distintas distancias: el de adelante ocupa media pantalla y el del fondo cincuenta píxeles. Mirando sólo el cuadro entero, el modelo resuelve al de adelante y se pierde a los de atrás — se ve como que detecta a uno solo de tres. Recortando a cada persona y ampliándola, todos reciben la misma atención. Cuesta alrededor de un 77% más de CPU por cuadro; apagalo si la máquina no llega.",
+      "default": true
     }
   },
   "additionalProperties": false
