@@ -97,6 +97,8 @@ El modelo no viene con el repositorio: se entrena acá, con un dataset público
 
 ```bash
 python training/ppe/descargar.py && python training/ppe/verificar.py && python training/ppe/entrenar.py
+python training/ppe/evaluar.py     # que tan bien detecta, clase por clase
+python training/ppe/umbral.py      # con cuanta confianza conviene alertar
 ```
 
 `verificar.py` no es opcional. El primer dataset que probé tenía las clases corridas y no
@@ -107,6 +109,12 @@ grande, las botas abajo— y se planta si algo no cae donde va.
 En CPU el entrenamiento tarda unas 5 horas. Deja `training/models/epp.pt` y las métricas por
 clase en `training/models/epp.json`. Ninguno de los dos va al repositorio: son artefactos, se
 regeneran con el comando de arriba.
+
+**Antes de confiar en él, medilo.**  da el mAP por clase sobre las 254 imágenes
+que el modelo nunca vio, y traduce el número: *"de cada 10 alertas, ~7 serían correctas"*.
+ elige con cuánta confianza conviene alertar cada elemento — y se niega a dar un
+número para los que todavía no llegan, en vez de inventar uno. Lo que no llega se pone en
+: se sigue viendo en la cámara, pero no manda alertas.
 
 **Lo que el módulo NO hace:** avisar porque no vio el elemento. Sólo avisa cuando el modelo
 vio la ausencia —el dataset tiene las cabezas sin casco anotadas a mano—. La diferencia es lo

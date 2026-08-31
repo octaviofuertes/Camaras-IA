@@ -78,13 +78,30 @@ class ConfigEpp:
     minConfianza: float = 0.45
     #: Confianza mínima para creerle a una caja que dice que el elemento FALTA.
     #:
-    #: Más alta que la otra a propósito, y no por gusto: los dos errores no
-    #: cuestan lo mismo. Pasar por alto un casco puesto no le hace nada a
-    #: nadie; decir que alguien no lo tiene cuando sí lo tiene es acusarlo de
-    #: algo que no hizo, delante de su jefe. Medido sobre el split de prueba,
-    #: las clases de ausencia son además las más flojas del modelo, así que son
-    #: justo las que hay que exigir más.
-    minConfianzaFalta: float = 0.60
+    #: Los dos errores no cuestan lo mismo: pasar por alto un casco puesto no le
+    #: hace nada a nadie, y decir que alguien no lo tiene cuando sí lo tiene es
+    #: acusarlo delante de su jefe de algo que no hizo. Por eso la ausencia se
+    #: mira aparte de la presencia.
+    #:
+    #: Pero el número NO se elige a ojo. Se puso 0,60 razonando "más evidencia
+    #: para acusar", y medido sobre el split de prueba ese valor descartaba 18
+    #: de cada 19 faltas detectadas: el módulo dejaba de avisar casi siempre. La
+    #: confianza no significa lo mismo en todas las clases —el modelo está
+    #: seguro de un casco y mucho menos de una cabeza descubierta— así que sale
+    #: de `training/ppe/umbral.py`, que lo deriva de la curva de precisión.
+    minConfianzaFalta: float = 0.45
+    #: Umbral propio de cada elemento, cuando se lo midió. Lo que no esté acá
+    #: usa `minConfianzaFalta`.
+    #:
+    #: Existe porque un solo número para los cuatro obliga a elegir entre no
+    #: avisar de lo que el modelo sí ve bien, o avisar de más con lo que ve mal.
+    umbralPorElemento: dict[str, float] = field(default_factory=dict)
+    #: Elementos que NO se alertan aunque estén en `exigidos`.
+    #:
+    #: Sirve para el caso real de un modelo que ve bien unas cosas y mal otras:
+    #: se sigue dibujando lo que detecta —que es información útil en pantalla—
+    #: sin mandar a Eventos alertas que serían mayormente falsas.
+    sinAlertar: tuple[str, ...] = ()
     #: Verificar que el elemento caiga donde va en el cuerpo.
     verificarPosicion: bool = True
     #: Cuánto de la caja del elemento tiene que caer dentro de la persona para
@@ -202,7 +219,11 @@ def evaluar_cuadro(
         # A la ausencia se le pide más confianza que a la presencia: un falso
         # "sin casco" acusa a alguien, un falso "con casco" no le hace nada a
         # nadie.
-        if conf < (cfg.minConfianza if lo_tiene else cfg.minConfianzaFalta):
+        if lo_tiene:
+            minimo = cfg.minConfianza
+        else:
+            minimo = cfg.umbralPorElemento.get(elemento.clave, cfg.minConfianzaFalta)
+        if conf < minimo:
             continue
         quien = de_quien_es(caja, personas, cfg.solapeMinimo)
         if quien is None:
@@ -270,6 +291,11 @@ class VigiladorEpp:
                 lo_tiene, conf = dato
                 if lo_tiene:
                     est.seguidos[clave] = 0
+                    continue
+                if clave in cfg.sinAlertar:
+                    # Se sigue viendo y dibujando, pero no se avisa: el modelo
+                    # todavía no distingue esta ausencia con precisión suficiente
+                    # como para acusar a alguien.
                     continue
 
                 est.seguidos[clave] = est.seguidos.get(clave, 0) + 1

@@ -117,6 +117,10 @@ class PpeDetectionModule(PerceptaModule):
         self._vigilador = VigiladorEpp(ConfigEpp(
             exigidos=tuple(exigidos),
             minConfianza=float(cfg.get("minConfianza", 0.45)),
+            minConfianzaFalta=float(cfg.get("minConfianzaFalta", 0.45)),
+            umbralPorElemento={k: float(v) for k, v in (cfg.get("umbralPorElemento") or {}).items()},
+            sinAlertar=tuple(cfg.get("sinAlertar") or ()),
+            verificarPosicion=bool(cfg.get("verificarPosicion", True)),
             solapeMinimo=float(cfg.get("solapeMinimo", 0.55)),
             framesSeguidos=int(cfg.get("framesSeguidos", 4)),
             repetirSegundos=float(cfg.get("repetirSegundos", 120.0)),

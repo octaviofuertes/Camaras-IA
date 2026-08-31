@@ -102,16 +102,40 @@
     "minConfianzaFalta": {
       "type": "number",
       "title": "Confianza mínima para afirmar que FALTA",
-      "description": "Más alta que la anterior a propósito. Los dos errores no cuestan lo mismo: pasar por alto un casco puesto no le hace nada a nadie, y decir que alguien no lo tiene cuando sí lo tiene es acusarlo delante de su jefe de algo que no hizo. Además las clases de ausencia son las más flojas del modelo.",
+      "description": "Los dos errores no cuestan lo mismo: pasar por alto un casco puesto no le hace nada a nadie, y decir que alguien no lo tiene cuando sí lo tiene es acusarlo delante de su jefe. Pero el número NO se elige a ojo: sale de `python training/ppe/umbral.py`, que lo deriva de la curva de precisión del modelo. Un 0,60 puesto a criterio descartaba 18 de cada 19 faltas reales.",
       "minimum": 0.1,
       "maximum": 0.95,
-      "default": 0.6
+      "default": 0.45
     },
     "verificarPosicion": {
       "type": "boolean",
       "title": "Exigir que el elemento esté donde va en el cuerpo",
       "description": "Un casco tiene que estar en la cabeza y unos guantes en las manos. Si el modelo pone un \"sin casco\" a la altura de los pies, se equivocó, y sin esto esa equivocación se convierte en una alerta contra alguien. Apagalo sólo si la cámara tiene un encuadre tan raro que el filtro estorba.",
       "default": true
+    },
+    "umbralPorElemento": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number"
+      },
+      "title": "Umbral propio de cada elemento",
+      "description": "El modelo está seguro de un chaleco y mucho menos de unas antiparras. Un solo número para los cuatro obliga a elegir entre no avisar de lo que ve bien, o avisar de más con lo que ve mal. Lo llena `training/ppe/umbral.py`.",
+      "default": {}
+    },
+    "sinAlertar": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "casco",
+          "chaleco",
+          "antiparras",
+          "guantes"
+        ]
+      },
+      "title": "Vigilar pero no alertar",
+      "description": "Lo que está acá se sigue detectando y dibujando en la cámara, pero no manda alertas a Eventos. Es para el elemento cuyo modelo todavía no distingue la ausencia con precisión suficiente: mejor mostrarlo sin acusar a nadie que llenar Eventos de alertas falsas.",
+      "default": []
     }
   },
   "additionalProperties": false

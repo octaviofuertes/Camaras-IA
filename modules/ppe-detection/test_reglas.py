@@ -300,3 +300,39 @@ def test_la_banda_se_mide_contra_la_persona_no_contra_la_imagen():
     c = ConfigEpp(exigidos=("casco",), minConfianzaFalta=0.5)
     r = evaluar_cuadro([lejos], [("NO-Hardhat", casco, 0.9)], c)
     assert r[0]["casco"] == (False, 0.9)
+
+
+# ── umbral propio de cada elemento ───────────────────────────────────
+
+def test_cada_elemento_puede_tener_su_umbral():
+    # El modelo está seguro de un chaleco y mucho menos de unas antiparras: un
+    # solo número obliga a elegir entre no avisar de lo que ve bien o avisar de
+    # más con lo que ve mal.
+    c = ConfigEpp(exigidos=("casco", "chaleco"), minConfianzaFalta=0.60,
+                  umbralPorElemento={"chaleco": 0.35})
+    torso = (0.12, 0.25, 0.16, 0.30)
+    r = evaluar_cuadro([IZQ], [("NO-Safety Vest", torso, 0.40)], c)
+    assert r[0]["chaleco"] == (False, 0.40), "el umbral propio del chaleco no se aplicó"
+
+    # El casco, sin umbral propio, sigue con el general.
+    assert evaluar_cuadro([IZQ], [("NO-Hardhat", CASCO_IZQ, 0.40)], c) == {}
+
+
+def test_un_elemento_silenciado_no_alerta_pero_se_sigue_viendo():
+    # El caso real: el modelo ve mal la ausencia de casco, así que no conviene
+    # acusar a nadie por eso todavía; pero lo que detecta se sigue dibujando.
+    c = ConfigEpp(exigidos=("casco",), framesSeguidos=1, repetirSegundos=0.0,
+                  minConfianzaFalta=0.4, sinAlertar=("casco",))
+    v = VigiladorEpp(c)
+    assert v.ver([IZQ], [("NO-Hardhat", CASCO_IZQ, 0.9)], 1.0) == []
+    # Pero el cuadro lo sigue sabiendo: es lo que alimenta el dibujo.
+    assert evaluar_cuadro([IZQ], [("NO-Hardhat", CASCO_IZQ, 0.9)], c)[0]["casco"] == (False, 0.9)
+
+
+def test_lo_no_silenciado_sigue_alertando():
+    c = ConfigEpp(exigidos=("casco", "chaleco"), framesSeguidos=1, repetirSegundos=0.0,
+                  minConfianzaFalta=0.4, sinAlertar=("casco",))
+    v = VigiladorEpp(c)
+    torso = (0.12, 0.25, 0.16, 0.30)
+    f = v.ver([IZQ], [("NO-Hardhat", CASCO_IZQ, 0.9), ("NO-Safety Vest", torso, 0.9)], 1.0)
+    assert [x.elemento.clave for x in f] == ["chaleco"]
