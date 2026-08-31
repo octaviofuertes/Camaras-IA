@@ -125,20 +125,60 @@ que separa un módulo que se usa de uno que se apaga a la semana por avisar de m
 En **Dashboard**, el botón de las flechas en cada cámara la abre a pantalla completa, con el
 video en vivo (MJPEG, sin recortar).
 
-Ahí cada persona que ve la cámara queda marcada con el contorno de su cuerpo. Tocando a una:
+Ahí cada persona queda marcada con un **recuadro sobre la cara**, con su nombre encima:
 
-- aparece su ficha con **nombre**, **hace cuánto está en el lugar** y **si tiene acceso**;
-- se la cubre con una capa **verde** si puede estar ahí y **roja** si no.
+- **verde** si tiene acceso a este lugar;
+- **rojo** si se sabe quién es y no tiene acceso;
+- **gris** y con el texto **Sin identificar** si el sistema no sabe quién es.
 
-La capa aparece sólo al seleccionar. Con todos pintados todo el tiempo el video deja de verse
-y el rojo deja de significar algo.
+El gris nunca se convierte en un nombre. A quien no se reconoce no se le pone el del que más se
+le parece: un nombre equivocado sobre una cara es un error que nadie mirando la pantalla puede
+detectar, y se arrastra al registro de accesos entero.
 
-A quien el sistema no reconoció no se lo pinta ni de verde ni de rojo, sino de gris: no se sabe
-si puede estar ahí, y un color afirmaría algo que no se sabe.
+El recuadro va **punteado** cuando en ese momento no se le ve la cara —está de espaldas o de
+costado— y lo que se marca es dónde está la cabeza, deducida del cuerpo. Con línea llena estaría
+diciendo que se le está viendo la cara.
 
-El contorno sale del modelo de segmentación (`yolov8n-seg.pt`), que cuesta alrededor del doble
-de CPU por frame que el de detección. Se puede volver al anterior poniendo `personWeights:
-"yolov8n.pt"` en la configuración del módulo: ahí la marca pasa a ser un recuadro.
+Debajo del recuadro va un **cronómetro exacto** (`mm:ss`, y `h:mm:ss` pasada la hora) que
+corre segundo a segundo. No dice "hace 3 min", que puede ser cualquier cosa entre tres y cuatro:
+en un control de accesos el minuto es justamente el dato.
+
+Mide dos cosas distintas según el caso, y la ficha dice cuál:
+
+- **En el lugar** — para alguien identificado, desde que empezó su visita. Ese instante sobrevive
+  a que se tape, se agache o salga del cuadro un momento (hasta 90 s).
+- **En cuadro** — para alguien sin identificar, desde que su cuerpo apareció. Es exacto desde el
+  primer instante y no hace falta saber quién es. Tolera que el seguidor lo pierda unos segundos.
+
+El número lo calcula el worker con su propio reloj y la pantalla lo sigue contando con el del
+navegador, así que es exacto aunque el dashboard esté en otra máquina con la hora corrida.
+
+Tocando a una persona aparece su ficha con el **nombre**, **por qué vía se sabe quién es**
+(se le vio la cara, se lo viene siguiendo, por su ropa, por el puesto), el **cronómetro con la
+hora exacta de llegada** y **si tiene acceso**.
+
+> **El dibujo va atrasado respecto del video, y es normal.** Los modelos corren en CPU: analizar
+> un cuadro lleva unos **4 segundos** en esta máquina, así que el recuadro marca dónde estaba la
+> cara hace ese tanto. Si la persona se mueve rápido, se ve. El cronómetro **no** tiene ese
+> atraso: se calcula al momento de contestar, no al momento de analizar.
+
+### Ponerle un nombre a un "Sin identificar"
+
+Tocando a alguien que el sistema no reconoce, la ficha ofrece darlo de alta ahí mismo: se ve la
+cara que se va a guardar, se escribe el nombre, se elige si tiene acceso o no y se declara la
+base del consentimiento. La cámara vuelve a leer la lista de personas cada 30 segundos, así que
+en menos de un minuto empieza a reconocerlo con su nombre.
+
+Hace falta el permiso `persons:write` (los administradores lo tienen): dar de alta a alguien es
+afirmar que existe su consentimiento para guardar su cara, y esa no es una decisión operativa.
+
+Si todavía no se le agarró una cara utilizable, la ficha lo dice y explica por qué —de perfil,
+demasiado chica, poco nítida—. En cuanto la persona mire hacia la cámara una vez, aparece su
+foto y se la puede dar de alta.
+
+Si esa cara ya es de alguien dado de alta, el servidor lo avisa y se ofrecen las dos salidas:
+sumarle esta foto a esa persona (mejora el reconocimiento) o afirmar que es otra y darla de alta
+igual. El sistema no lo decide solo.
 
 ### El plano del lugar
 
