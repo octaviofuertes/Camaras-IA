@@ -47,6 +47,8 @@ export class RecognitionComponent implements OnInit, OnDestroy {
   cargandoPendientes = true;
   /** Cuál de las pendientes está desplegada. */
   abierta: string | null = null;
+  /** Foto del cuadro completo de la alerta abierta, si quedó guardada. */
+  fotoEscena: string | null = null;
 
   // ── manual ─────────────────────────────────────────────────────────
   personas: Persona[] = [];
@@ -118,12 +120,30 @@ export class RecognitionComponent implements OnInit, OnDestroy {
 
   desplegar(e: EventItem): void {
     this.abierta = this.abierta === e.id ? null : e.id;
+    this.fotoEscena = null;
     if (this.abierta) {
       this.nombre = '';
       this.acceso = null;
       this.consentimiento = '';
       this.errorAlta = null;
+      this.cargarFotoEscena(e);
     }
+  }
+
+  /**
+   * La foto del cuadro entero en el momento de la alerta.
+   *
+   * El recorte de la cara alcanza para reconocer a alguien conocido, pero no
+   * para saber DÓNDE ni CÓMO apareció: si venía con un casco puesto, si estaba
+   * con otra persona, si es el repartidor de siempre. Eso lo contesta la
+   * escena, y es lo que decide si esta persona se da de alta o no.
+   */
+  private cargarFotoEscena(e: EventItem): void {
+    this.eventos.evidences(e.id).subscribe((items) => {
+      if (this.abierta !== e.id) return;
+      const foto = items.find((ev) => ev.kind === 'image');
+      this.fotoEscena = foto ? this.eventos.evidenceUrl(e.cameraId ?? '', foto.storageKey) : null;
+    });
   }
 
   urlMiniatura(e: EventItem): string {

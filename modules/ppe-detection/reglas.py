@@ -320,3 +320,31 @@ class VigiladorEpp:
             "personasSeguidas": len(self._estado),
             "elementosExigidos": list(self.cfg.exigidos),
         }
+
+
+def calibracion(
+    exigidos: tuple[str, ...],
+    medidos: dict[str, float],
+) -> tuple[dict[str, float], tuple[str, ...]]:
+    """Qué se puede alertar y con qué umbral, según lo que se midió del modelo.
+
+    `medidos` sale de `training/ppe/umbral.py`: por cada elemento, la confianza
+    mínima con la que sus alertas alcanzan la precisión pedida. Un elemento que
+    no está en esa lista es uno que el modelo NO distingue lo bastante bien como
+    para acusar a nadie.
+
+    La regla es simple y es la que hace que el módulo no invente: **sólo alerta
+    lo que tiene un umbral medido**. Lo demás se sigue detectando y dibujando
+    —sirve para ver que el módulo está mirando— pero no manda nada a Eventos.
+
+    Existe porque el error que reportó el usuario nace justo de lo contrario: la
+    configuración guardada en la cámara se escribió al asignar el módulo, con
+    los valores por omisión de ese momento, y nunca más se tocó. Cuando después
+    se midió que el casco no estaba para alertar y que el chaleco necesitaba
+    0,35, esa cámara siguió con 0,45 para todo: avisaba de cascos que estaban
+    puestos y se comía las faltas de chaleco reales. La calibración pertenece al
+    modelo, no a la cámara.
+    """
+    umbrales = {e: u for e, u in medidos.items() if e in exigidos}
+    callados = tuple(e for e in exigidos if e not in umbrales)
+    return umbrales, callados

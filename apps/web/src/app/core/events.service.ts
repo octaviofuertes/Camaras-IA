@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Observable, catchError, map, of } from 'rxjs';
+import { Observable, catchError, map, of, switchMap } from 'rxjs';
 import type { EventItem, EventStatus, Severity } from './models';
 import { DEMO_EVENTS } from './demo-data';
 
@@ -67,6 +67,21 @@ export interface ResultadoAlta {
   id?: string;
   yaExiste?: { id: string; displayName: string; parecido: number };
   mensaje?: string;
+}
+
+/** Quién es la persona de una foto, resuelto a pedido desde una alerta. */
+export interface Reconocimiento {
+  reconocido: {
+    personId: string;
+    displayName: string;
+    photo: string | null;
+    hasAccess: boolean;
+    workZone: string | null;
+    parecido: number;
+  } | null;
+  /** Por qué no se pudo. Vacío cuando sí se pudo. */
+  motivo: string;
+  caras: number;
 }
 
 export interface TrainingStats {
@@ -199,7 +214,61 @@ export class EventsService {
       .pipe(map(() => true), catchError(() => of(false)));
   }
 
-  /** URL de descarga del clip. El archivo lo sirve media-service. */
+  /**
+   * ¿Quién es la persona de esta foto?
+   *
+   * Se dispara SÓLO cuando el operador aprieta el botón. El reconocimiento
+   * facial no corre en cada alerta: correrlo siempre gastaría el modelo de
+   * rostros miles de veces por día para que nadie lea el resultado, y dejaría
+   * escrito en la base quién anduvo sin casco cada día sin que nadie lo pidiera.
+   */
+  reconocerPersona(imagenBase64: string): Observable<Reconocimiento> {
+    return this.http
+      .post<Reconocimiento>('/analytics/api/v1/persons/recognize', { image: imagenBase64 })
+      .pipe(
+        catchError((err: HttpErrorResponse) => {
+          // Cada causa se dice con su nombre: son cosas que se arreglan en
+          // lugares distintos, y un "no se pudo" genérico manda a buscar el
+          // problema donde no está.
+          const motivo =
+            err.status === 403
+              ? 'Tu usuario no tiene permiso para ver el nombre de las personas. Lo habilita ' +
+                'un administrador (permiso "Ver informes con nombre y apellido").'
+              : err.status === 409
+                ? (err.error?.message ??
+                  'Para reconocer a alguien hace falta el módulo "Ingreso de personas" asignado ' +
+                  'a alguna cámara.')
+                : 'No se pudo consultar el reconocimiento. Revisá que analytics-service y el ' +
+                  'worker estén corriendo.';
+          return of({ reconocido: null, motivo, caras: 0 } as Reconocimiento);
+        }),
+      );
+  }
+
+  /**
+   * La foto de la evidencia como data URL, para poder mandarla a analizar.
+   *
+   * Se lee del archivo ya guardado y no de la cámara: la alerta puede tener
+   * horas, y lo que hay que reconocer es a quien estaba en ESE momento.
+   */
+  fotoEvidencia(url: string): Observable<string> {
+    return this.http.get(url, { responseType: 'blob' }).pipe(
+      switchMap(
+        (b) =>
+          new Observable<string>((obs) => {
+            const fr = new FileReader();
+            fr.onload = () => {
+              obs.next(String(fr.result));
+              obs.complete();
+            };
+            fr.onerror = () => obs.error(fr.error);
+            fr.readAsDataURL(b);
+          }),
+      ),
+    );
+  }
+
+  /** URL de descarga de la evidencia. El archivo lo sirve media-service. */
   evidenceUrl(cameraId: string, storageKey: string): string {
     // Se corta por AMBOS separadores: media-service corre sobre Windows y sus
     // claves vienen con `\`. Partiendo sólo por `/` el nombre salía entero

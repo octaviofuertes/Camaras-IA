@@ -8,7 +8,13 @@ import {
   inject,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { VivoService, type ElementoEpp, type PersonaEnVivo } from '../core/vivo.service';
+import {
+  VivoService,
+  type ElementoEpp,
+  type EstadoEpp,
+  type PersonaEnVivo,
+  type PersonaEpp,
+} from '../core/vivo.service';
 
 /** Cada cuánto se le pregunta al worker quién está en el cuadro. */
 const REFRESCO_MS = 700;
@@ -58,6 +64,8 @@ export class CameraLiveComponent implements OnInit, OnDestroy {
   epp: ElementoEpp[] = [];
   hayEpp = false;
   exigidos: string[] = [];
+  /** Las personas que ve el módulo de EPP, con el estado de cada elemento. */
+  eppPersonas: PersonaEpp[] = [];
   /** El track seleccionado. Se sigue por track, no por persona: quien no está
    *  identificado igual se puede tocar para ver que el sistema no sabe quién es. */
   seleccion: number | null = null;
@@ -89,6 +97,7 @@ export class CameraLiveComponent implements OnInit, OnDestroy {
       this.hayEpp = v.moduloEpp;
       this.exigidos = v.exigidos;
       this.epp = v.epp;
+      this.eppPersonas = v.eppPersonas;
       // Si el seleccionado se fue del cuadro, se suelta la selección: dejarla
       // pegada mostraría la ficha de alguien que ya no está.
       if (this.seleccion !== null && !v.personas.some((p) => p.trackId === this.seleccion)) {
@@ -158,22 +167,104 @@ export class CameraLiveComponent implements OnInit, OnDestroy {
     return e.tiene ? e.nombre : `sin ${e.nombre}`;
   }
 
-  /** Qué le falta a la persona seleccionada, para la ficha. */
-  faltantesDe(indice: number): string[] {
-    return this.epp
-      .filter((e) => e.persona === indice && e.exigido && !e.tiene)
-      .map((e) => e.nombre);
+  /**
+   * Qué persona del módulo de EPP es la misma que ésta.
+   *
+   * Se cruza por geometría y no por índice. Los dos módulos corren su propio
+   * modelo y encuentran a la gente en su propio orden, así que la persona 0 de
+   * uno no es la persona 0 del otro: cruzarlos por índice le ponía "le falta el
+   * casco" a quien estaba al lado. Se compara solapamiento de cajas, que es lo
+   * único que las dos listas tienen en común.
+   */
+  private parDeEpp(p: PersonaEnVivo): PersonaEpp | null {
+    let mejor: PersonaEpp | null = null;
+    let mejorValor = 0.4; // por debajo de esto no son la misma persona
+    for (const e of this.eppPersonas) {
+      const v = this.iou(p.bbox, e.bbox);
+      if (v > mejorValor) {
+        mejor = e;
+        mejorValor = v;
+      }
+    }
+    return mejor;
   }
 
-  /** Qué tiene puesto la persona seleccionada. */
-  puestosDe(indice: number): string[] {
-    return this.epp
-      .filter((e) => e.persona === indice && e.tiene)
-      .map((e) => e.nombre);
+  /** Solapamiento sobre unión de dos cajas [x, y, ancho, alto]. */
+  private iou(a: [number, number, number, number], b: [number, number, number, number]): number {
+    const ix = Math.max(0, Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0]));
+    const iy = Math.max(0, Math.min(a[1] + a[3], b[1] + b[3]) - Math.max(a[1], b[1]));
+    const inter = ix * iy;
+    const union = a[2] * a[3] + b[2] * b[3] - inter;
+    return union > 0 ? inter / union : 0;
   }
 
-  indiceDe(p: PersonaEnVivo): number {
-    return this.personas.indexOf(p);
+  /** Los elementos obligatorios de esta persona, con su estado, para la ficha. */
+  estadoDe(p: PersonaEnVivo): { nombre: string; estado: EstadoEpp }[] {
+    const par = this.parDeEpp(p);
+    if (!par) return [];
+    return this.exigidos.map((clave) => ({
+      nombre: clave,
+      estado: par.estado[clave] ?? 'no_se_sabe',
+    }));
+  }
+
+  /**
+   * Cómo se pinta el recuadro de una persona según su EPP.
+   *
+   * Rojo si le falta algo, verde si tiene todo lo exigido, y gris si no se
+   * sabe. El gris importa: alguien de espaldas no está en falta, y pintarlo de
+   * rojo sería acusarlo por no dejarse ver.
+   */
+  colorDePersona(p: PersonaEpp): string {
+    const estados = Object.values(p.estado ?? {});
+    if (estados.some((e) => e === 'falta')) return 'falta';
+    if (estados.length && estados.every((e) => e === 'tiene')) return 'completo';
+    return 'no-se-sabe';
+  }
+
+  /** Un renglón corto sobre la cabeza: qué le falta, o que está completo. */
+  resumenDePersona(p: PersonaEpp): string {
+    const faltan = Object.entries(p.estado ?? {})
+      .filter(([, v]) => v === 'falta')
+      .map(([k]) => k);
+    if (faltan.length) return `sin ${faltan.join(', ')}`;
+    const todos = Object.values(p.estado ?? {});
+    return todos.length && todos.every((e) => e === 'tiene') ? 'completo' : '';
+  }
+
+  /** Cómo se redacta cada estado en la ficha. */
+  textoEstado(e: EstadoEpp): string {
+    if (e === 'tiene') return 'lo lleva';
+    if (e === 'falta') return 'LE FALTA';
+    return 'no se sabe';
+  }
+
+  /** Los renglones que se dibujan sobre el cuerpo: un elemento por línea. */
+  filas(e: PersonaEpp): { texto: string; estado: EstadoEpp }[] {
+    return this.exigidos.map((clave) => {
+      const estado = e.estado[clave] ?? 'no_se_sabe';
+      // El símbolo va además del color: quien no distingue rojo de verde tiene
+      // que poder leer lo mismo, y un tilde o una cruz se ven aunque el
+      // recuadro quede sobre una parte clara del video.
+      const marca = estado === 'tiene' ? '✓' : estado === 'falta' ? '✗' : '?';
+      return { texto: `${marca} ${clave}`, estado };
+    });
+  }
+
+  /** Le falta algo obligatorio: la caja va en rojo. */
+  tieneFalta(e: PersonaEpp): boolean {
+    return this.exigidos.some((c) => e.estado[c] === 'falta');
+  }
+
+  /**
+   * Se le ve TODO lo obligatorio puesto: la caja va en verde.
+   *
+   * Pide que no quede ninguno en "no se sabe". Pintar de verde a alguien del
+   * que sólo se vio el chaleco sería decir que está en regla sin haberle visto
+   * la cabeza, y el verde tiene que significar exactamente eso: está en regla.
+   */
+  cumpleTodo(e: PersonaEpp): boolean {
+    return this.exigidos.length > 0 && this.exigidos.every((c) => e.estado[c] === 'tiene');
   }
 
   // ── textos ─────────────────────────────────────────────────────────

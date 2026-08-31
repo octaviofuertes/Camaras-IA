@@ -125,6 +125,19 @@
               <span class="assigned-chip" *ngFor="let a of cam.assignments" [title]="a.moduleName">
                 <px-module-icon [icon]="iconOf(a).icon" [color]="iconOf(a).color" [size]="18" />
                 <span class="a-name">{{ a.moduleName }}</span>
+                <!-- Qué vigila este módulo acá. Sólo aparece si el módulo lo
+                     permite: sale de su propio esquema, no de una lista fija. -->
+                <span class="a-que" *ngIf="opcionesDe(a).length"
+                      [title]="'Vigila: ' + (exigidosDe(a).join(', ') || 'nada')">
+                  {{ exigidosDe(a).length ? exigidosDe(a).join(' · ') : 'sin elegir' }}
+                </span>
+                <button class="a-config" *ngIf="opcionesDe(a).length"
+                        (click)="abrirConfig(cam, a)" title="Elegir qué vigilar">
+                  <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <circle cx="12" cy="12" r="3.2" />
+                    <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1" />
+                  </svg>
+                </button>
                 <button class="a-remove" (click)="removeModule(cam, a)" title="Quitar módulo">
                   <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5">
                     <path d="M18 6 6 18M6 6l12 12" />
@@ -261,6 +274,34 @@
         <span class="spinner" *ngIf="saving"></span>
         {{ saving ? 'Creando…' : 'Crear cámara' }}
       </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Qué tiene que vigilar este módulo ══════════════════════════════ -->
+<div class="tapa" *ngIf="configurando as c" (click)="configurando = null">
+  <div class="dialogo" (click)="$event.stopPropagation()">
+    <h2>{{ c.a.moduleName }}</h2>
+    <p class="d-sub">En <strong>{{ c.cam.name }}</strong></p>
+    <p class="d-ayuda">
+      Elegí qué tiene que vigilar acá. Depende del lugar: en un obrador casco y chaleco,
+      en un laboratorio antiparras y guantes. Lo que no elijas no se mira ni genera alertas.
+    </p>
+
+    <label class="opcion" *ngFor="let o of opcionesDe(c.a)">
+      <input type="checkbox" [checked]="estaElegido(o)" (change)="alternar(o)" />
+      <span>{{ o }}</span>
+    </label>
+
+    <p class="d-nota">
+      Con cuánta confianza avisar de cada uno no se elige acá: sale de medir el modelo
+      (<code>training/ppe/umbral.py</code>) y el módulo lo lee solo. Lo que todavía no se
+      midió se detecta y se dibuja, pero no manda alertas.
+    </p>
+
+    <div class="d-acciones">
+      <button class="btn btn-ghost" (click)="configurando = null">Cancelar</button>
+      <button class="btn btn-primary" (click)="guardarConfig()">Guardar</button>
     </div>
   </div>
 </div>

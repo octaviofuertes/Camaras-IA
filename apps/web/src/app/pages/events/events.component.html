@@ -180,16 +180,53 @@
 
           <ng-container *ngIf="!cargandoEvidencias">
             <div class="evidencia" *ngFor="let ev of evidencias">
-              <video [src]="urlEvidencia(ev)" controls preload="metadata"></video>
+              <!-- Foto para lo que se contesta mirando un instante (EPP, una cara
+                   desconocida); video para lo que hay que ver moverse (una caída). -->
+              <img *ngIf="esFoto(ev)" [src]="urlEvidencia(ev)" alt="Foto del momento de la alerta" />
+              <video *ngIf="!esFoto(ev)" [src]="urlEvidencia(ev)" controls preload="metadata"></video>
               <div class="ev-info">
-                <span class="ev-nombre">{{ ev.title || (esProvisional(ev) ? 'Sin revisar' : 'Clip') }}</span>
+                <span class="ev-nombre">
+                  {{ ev.title || (esProvisional(ev) ? 'Sin revisar' : esFoto(ev) ? 'Foto' : 'Clip') }}
+                </span>
                 <span class="mute">{{ tamano(ev.bytes) }} · {{ ventanaClip(ev) }}</span>
               </div>
               <a class="btn sm" [href]="urlEvidencia(ev)" download>Descargar</a>
             </div>
 
+            <!-- Quién es. Se calcula ACÁ, cuando alguien lo pide: el sistema no
+                 reconoce caras en cada alerta ni guarda el nombre en la base. -->
+            <div class="reconocer" *ngIf="fotoDelEvento">
+              <button class="btn sm" (click)="reconocerPersona()" [disabled]="reconociendo || demoMode">
+                <span class="spinner" *ngIf="reconociendo"></span>
+                {{ reconociendo ? 'Consultando…' : 'Reconocer persona' }}
+              </button>
+              <span class="mute" *ngIf="!reconocimiento && !reconociendo">
+                El nombre no se calcula solo: se consulta cuando lo pedís.
+              </span>
+
+              <div class="reco-ok" *ngIf="reconocimiento?.reconocido as r">
+                <img *ngIf="r.photo" [src]="r.photo" alt="" />
+                <div>
+                  <div class="reco-nombre">{{ r.displayName }}</div>
+                  <div class="mute">
+                    parecido {{ parecidoPct(r.parecido) }}%
+                    <span *ngIf="r.workZone"> · {{ r.workZone }}</span>
+                    <span *ngIf="!r.hasAccess"> · sin acceso a este lugar</span>
+                  </div>
+                  <div class="mute reco-aviso">
+                    Es una sugerencia del sistema, no una identificación certificada.
+                    Verificala antes de usarla para algo.
+                  </div>
+                </div>
+              </div>
+
+              <div class="reco-no" *ngIf="reconocimiento && !reconocimiento.reconocido">
+                {{ reconocimiento.motivo }}
+              </div>
+            </div>
+
             <div class="mute clip-note" *ngIf="!evidencias.length">
-              No hay clip de este evento. El video se graba al detectarse la alerta;
+              No hay imagen de este evento. La evidencia se guarda al detectarse la alerta;
               si la cámara no estaba entregando imagen en ese momento, no queda registro.
             </div>
           </ng-container>
@@ -225,8 +262,8 @@
         </div>
 
         <div class="clip-note mute" *ngIf="e.status !== 'confirmed' && evidencias.length">
-          Mirá el clip antes de decidir. Si confirmás que fue una caída real se conserva
-          como evidencia con el nombre que le pongas; si marcás falso positivo se borra.
+          Mirá la evidencia antes de decidir. Si confirmás la alerta se conserva
+          con el nombre que le pongas; si marcás falso positivo se borra.
         </div>
 
         <div class="clip-note mute" *ngIf="e.status === 'confirmed' && evidencias.length">

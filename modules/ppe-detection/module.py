@@ -26,6 +26,7 @@ semana por avisar de más.
 """
 from __future__ import annotations
 
+import json
 import logging
 import sys
 import time
@@ -49,6 +50,7 @@ from reglas import (  # noqa: E402
     POR_CLAVE,
     ConfigEpp,
     VigiladorEpp,
+    calibracion,
     de_quien_es,
     evaluar_cuadro,
 )
@@ -60,6 +62,34 @@ PESOS_POR_OMISION = "training/models/epp.pt"
 
 #: Cómo se llama la persona en el modelo entrenado.
 CLASE_PERSONA = "Person"
+
+
+def _medido(pesos: Path) -> dict[str, float]:
+    """Los umbrales que midió `training/ppe/umbral.py` para ESTE modelo.
+
+    Vive al lado del .pt, en `epp.json`, porque es una propiedad del modelo y no
+    de la cámara: cuando se reentrena y se vuelve a medir, todas las cámaras
+    quedan bien calibradas sin que nadie edite nada.
+
+    Si no está el archivo se devuelve vacío, y eso significa "no se midió
+    nada". La consecuencia es deliberada: sin medición no se alerta. Un módulo
+    que avisa con umbrales inventados acusa gente por nada, y es exactamente lo
+    que pasaba antes de esto.
+    """
+    ficha = pesos.with_suffix(".json")
+    if not ficha.is_file():
+        log.warning(
+            "no hay mediciones en %s: no se va a alertar de nada hasta correr "
+            "python training/ppe/umbral.py", ficha,
+        )
+        return {}
+    try:
+        datos = json.loads(ficha.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        log.error("no se pudo leer %s: %r", ficha, exc)
+        return {}
+    medidos = (datos.get("umbrales") or {}).get("porElemento") or {}
+    return {str(k): float(v) for k, v in medidos.items()}
 
 
 class PpeDetectionModule(PerceptaModule):
@@ -114,19 +144,40 @@ class PpeDetectionModule(PerceptaModule):
             )
             exigidos = [e for e in exigidos if e in POR_CLAVE]
 
+        # Los umbrales salen de lo MEDIDO sobre este modelo, no de lo que quedó
+        # guardado en la cámara cuando se asignó el módulo. Esa config se
+        # escribe una vez y no se vuelve a tocar: cuando después se midió que el
+        # casco no estaba para alertar, las cámaras siguieron avisando igual.
+        # Se puede pisar por cámara, para el caso raro de un encuadre propio.
+        umbrales, callados = calibracion(tuple(exigidos), _medido(ruta))
+        if cfg.get("umbralPorElemento"):
+            umbrales = {k: float(v) for k, v in cfg["umbralPorElemento"].items()}
+        if cfg.get("sinAlertar") is not None and cfg.get("sinAlertar") != []:
+            callados = tuple(cfg["sinAlertar"])
+        if callados:
+            log.warning(
+                "sin medición suficiente para alertar de: %s. Se detectan y se "
+                "dibujan, pero no generan eventos. Corré python training/ppe/umbral.py",
+                ", ".join(callados),
+            )
+
         self._vigilador = VigiladorEpp(ConfigEpp(
             exigidos=tuple(exigidos),
             minConfianza=float(cfg.get("minConfianza", 0.45)),
             minConfianzaFalta=float(cfg.get("minConfianzaFalta", 0.45)),
-            umbralPorElemento={k: float(v) for k, v in (cfg.get("umbralPorElemento") or {}).items()},
-            sinAlertar=tuple(cfg.get("sinAlertar") or ()),
+            umbralPorElemento=umbrales,
+            sinAlertar=callados,
             verificarPosicion=bool(cfg.get("verificarPosicion", True)),
             solapeMinimo=float(cfg.get("solapeMinimo", 0.55)),
             framesSeguidos=int(cfg.get("framesSeguidos", 4)),
             repetirSegundos=float(cfg.get("repetirSegundos", 120.0)),
         ))
         self._cargado_en = time.time()
-        log.info("EPP cargado desde %s; se exige: %s", ruta.name, ", ".join(exigidos))
+        log.info(
+            "EPP cargado desde %s; se exige: %s; se alerta de: %s",
+            ruta.name, ", ".join(exigidos) or "nada",
+            ", ".join(k for k in exigidos if k not in callados) or "nada todavía",
+        )
 
     def warmup(self) -> None:
         if self._modelo is None:
@@ -284,6 +335,10 @@ class PpeDetectionModule(PerceptaModule):
             "ok": self._modelo is not None,
             "pesos": self._pesos,
             "clasesDelModelo": [self._nombres[i] for i in sorted(self._nombres)],
+            "seExige": list(self._vigilador.cfg.exigidos) if self._vigilador else [],
+            "seAlerta": [k for k in (self._vigilador.cfg.exigidos if self._vigilador else ())
+                         if k not in (self._vigilador.cfg.sinAlertar if self._vigilador else ())],
+            "umbralesMedidos": dict(self._vigilador.cfg.umbralPorElemento) if self._vigilador else {},
             "cuadrosProcesados": self._cuadros,
             "personasVistas": self._personas_vistas,
             "faltasAvisadas": self._faltas,

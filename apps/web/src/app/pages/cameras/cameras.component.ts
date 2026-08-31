@@ -113,7 +113,7 @@ export class CamerasComponent implements OnInit, OnDestroy {
     this.subs.unsubscribe();
   }
 
-  reload(silent = false): void {
+  reload(silent = false, alTerminar?: () => void): void {
     if (!silent) this.loading = true;
     forkJoin({
       cams: this.api.listCameras(),
@@ -133,6 +133,7 @@ export class CamerasComponent implements OnInit, OnDestroy {
         assignments: assigns.filter((a) => a.cameraId === c.id),
       }));
       this.modules = mods;
+      alTerminar?.();
       this.applyFilter();
     });
   }
@@ -172,6 +173,70 @@ export class CamerasComponent implements OnInit, OnDestroy {
     this.assign(camera, mod);
   }
 
+  /**
+   * Qué se le puede pedir a un módulo, cuando su configuración lo permite.
+   *
+   * Sale del propio esquema del módulo —la propiedad `exigidos`, con su lista
+   * de valores— y no de una lista escrita acá: si mañana el módulo de EPP suma
+   * "protector auditivo", aparece solo. Un módulo que no declara `exigidos` no
+   * muestra nada y se comporta como antes.
+   */
+  opcionesDe(a: ApiAssignment): string[] {
+    const mod = this.modules.find((m) => m.id === a.aiModuleId);
+    const prop = (mod?.configSchema?.['properties'] as Record<string, any>)?.['exigidos'];
+    const valores = prop?.items?.enum;
+    return Array.isArray(valores) ? (valores as string[]) : [];
+  }
+
+  /** Lo que esa cámara tiene exigido hoy. */
+  exigidosDe(a: ApiAssignment): string[] {
+    const v = (a.config as Record<string, unknown>)?.['exigidos'];
+    return Array.isArray(v) ? (v as string[]) : [];
+  }
+
+  /** La asignación que se está configurando, o null. */
+  configurando: { cam: CameraView; a: ApiAssignment; elegidos: string[] } | null = null;
+
+  abrirConfig(cam: CameraView, a: ApiAssignment): void {
+    this.configurando = { cam, a, elegidos: [...this.exigidosDe(a)] };
+  }
+
+  alternar(clave: string): void {
+    if (!this.configurando) return;
+    const i = this.configurando.elegidos.indexOf(clave);
+    if (i >= 0) this.configurando.elegidos.splice(i, 1);
+    else this.configurando.elegidos.push(clave);
+  }
+
+  estaElegido(clave: string): boolean {
+    return !!this.configurando?.elegidos.includes(clave);
+  }
+
+  guardarConfig(): void {
+    const c = this.configurando;
+    if (!c) return;
+    // Se preserva el resto de la configuración: acá sólo se decide QUÉ vigilar.
+    // Los umbrales no se tocan porque no son una decisión del usuario: salen de
+    // medir el modelo (training/ppe/umbral.py) y el módulo los lee solo.
+    const config = { ...(c.a.config as Record<string, unknown>), exigidos: c.elegidos };
+    this.busy = c.cam.id;
+    this.api.updateModuleConfig(c.cam.id, c.a.aiModuleId, config).subscribe((ok) => {
+      this.busy = null;
+      if (!ok) {
+        this.flash('No se pudo guardar la configuración', 'error');
+        return;
+      }
+      c.a.config = config;
+      this.configurando = null;
+      this.flash(
+        c.elegidos.length
+          ? `${c.a.moduleName}: se vigila ${c.elegidos.join(', ')}. Reiniciá el ai-worker para que lo tome.`
+          : `${c.a.moduleName} quedó sin nada que vigilar.`,
+        'ok',
+      );
+    });
+  }
+
   /** Punto único de asignación: lo usan tanto el arrastre como el selector. */
   private assign(camera: CameraView, mod: ApiModule): void {
     if (camera.assignments.some((a) => a.aiModuleId === mod.id)) {
@@ -186,8 +251,14 @@ export class CamerasComponent implements OnInit, OnDestroy {
         this.busy = null;
         if (ok) {
           this.flash(`"${mod.name}" asignado a ${camera.name}. Reiniciá el ai-worker para que lo tome.`, 'ok');
-          this.reload(true);
           this.avisarQueCambioElMenu();
+          // Elegir qué vigilar es parte de asignar, no un paso aparte que
+          // alguien tiene que descubrir: se abre solo si el módulo lo permite.
+          this.reload(true, () => {
+            const cam = this.cameras.find((x) => x.id === camera.id);
+            const a = cam?.assignments.find((x) => x.aiModuleId === mod.id);
+            if (cam && a && this.opcionesDe(a).length) this.abrirConfig(cam, a);
+          });
         } else {
           this.flash('No se pudo asignar el módulo', 'error');
         }

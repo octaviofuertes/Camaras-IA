@@ -336,3 +336,34 @@ def test_lo_no_silenciado_sigue_alertando():
     torso = (0.12, 0.25, 0.16, 0.30)
     f = v.ver([IZQ], [("NO-Hardhat", CASCO_IZQ, 0.9), ("NO-Safety Vest", torso, 0.9)], 1.0)
     assert [x.elemento.clave for x in f] == ["chaleco"]
+
+
+# ── la calibración sale de lo medido, no de la config de la cámara ───
+
+def test_solo_alerta_lo_que_tiene_umbral_medido():
+    from reglas import calibracion
+    u, callados = calibracion(("casco", "chaleco"), {"chaleco": 0.35})
+    assert u == {"chaleco": 0.35}
+    assert callados == ("casco",), "el casco no se midió: no puede alertar"
+
+
+def test_lo_que_no_se_exige_no_entra_en_la_calibracion():
+    from reglas import calibracion
+    u, callados = calibracion(("chaleco",), {"chaleco": 0.35, "casco": 0.5})
+    assert u == {"chaleco": 0.35}
+    assert callados == ()
+
+
+def test_sin_mediciones_no_se_alerta_nada():
+    # Modelo recién entrenado y todavía sin medir: se dibuja, no se acusa.
+    from reglas import calibracion
+    u, callados = calibracion(("casco", "chaleco", "guantes"), {})
+    assert u == {}
+    assert set(callados) == {"casco", "chaleco", "guantes"}
+
+
+def test_con_todo_medido_no_queda_nada_callado():
+    from reglas import calibracion
+    u, callados = calibracion(("casco", "guantes"), {"casco": 0.4, "guantes": 0.55})
+    assert u == {"casco": 0.4, "guantes": 0.55}
+    assert callados == ()

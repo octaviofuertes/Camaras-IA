@@ -112,6 +112,13 @@
         <div class="detalle" *ngIf="abierta === e.id">
           <img class="grande" *ngIf="e.faceThumbnail" [src]="urlMiniatura(e)" alt="Rostro detectado" />
 
+          <!-- El cuadro entero del momento: el recorte de la cara dice a quién
+               se parece, la escena dice dónde y cómo apareció. -->
+          <figure class="escena" *ngIf="fotoEscena">
+            <img [src]="fotoEscena" alt="Foto del momento de la alerta" />
+            <figcaption>La escena en ese momento</figcaption>
+          </figure>
+
           <div class="form">
             <div class="campos">
               <label class="campo">

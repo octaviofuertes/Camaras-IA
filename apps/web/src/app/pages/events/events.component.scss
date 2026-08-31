@@ -190,6 +190,30 @@ code {
 .ev-info { display: flex; align-items: center; justify-content: space-between; font-size: 12px; }
 .ev-nombre { font-weight: 600; }
 .evidencia .btn { align-self: flex-start; text-decoration: none; }
+.evidencia img {
+  width: 100%; border-radius: var(--radius-sm);
+  background: #000; max-height: 260px; object-fit: contain;
+}
+
+/* ─── Reconocer a la persona de la foto (a pedido) ─────── */
+.reconocer {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 11px 0 3px; font-size: 12.5px;
+}
+.reconocer .btn { align-self: flex-start; }
+.reco-ok {
+  display: flex; gap: 11px; align-items: flex-start;
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 10px 12px;
+}
+.reco-ok img { width: 46px; height: 46px; border-radius: 50%; object-fit: cover; }
+.reco-nombre { font-weight: 600; font-size: 13.5px; }
+.reco-aviso { margin-top: 5px; line-height: 1.5; }
+.reco-no {
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 10px 12px;
+  color: var(--text-dim); line-height: 1.55;
+}
 
 /* ─── Modal de confirmación ────────────────────────────── */
 .modal-backdrop {

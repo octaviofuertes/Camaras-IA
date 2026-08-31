@@ -35,8 +35,21 @@ export interface ElementoEpp {
   exigido: boolean;
   conf: number;
   bbox: [number, number, number, number];
-  /** Índice de la persona a la que pertenece, o null si no se pudo saber. */
+  /** Índice de la persona a la que pertenece, o null si no se pudo saber.
+   *  Es el índice DENTRO del módulo de EPP: no sirve para indexar `personas`,
+   *  que las detecta otro modelo. Para eso está `eppPersonas`. */
   persona: number | null;
+}
+
+/** Si a una persona se le ve el elemento, se le ve que le falta, o no se sabe. */
+export type EstadoEpp = 'tiene' | 'falta' | 'no_se_sabe';
+
+/** Una persona vista por el módulo de EPP, con qué tiene puesto y qué no. */
+export interface PersonaEpp {
+  trackId: number;
+  bbox: [number, number, number, number];
+  /** Por cada elemento obligatorio en esta cámara, en qué estado está. */
+  estado: Record<string, EstadoEpp>;
 }
 
 export interface VistaEnVivo {
@@ -50,11 +63,13 @@ export interface VistaEnVivo {
   /** Qué elementos son obligatorios en esta cámara. */
   exigidos: string[];
   epp: ElementoEpp[];
+  /** Las personas segun el modulo de EPP, con el estado de cada elemento. */
+  eppPersonas: PersonaEpp[];
 }
 
 const VACIO: VistaEnVivo = {
   modulo: false, siluetas: false, personas: [],
-  moduloEpp: false, exigidos: [], epp: [],
+  moduloEpp: false, exigidos: [], epp: [], eppPersonas: [],
 };
 
 /**
@@ -77,6 +92,7 @@ export class VivoService {
         moduloEpp: !!r?.moduloEpp,
         exigidos: r?.exigidos ?? [],
         epp: r?.epp ?? [],
+        eppPersonas: r?.eppPersonas ?? [],
       })),
       // Que el worker no conteste no puede tapar el video: se sigue viendo la
       // cámara, sólo que sin nadie marcado.

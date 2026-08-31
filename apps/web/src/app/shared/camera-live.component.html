@@ -46,6 +46,33 @@
                 [attr.width]="p.bbox[2] * 1000" [attr.height]="p.bbox[3] * 1000" rx="6" />
         </g>
 
+        <!-- El estado de cada persona: la caja del cuerpo pintada según le
+             falte algo obligatorio o no, y al lado un renglón por elemento.
+             Va siempre visible porque es la pregunta del módulo —"¿está con
+             lo puesto?"— y responderla sólo al seleccionar obligaba a tocar a
+             cada uno para saber si alguien estaba sin casco. -->
+        <g *ngFor="let e of eppPersonas" class="epp-persona"
+           [class.incumple]="tieneFalta(e)" [class.cumple]="cumpleTodo(e)">
+          <rect [attr.x]="e.bbox[0] * 1000" [attr.y]="e.bbox[1] * 1000"
+                [attr.width]="e.bbox[2] * 1000" [attr.height]="e.bbox[3] * 1000" rx="6" />
+          <text *ngFor="let f of filas(e); let i = index"
+                [attr.data-epp]="f.estado"
+                [attr.x]="e.bbox[0] * 1000 + 8"
+                [attr.y]="e.bbox[1] * 1000 + 22 + i * 20">{{ f.texto }}</text>
+        </g>
+
+        <!-- Las personas que ve el módulo de EPP. Van aparte de las del
+             ingreso de personas: son otro modelo y ven cosas distintas, así
+             que con el EPP asignado y el ingreso no, igual se ve a toda la
+             gente del cuadro y no una sola. -->
+        <g *ngFor="let p of eppPersonas" class="epp-persona" [attr.data-estado]="colorDePersona(p)">
+          <rect [attr.x]="p.bbox[0] * 1000" [attr.y]="p.bbox[1] * 1000"
+                [attr.width]="p.bbox[2] * 1000" [attr.height]="p.bbox[3] * 1000" rx="6" />
+          <text [attr.x]="p.bbox[0] * 1000 + 6" [attr.y]="p.bbox[1] * 1000 + 26">
+            {{ resumenDePersona(p) }}
+          </text>
+        </g>
+
         <!-- Los elementos de protección: un recuadro por cada uno, con su
              nombre. Van siempre visibles, no sólo al seleccionar: es lo que
              deja ver que el módulo está mirando. -->
@@ -60,12 +87,13 @@
       <div class="ficha" *ngIf="elegida as p" [attr.data-acceso]="clase(p)">
         <div class="f-linea"><span>Nombre:</span> <strong>{{ nombreDe(p) }}</strong></div>
         <div class="f-linea"><span>En el lugar:</span> <strong>{{ haceCuanto(p) }}</strong></div>
-        <div class="f-linea"><span>Acceso:</span> <strong>{{ acceso(p) }}</strong></div>
-        <div class="f-linea" *ngIf="hayEpp && faltantesDe(indiceDe(p)).length">
-          <span>Le falta:</span> <strong class="malo">{{ faltantesDe(indiceDe(p)).join(', ') }}</strong>
-        </div>
-        <div class="f-linea" *ngIf="hayEpp && puestosDe(indiceDe(p)).length">
-          <span>Lleva:</span> <strong>{{ puestosDe(indiceDe(p)).join(', ') }}</strong>
+        <div class="f-linea f-acceso"><span>Acceso:</span> <strong>{{ acceso(p) }}</strong></div>
+        <!-- Cada elemento obligatorio con su estado, siempre los tres: que el
+             casco no aparezca por no haberse detectado dejaba la duda de si la
+             persona lo tiene o si el módulo no está mirando. -->
+        <div class="f-linea f-epp" *ngFor="let e of estadoDe(p)">
+          <span>{{ e.nombre | titlecase }}:</span>
+          <strong [attr.data-epp]="e.estado">{{ textoEstado(e.estado) }}</strong>
         </div>
       </div>
 

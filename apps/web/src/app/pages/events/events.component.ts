@@ -1,9 +1,15 @@
 import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { switchMap } from 'rxjs';
 import { FormsModule } from '@angular/forms';
 import { PageHeaderComponent } from '../../shared/page-header.component';
 import { ModuleIconComponent } from '../../shared/module-icon.component';
-import { EventsService, type EvidenceItem, type TrainingStats } from '../../core/events.service';
+import {
+  EventsService,
+  type EvidenceItem,
+  type Reconocimiento,
+  type TrainingStats,
+} from '../../core/events.service';
 import { AI_MODULES } from '../../core/catalog';
 import {
   SEVERITY_CLASS,
@@ -59,6 +65,10 @@ export class EventsComponent implements OnInit, OnDestroy {
 
   evidencias: EvidenceItem[] = [];
   cargandoEvidencias = false;
+
+  // ── reconocer a la persona de la foto (a pedido) ───────────────────
+  reconocimiento: Reconocimiento | null = null;
+  reconociendo = false;
   stats: TrainingStats | null = null;
 
   private timer?: ReturnType<typeof setInterval>;
@@ -161,6 +171,11 @@ export class EventsComponent implements OnInit, OnDestroy {
   select(e: EventItem): void {
     this.selected = e;
     this.evidencias = [];
+    // El resultado del reconocimiento pertenece al evento que se estaba
+    // mirando: dejarlo puesto mostraría el nombre de una persona sobre la foto
+    // de otra, que es el peor error que puede cometer esta pantalla.
+    this.reconocimiento = null;
+    this.reconociendo = false;
     // Se pide el clip SIEMPRE, no sólo si el evento ya está confirmado. El clip
     // se graba al sonar la alerta justamente para poder mirarlo antes de
     // decidir: no se le puede pedir a nadie que dictamine si hubo una caída sin
@@ -181,8 +196,61 @@ export class EventsComponent implements OnInit, OnDestroy {
     });
   }
 
+  /** Esta evidencia es una foto (EPP, cara desconocida) y no un video. */
+  esFoto(ev: EvidenceItem): boolean {
+    return ev.kind === 'image';
+  }
+
+  /** La foto del evento, si tiene. Es sobre la que corre el reconocimiento. */
+  get fotoDelEvento(): EvidenceItem | null {
+    return this.evidencias.find((ev) => ev.kind === 'image') ?? null;
+  }
+
+  /**
+   * Pregunta quién es la persona de la foto. Recién ahora corre el modelo.
+   *
+   * Nada de esto pasó cuando sonó la alerta: reconocer caras en cada detección
+   * de EPP sería gastar el modelo de rostros todo el día para que nadie mire el
+   * resultado, y además dejaría escrito quién anduvo sin casco sin que nadie lo
+   * haya preguntado. Acá corre una vez, porque alguien quiso saber.
+   */
+  reconocerPersona(): void {
+    const foto = this.fotoDelEvento;
+    const evento = this.selected;
+    if (!foto || !evento || this.reconociendo) return;
+
+    this.reconociendo = true;
+    this.reconocimiento = null;
+    this.api
+      .fotoEvidencia(this.urlEvidencia(foto))
+      .pipe(switchMap((b64) => this.api.reconocerPersona(b64)))
+      .subscribe({
+        next: (r) => {
+          // Si el operador ya pasó a otra alerta, esta respuesta llega tarde y
+          // no corresponde mostrarla sobre otra foto.
+          if (this.selected?.id !== evento.id) return;
+          this.reconocimiento = r;
+          this.reconociendo = false;
+        },
+        error: () => {
+          if (this.selected?.id !== evento.id) return;
+          this.reconocimiento = {
+            reconocido: null,
+            caras: 0,
+            motivo: 'No se pudo leer la foto de la evidencia para analizarla.',
+          };
+          this.reconociendo = false;
+        },
+      });
+  }
+
+  parecidoPct(p: number): number {
+    return Math.round(p * 100);
+  }
+
   /** Cuánto cubre el clip, tomado de lo que se grabó y no de un texto fijo. */
   ventanaClip(ev: EvidenceItem): string {
+    if (ev.kind === 'image') return 'foto del momento de la alerta';
     const antes = ev.preRollMs ? Math.round(ev.preRollMs / 1000) : null;
     const despues = ev.postRollMs ? Math.round(ev.postRollMs / 1000) : null;
     if (antes === null || despues === null) {

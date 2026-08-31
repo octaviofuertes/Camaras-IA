@@ -124,8 +124,42 @@
   strong { color: #fff; font-weight: 600; }
 }
 
-.ficha[data-acceso='sin-acceso'] .f-linea:last-child strong { color: #fca5a5; }
-.ficha[data-acceso='con-acceso'] .f-linea:last-child strong { color: #86efac; }
+/* El color del acceso va sobre SU renglón y no sobre el último de la ficha:
+   debajo ahora van los elementos de protección, y con `:last-child` el verde
+   del acceso terminaba pintando el "LE FALTA casco" de abajo. */
+.ficha[data-acceso='sin-acceso'] .f-acceso strong { color: #fca5a5; }
+.ficha[data-acceso='con-acceso'] .f-acceso strong { color: #86efac; }
+
+/* Cada elemento con su estado. El "no se sabe" va en gris a propósito: no es
+   ni una aprobación ni una acusación, es que no se lo vio. */
+.f-epp strong {
+  &[data-epp='tiene']      { color: #86efac; }
+  &[data-epp='falta']      { color: #fca5a5; letter-spacing: .03em; }
+  &[data-epp='no_se_sabe'] { color: rgba(255, 255, 255, .45); font-weight: 500; }
+}
+
+/* ─── El cuerpo de cada persona según su EPP ────────────────────── */
+/* Va siempre visible: para saber si alguien está sin casco no se puede
+   depender de que el operador lo toque primero. */
+.epp-persona {
+  pointer-events: none;
+
+  rect { fill: none; stroke-width: 3; stroke: rgba(255, 255, 255, .35); }
+  text {
+    font-size: 20px; font-weight: 700;
+    paint-order: stroke; stroke: rgba(0, 0, 0, .8); stroke-width: 4px;
+    fill: rgba(255, 255, 255, .5);
+  }
+
+  /* Le falta algo obligatorio. Relleno tenue además del borde: el borde solo
+     se pierde sobre un fondo movido, y esto es lo que hay que ver primero. */
+  &.incumple rect { stroke: #ef4444; fill: rgba(239, 68, 68, .13); }
+  &.cumple   rect { stroke: #22c55e; }
+
+  text[data-epp='tiene']      { fill: #86efac; }
+  text[data-epp='falta']      { fill: #fca5a5; }
+  text[data-epp='no_se_sabe'] { fill: rgba(255, 255, 255, .5); }
+}
 
 /* ─── Avisos ────────────────────────────────────────────────────── */
 .fallo, .aviso {
@@ -166,4 +200,21 @@
   &.no-exigido { rect { stroke: rgba(255, 255, 255, .3); } text { fill: rgba(255, 255, 255, .45); } }
 }
 
-.f-linea strong.malo { color: #fca5a5; }
+
+/* ─── Personas que ve el módulo de EPP ──────────────────────────── */
+/* Van aparte de las del ingreso de personas: con el EPP asignado y el ingreso
+   no, sin esto se veía una sola persona (o ninguna) aunque hubiera varias. */
+.epp-persona {
+  pointer-events: none;
+
+  rect { fill: none; stroke-width: 2; stroke-dasharray: 3 3; }
+  text {
+    font-size: 19px; font-weight: 700;
+    paint-order: stroke; stroke: rgba(0, 0, 0, .75); stroke-width: 4px;
+  }
+
+  &[data-estado='falta']    { rect { stroke: #ef4444; stroke-dasharray: none; } text { fill: #fca5a5; } }
+  &[data-estado='completo'] { rect { stroke: rgba(34, 197, 94, .75); } text { fill: #86efac; } }
+  /* Sin datos no se afirma nada: alguien de espaldas no está en falta. */
+  &[data-estado='no-se-sabe'] { rect { stroke: rgba(255, 255, 255, .28); } text { fill: transparent; } }
+}
