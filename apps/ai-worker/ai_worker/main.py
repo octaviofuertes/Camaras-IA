@@ -377,7 +377,8 @@ def live(camera_id: str) -> dict:
     """
     salida: dict = {
         "ts": 0, "siluetas": False, "personas": [], "modulo": False,
-        "epp": [], "exigidos": [], "moduloEpp": False,
+        "epp": [], "exigidos": [], "moduloEpp": False, "eppPersonas": [],
+        "sinAlertarEpp": [],
     }
 
     # Los dos módulos son independientes: una cámara puede tener uno, el otro,
@@ -397,6 +398,11 @@ def live(camera_id: str) -> dict:
             salida.update({
                 "epp": v.get("elementos", []),
                 "exigidos": v.get("exigidos", []),
+                "sinAlertarEpp": v.get("sinAlertar", []),
+                # Las personas del EPP van aparte de las del ingreso: son otro
+                # modelo y otro orden. Mezclarlas en una sola lista fue el
+                # error que le atribuía el casco de uno al de al lado.
+                "eppPersonas": v.get("personas", []),
                 "moduloEpp": True,
             })
         except Exception as exc:  # noqa: BLE001

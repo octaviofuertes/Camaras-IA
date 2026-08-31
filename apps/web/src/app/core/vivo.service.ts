@@ -65,11 +65,14 @@ export interface VistaEnVivo {
   epp: ElementoEpp[];
   /** Las personas segun el modulo de EPP, con el estado de cada elemento. */
   eppPersonas: PersonaEpp[];
+  /** Lo que se vigila pero todavía no se puede alertar: el modelo no distingue
+   *  esa ausencia con precisión suficiente como para acusar a nadie. */
+  sinAlertarEpp: string[];
 }
 
 const VACIO: VistaEnVivo = {
   modulo: false, siluetas: false, personas: [],
-  moduloEpp: false, exigidos: [], epp: [], eppPersonas: [],
+  moduloEpp: false, exigidos: [], epp: [], eppPersonas: [], sinAlertarEpp: [],
 };
 
 /**
@@ -93,6 +96,7 @@ export class VivoService {
         exigidos: r?.exigidos ?? [],
         epp: r?.epp ?? [],
         eppPersonas: r?.eppPersonas ?? [],
+        sinAlertarEpp: r?.sinAlertarEpp ?? [],
       })),
       // Que el worker no conteste no puede tapar el video: se sigue viendo la
       // cámara, sólo que sin nadie marcado.

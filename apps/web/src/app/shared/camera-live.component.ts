@@ -66,6 +66,7 @@ export class CameraLiveComponent implements OnInit, OnDestroy {
   exigidos: string[] = [];
   /** Las personas que ve el módulo de EPP, con el estado de cada elemento. */
   eppPersonas: PersonaEpp[] = [];
+  sinAlertarEpp: string[] = [];
   /** El track seleccionado. Se sigue por track, no por persona: quien no está
    *  identificado igual se puede tocar para ver que el sistema no sabe quién es. */
   seleccion: number | null = null;
@@ -98,6 +99,7 @@ export class CameraLiveComponent implements OnInit, OnDestroy {
       this.exigidos = v.exigidos;
       this.epp = v.epp;
       this.eppPersonas = v.eppPersonas;
+      this.sinAlertarEpp = v.sinAlertarEpp;
       // Si el seleccionado se fue del cuadro, se suelta la selección: dejarla
       // pegada mostraría la ficha de alguien que ya no está.
       if (this.seleccion !== null && !v.personas.some((p) => p.trackId === this.seleccion)) {
@@ -230,6 +232,11 @@ export class CameraLiveComponent implements OnInit, OnDestroy {
     if (faltan.length) return `sin ${faltan.join(', ')}`;
     const todos = Object.values(p.estado ?? {});
     return todos.length && todos.every((e) => e === 'tiene') ? 'completo' : '';
+  }
+
+  /** De qué SÍ se avisa: lo exigido menos lo que todavía no se puede medir. */
+  get seAlerta(): string[] {
+    return this.exigidos.filter((e) => !this.sinAlertarEpp.includes(e));
   }
 
   /** Cómo se redacta cada estado en la ficha. */

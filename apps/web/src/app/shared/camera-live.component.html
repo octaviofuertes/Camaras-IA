@@ -110,7 +110,16 @@
     <p class="pie" *ngIf="hayEpp">
       Protección obligatoria acá:
       <strong>{{ exigidos.length ? exigidos.join(', ') : 'nada configurado' }}</strong>.
-      Lo que falte genera una alerta en Eventos.
+      <ng-container *ngIf="seAlerta.length">
+        Genera alerta en Eventos: <strong>{{ seAlerta.join(', ') }}</strong>.
+      </ng-container>
+      <!-- Decirlo es importante: un elemento que se vigila pero nunca aparece
+           se lee como "está roto". Está callado a propósito. -->
+      <span class="pie-callado" *ngIf="sinAlertarEpp.length">
+        Todavía sin avisar de <strong>{{ sinAlertarEpp.join(', ') }}</strong>: el modelo no
+        distingue esa ausencia con precisión suficiente como para acusar a nadie. Se sigue
+        detectando y dibujando.
+      </span>
     </p>
     <p class="pie" *ngIf="hayModulo">
       Tocá a una persona para ver quién es. Se pinta de verde si puede estar acá y de rojo si no.

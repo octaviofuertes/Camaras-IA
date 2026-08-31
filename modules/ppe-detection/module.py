@@ -325,6 +325,12 @@ class PpeDetectionModule(PerceptaModule):
         return {
             "ts": self._en_vivo_ts,
             "exigidos": list(self._vigilador.cfg.exigidos) if self._vigilador else [],
+            # De qué se vigila pero todavía no se avisa, porque el modelo no
+            # distingue esa ausencia con precisión suficiente. Viaja hasta la
+            # pantalla a propósito: sin decirlo, un elemento que nunca aparece
+            # se lee como "está roto", cuando en realidad está callado por
+            # honestidad.
+            "sinAlertar": list(self._vigilador.cfg.sinAlertar) if self._vigilador else [],
             "elementos": self._en_vivo,
             "personas": self._en_vivo_personas,
         }

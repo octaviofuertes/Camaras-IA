@@ -218,3 +218,11 @@
   /* Sin datos no se afirma nada: alguien de espaldas no está en falta. */
   &[data-estado='no-se-sabe'] { rect { stroke: rgba(255, 255, 255, .28); } text { fill: transparent; } }
 }
+
+/* Lo que se vigila pero todavía no se avisa. Ámbar y no rojo: no está roto,
+   está callado a propósito hasta tener con qué afirmar. */
+.pie-callado {
+  display: block; margin-top: 6px;
+  color: #fcd34d; line-height: 1.55;
+  strong { color: #fde68a; }
+}
