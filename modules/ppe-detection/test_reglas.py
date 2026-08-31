@@ -115,6 +115,32 @@ def test_lo_que_no_se_exige_no_se_mira():
     assert r == {}
 
 
+def test_para_dibujar_se_miran_todos_los_elementos():
+    """Lo que no se exige no alerta, pero sí se muestra.
+
+    La pantalla tiene que poder dibujar el chaleco que la cámara ve aunque en
+    esa cámara no sea obligatorio. Si sólo se devolviera lo exigido, un módulo
+    que está mirando bien y uno que está roto se verían iguales.
+    """
+    detecciones = [("NO-Safety Vest", CASCO_IZQ, 0.9)]
+    assert evaluar_cuadro([IZQ], detecciones, cfg(exigidos=("casco",))) == {}
+    r = evaluar_cuadro([IZQ], detecciones, cfg(exigidos=("casco",)), solo_exigidos=False)
+    assert r[0]["chaleco"] == (False, 0.9)
+
+
+def test_mirar_todo_no_baja_la_vara_de_confianza():
+    """Dibujar de más no es creer de más: la confianza mínima sigue rigiendo.
+
+    Una caja floja de "NO-Hardhat" no alcanza para avisar, así que tampoco
+    puede alcanzar para pintar de rojo a alguien en pantalla.
+    """
+    r = evaluar_cuadro(
+        [IZQ], [("NO-Hardhat", CASCO_IZQ, 0.20)],
+        cfg(minConfianza=0.45), solo_exigidos=False,
+    )
+    assert r == {}
+
+
 # ── cuándo se avisa ──────────────────────────────────────────────────
 
 def test_avisa_cuando_ve_que_falta():
@@ -211,3 +237,66 @@ def test_se_olvida_a_quien_ya_no_esta():
 def test_sin_personas_no_pasa_nada():
     v = VigiladorEpp(cfg())
     assert v.ver([], [("NO-Hardhat", CASCO_IZQ, 0.9)], 1.0) == []
+
+
+# ── se le pide más evidencia a la ausencia que a la presencia ────────
+
+def test_una_ausencia_floja_no_alcanza():
+    # 0.50 pasa el umbral de presencia (0.45) pero no el de ausencia (0.60).
+    # Un falso "sin casco" acusa a alguien; un falso "con casco" no.
+    c = ConfigEpp(exigidos=("casco",), minConfianza=0.45, minConfianzaFalta=0.60)
+    assert evaluar_cuadro([IZQ], [("NO-Hardhat", CASCO_IZQ, 0.50)], c) == {}
+
+
+def test_una_presencia_floja_sí_alcanza():
+    c = ConfigEpp(exigidos=("casco",), minConfianza=0.45, minConfianzaFalta=0.60)
+    r = evaluar_cuadro([IZQ], [("Hardhat", CASCO_IZQ, 0.50)], c)
+    assert r[0]["casco"] == (True, 0.50)
+
+
+def test_una_ausencia_firme_pasa():
+    c = ConfigEpp(exigidos=("casco",), minConfianza=0.45, minConfianzaFalta=0.60)
+    r = evaluar_cuadro([IZQ], [("NO-Hardhat", CASCO_IZQ, 0.75)], c)
+    assert r[0]["casco"] == (False, 0.75)
+
+
+# ── el elemento tiene que caer donde va en el cuerpo ─────────────────
+
+def test_un_casco_a_la_altura_de_los_pies_se_descarta():
+    # Si el modelo pone un "sin casco" abajo del todo, se equivocó. Sin este
+    # filtro esa equivocación se convierte en una alerta contra una persona.
+    c = ConfigEpp(exigidos=("casco",), minConfianzaFalta=0.5)
+    pies = (0.14, 0.82, 0.10, 0.08)
+    assert evaluar_cuadro([IZQ], [("NO-Hardhat", pies, 0.9)], c) == {}
+
+
+def test_un_casco_en_la_cabeza_pasa():
+    c = ConfigEpp(exigidos=("casco",), minConfianzaFalta=0.5)
+    r = evaluar_cuadro([IZQ], [("NO-Hardhat", CASCO_IZQ, 0.9)], c)
+    assert r[0]["casco"] == (False, 0.9)
+
+
+def test_los_guantes_pueden_estar_abajo():
+    # A diferencia del casco: las manos caen a media altura o más abajo.
+    c = ConfigEpp(exigidos=("guantes",), minConfianzaFalta=0.5)
+    mano = (0.12, 0.62, 0.06, 0.06)
+    r = evaluar_cuadro([IZQ], [("NO-Gloves", mano, 0.9)], c)
+    assert r[0]["guantes"] == (False, 0.9)
+
+
+def test_se_puede_apagar_el_filtro_de_posicion():
+    # Para una cámara con un encuadre muy raro, donde el filtro estorbe.
+    c = ConfigEpp(exigidos=("casco",), minConfianzaFalta=0.5, verificarPosicion=False)
+    pies = (0.14, 0.82, 0.10, 0.08)
+    r = evaluar_cuadro([IZQ], [("NO-Hardhat", pies, 0.9)], c)
+    assert r[0]["casco"] == (False, 0.9)
+
+
+def test_la_banda_se_mide_contra_la_persona_no_contra_la_imagen():
+    # La misma persona, lejos y chica arriba del cuadro: su casco sigue estando
+    # en SU cabeza aunque en la imagen esté a media altura.
+    lejos = (0.40, 0.30, 0.06, 0.24)
+    casco = (0.41, 0.31, 0.04, 0.03)
+    c = ConfigEpp(exigidos=("casco",), minConfianzaFalta=0.5)
+    r = evaluar_cuadro([lejos], [("NO-Hardhat", casco, 0.9)], c)
+    assert r[0]["casco"] == (False, 0.9)

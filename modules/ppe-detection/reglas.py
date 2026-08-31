@@ -44,15 +44,20 @@ class Elemento:
     falta: str
     #: Tipo de evento con el que sale la alerta.
     evento: str
+    #: Dónde va este elemento en el cuerpo, como fracción del alto de la
+    #: persona: (desde, hasta) medido desde la cabeza. Un casco arriba, unas
+    #: botas abajo. Sale de medir el dataset (`training/ppe/verificar.py`), con
+    #: margen para encuadres raros.
+    banda: tuple[float, float]
 
 
 #: Los cuatro que se pueden vigilar. El orden es el de la severidad con la que
 #: se los suele exigir: sin casco es lo más grave que se ve desde una cámara.
 ELEMENTOS: tuple[Elemento, ...] = (
-    Elemento("casco", "casco", "Hardhat", "NO-Hardhat", "ppe.helmet_missing"),
-    Elemento("chaleco", "chaleco", "Safety Vest", "NO-Safety Vest", "ppe.vest_missing"),
-    Elemento("antiparras", "antiparras", "Goggles", "NO-Goggles", "ppe.goggles_missing"),
-    Elemento("guantes", "guantes", "Gloves", "NO-Gloves", "ppe.gloves_missing"),
+    Elemento("casco", "casco", "Hardhat", "NO-Hardhat", "ppe.helmet_missing", (0.0, 0.45)),
+    Elemento("chaleco", "chaleco", "Safety Vest", "NO-Safety Vest", "ppe.vest_missing", (0.05, 0.80)),
+    Elemento("antiparras", "antiparras", "Goggles", "NO-Goggles", "ppe.goggles_missing", (0.0, 0.50)),
+    Elemento("guantes", "guantes", "Gloves", "NO-Gloves", "ppe.gloves_missing", (0.10, 1.0)),
 )
 
 POR_CLAVE = {e.clave: e for e in ELEMENTOS}
@@ -68,9 +73,20 @@ class ConfigEpp:
     mínimo común y el módulo no serviría en ningún lado.
     """
 
-    exigidos: tuple[str, ...] = ("casco", "chaleco")
+    exigidos: tuple[str, ...] = ("casco", "chaleco", "guantes")
     #: Confianza mínima para creerle a una caja de EPP.
     minConfianza: float = 0.45
+    #: Confianza mínima para creerle a una caja que dice que el elemento FALTA.
+    #:
+    #: Más alta que la otra a propósito, y no por gusto: los dos errores no
+    #: cuestan lo mismo. Pasar por alto un casco puesto no le hace nada a
+    #: nadie; decir que alguien no lo tiene cuando sí lo tiene es acusarlo de
+    #: algo que no hizo, delante de su jefe. Medido sobre el split de prueba,
+    #: las clases de ausencia son además las más flojas del modelo, así que son
+    #: justo las que hay que exigir más.
+    minConfianzaFalta: float = 0.60
+    #: Verificar que el elemento caiga donde va en el cuerpo.
+    verificarPosicion: bool = True
     #: Cuánto de la caja del elemento tiene que caer dentro de la persona para
     #: considerarlo suyo.
     solapeMinimo: float = 0.55
@@ -124,6 +140,27 @@ def de_quien_es(elemento: Caja, personas: list[Caja], minimo: float) -> int | No
     return mejor
 
 
+def en_su_lugar(elemento: Elemento, caja: Caja, persona: Caja) -> bool:
+    """¿La caja cae donde va esa parte del cuerpo?
+
+    Un casco tiene que estar en la cabeza. Si el modelo pone un "sin casco" a
+    la altura de los pies, se equivocó — y sin este filtro esa equivocación se
+    convierte en una alerta que acusa a alguien.
+
+    Se mide el centro de la caja contra la altura de la persona, así que
+    funciona igual con alguien lejos o cerca de la cámara. La banda es ancha
+    porque un encuadre picado corre todo hacia abajo; lo que se descarta son
+    los disparates, no los casos raros.
+    """
+    _px, py, _pw, ph = persona
+    if ph <= 0:
+        return False
+    _ex, ey, _ew, eh = caja
+    centro = (ey + eh / 2 - py) / ph
+    desde, hasta = elemento.banda
+    return desde - 0.08 <= centro <= hasta + 0.08
+
+
 @dataclass(frozen=True)
 class Falta:
     """Una persona a la que le falta un elemento exigido."""
@@ -138,27 +175,40 @@ def evaluar_cuadro(
     personas: list[Caja],
     detecciones: list[tuple[str, Caja, float]],
     cfg: ConfigEpp,
+    solo_exigidos: bool = True,
 ) -> dict[int, dict[str, tuple[bool, float]]]:
     """Qué se sabe de cada persona en ESTE cuadro.
 
     Devuelve, por persona y por elemento exigido: (lo_tiene, confianza).
     Un elemento que no aparece en el resultado es "no se sabe", y eso es
     distinto de "no lo tiene": el que no se sabe no genera nada.
+
+    Con `solo_exigidos=False` se miran todos los elementos y no sólo los
+    obligatorios. Eso NO sirve para decidir alertas —lo que no se exige no se
+    alerta— pero sí para dibujar: la pantalla muestra lo que la cámara ve, y
+    ocultar un casco detectado porque en esa cámara no es obligatorio deja al
+    operador sin saber si el módulo está mirando o está roto.
     """
     salida: dict[int, dict[str, tuple[bool, float]]] = {}
     for clase, caja, conf in detecciones:
-        if conf < cfg.minConfianza:
-            continue
         elemento = next(
-            (e for e in ELEMENTOS if clase in (e.puesto, e.falta) and e.clave in cfg.exigidos),
+            (e for e in ELEMENTOS if clase in (e.puesto, e.falta)
+             and (not solo_exigidos or e.clave in cfg.exigidos)),
             None,
         )
         if elemento is None:
             continue
+        lo_tiene = clase == elemento.puesto
+        # A la ausencia se le pide más confianza que a la presencia: un falso
+        # "sin casco" acusa a alguien, un falso "con casco" no le hace nada a
+        # nadie.
+        if conf < (cfg.minConfianza if lo_tiene else cfg.minConfianzaFalta):
+            continue
         quien = de_quien_es(caja, personas, cfg.solapeMinimo)
         if quien is None:
             continue
-        lo_tiene = clase == elemento.puesto
+        if cfg.verificarPosicion and not en_su_lugar(elemento, caja, personas[quien]):
+            continue
         previo = salida.setdefault(quien, {}).get(elemento.clave)
         # Ante dos detecciones del mismo elemento para la misma persona manda la
         # más confiable, y ante empate, la que dice que SÍ lo tiene: acusar de

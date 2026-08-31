@@ -6,10 +6,22 @@
   "properties": {
     "exigidos": {
       "type": "array",
-      "items": { "type": "string", "enum": ["casco", "chaleco", "antiparras", "guantes"] },
+      "items": {
+        "type": "string",
+        "enum": [
+          "casco",
+          "chaleco",
+          "antiparras",
+          "guantes"
+        ]
+      },
       "title": "Qué es obligatorio acá",
       "description": "Se configura por cámara porque depende del lugar: en un obrador se exige casco y chaleco, en un laboratorio antiparras y guantes, y en una oficina nada. Lo que no está en esta lista no se mira: no genera alertas ni consume tiempo de proceso.",
-      "default": ["casco", "chaleco"]
+      "default": [
+        "casco",
+        "chaleco",
+        "guantes"
+      ]
     },
     "minConfianza": {
       "type": "number",
@@ -51,10 +63,17 @@
     },
     "classes": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "title": "Qué detecciones llegan a Eventos",
       "description": "Las cuatro faltas que el módulo puede confirmar. Sacar una de la lista la silencia sin dejar de vigilarla.",
-      "default": ["NO-Hardhat", "NO-Safety Vest", "NO-Goggles", "NO-Gloves"]
+      "default": [
+        "NO-Hardhat",
+        "NO-Safety Vest",
+        "NO-Goggles",
+        "NO-Gloves"
+      ]
     },
     "minConfidence": {
       "type": "number",
@@ -79,6 +98,20 @@
       "minimum": 1,
       "maximum": 600,
       "default": 5
+    },
+    "minConfianzaFalta": {
+      "type": "number",
+      "title": "Confianza mínima para afirmar que FALTA",
+      "description": "Más alta que la anterior a propósito. Los dos errores no cuestan lo mismo: pasar por alto un casco puesto no le hace nada a nadie, y decir que alguien no lo tiene cuando sí lo tiene es acusarlo delante de su jefe de algo que no hizo. Además las clases de ausencia son las más flojas del modelo.",
+      "minimum": 0.1,
+      "maximum": 0.95,
+      "default": 0.6
+    },
+    "verificarPosicion": {
+      "type": "boolean",
+      "title": "Exigir que el elemento esté donde va en el cuerpo",
+      "description": "Un casco tiene que estar en la cabeza y unos guantes en las manos. Si el modelo pone un \"sin casco\" a la altura de los pies, se equivocó, y sin esto esa equivocación se convierte en una alerta contra alguien. Apagalo sólo si la cámara tiene un encuadre tan raro que el filtro estorba.",
+      "default": true
     }
   },
   "additionalProperties": false

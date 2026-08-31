@@ -50,6 +50,7 @@ from reglas import (  # noqa: E402
     ConfigEpp,
     VigiladorEpp,
     de_quien_es,
+    evaluar_cuadro,
 )
 
 log = logging.getLogger("ppe-detection")
@@ -75,6 +76,7 @@ class PpeDetectionModule(PerceptaModule):
         # Lo último que vio la cámara, para dibujarlo en pantalla. Vive sólo en
         # memoria y se pisa en cada cuadro: es el presente, no un registro.
         self._en_vivo: list[dict] = []
+        self._en_vivo_personas: list[dict] = []
         self._en_vivo_ts: float = 0.0
 
     # ── ciclo de vida ────────────────────────────────────────────────
@@ -101,7 +103,7 @@ class PpeDetectionModule(PerceptaModule):
         self._nombres = dict(self._modelo.names)
         self._pesos = str(ruta)
 
-        exigidos = cfg.get("exigidos") or ["casco", "chaleco"]
+        exigidos = cfg.get("exigidos") or ["casco", "chaleco", "guantes"]
         desconocidos = [e for e in exigidos if e not in POR_CLAVE]
         if desconocidos:
             # Se avisa y se sigue con los que sí existen: dejar la cámara sin
@@ -175,7 +177,7 @@ class PpeDetectionModule(PerceptaModule):
         # que genera alerta: ver "casco" verde sobre alguien es lo que le dice
         # al operador que el módulo está mirando y funcionando. Sin eso, un
         # módulo que no alerta y uno que está roto se ven exactamente igual.
-        self._en_vivo = self._armar_en_vivo(personas, elementos)
+        self._en_vivo, self._en_vivo_personas = self._armar_en_vivo(personas, ids, elementos)
         self._en_vivo_ts = frame.captured_at
 
         detecciones: list[Detection] = []
@@ -206,12 +208,24 @@ class PpeDetectionModule(PerceptaModule):
     def _armar_en_vivo(
         self,
         personas: list[tuple[float, float, float, float]],
+        ids: list[int],
         elementos: list[tuple[str, tuple[float, float, float, float], float]],
-    ) -> list[dict]:
-        """Cada elemento detectado, listo para dibujar con su nombre."""
-        cfg = self._vigilador.cfg if self._vigilador else None
+    ) -> tuple[list[dict], list[dict]]:
+        """Lo que hay que dibujar: los elementos y el estado de cada persona.
+
+        Se descartan las detecciones por debajo de `minConfianza`, la misma vara
+        con la que se decide alertar. Antes se dibujaba todo lo que saliera del
+        detector (que corre a 0,25) y eso pintaba de rojo a gente con el casco
+        puesto: una caja floja de "NO-Hardhat" no alcanza para avisar, así que
+        tampoco tiene por qué alcanzar para acusar en pantalla.
+        """
+        cfg = self._vigilador.cfg if self._vigilador else ConfigEpp()
+
+        dibujables = [(c, caja, conf) for c, caja, conf in elementos
+                      if conf >= cfg.minConfianza]
+
         salida: list[dict] = []
-        for clase, caja, conf in elementos:
+        for clase, caja, conf in dibujables:
             elem = next((e for e in ELEMENTOS if clase in (e.puesto, e.falta)), None)
             if elem is None:
                 continue
@@ -222,12 +236,34 @@ class PpeDetectionModule(PerceptaModule):
                 "tiene": clase == elem.puesto,
                 # Si en esta cámara no se exige, se dibuja igual pero apagado:
                 # sirve para ver qué hay sin que parezca que va a alertar.
-                "exigido": bool(cfg and elem.clave in cfg.exigidos),
+                "exigido": elem.clave in cfg.exigidos,
                 "conf": round(conf, 3),
                 "bbox": [round(v, 4) for v in caja],
-                "persona": de_quien_es(caja, personas, cfg.solapeMinimo if cfg else 0.55),
+                "persona": de_quien_es(caja, personas, cfg.solapeMinimo),
             })
-        return salida
+
+        # El estado por persona se manda aparte y con la caja del cuerpo, no con
+        # un índice. El índice no servía: la pantalla numera a las personas con
+        # las que detecta el módulo de ingreso, que es otro modelo y las
+        # encuentra en otro orden, así que el "le falta el casco" del EPP caía
+        # sobre la persona equivocada apenas había más de una en cuadro.
+        sabido = evaluar_cuadro(personas, dibujables, cfg, solo_exigidos=False)
+        gente: list[dict] = []
+        for i, caja in enumerate(personas):
+            de_esta = sabido.get(i, {})
+            estado: dict[str, str] = {}
+            for clave in cfg.exigidos:
+                dato = de_esta.get(clave)
+                # Tres estados y no dos: "no se sabe" es la respuesta honesta
+                # cuando la persona está de espaldas o el detector no vio nada,
+                # y mostrarla como "le falta" sería acusar por no haber visto.
+                estado[clave] = "no_se_sabe" if dato is None else ("tiene" if dato[0] else "falta")
+            gente.append({
+                "trackId": ids[i] if i < len(ids) else -1,
+                "bbox": [round(v, 4) for v in caja],
+                "estado": estado,
+            })
+        return salida, gente
 
     def en_vivo(self) -> dict:
         """Lo último que vio la cámara. Lo consume la vista ampliada."""
@@ -235,6 +271,7 @@ class PpeDetectionModule(PerceptaModule):
             "ts": self._en_vivo_ts,
             "exigidos": list(self._vigilador.cfg.exigidos) if self._vigilador else [],
             "elementos": self._en_vivo,
+            "personas": self._en_vivo_personas,
         }
 
     # ── diagnóstico ──────────────────────────────────────────────────

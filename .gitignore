@@ -53,4 +53,6 @@ training/models/
 # El dataset de EPP se baja con training/ppe/descargar.py (190 MB, CC BY 4.0).
 # No va al repositorio: es reproducible con un comando y ensucia cada diff.
 training/ppe/data/
-training/ppe/corridas/
+training/ppe/corridas*/
+# Salidas de prueba del modulo (imagenes anotadas).
+training/ppe/salida/

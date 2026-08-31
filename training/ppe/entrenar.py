@@ -2,6 +2,7 @@
 
   python training/ppe/entrenar.py                 # entrenamiento completo
   python training/ppe/entrenar.py --epocas 3      # una pasada corta, para probar
+  python training/ppe/entrenar.py --adoptar       # corta la corrida y se queda con el mejor
   python training/ppe/entrenar.py --solo-medir    # evalúa lo ya entrenado
 
 Sale un `epp.pt` que carga el módulo `ppe-detection`.
@@ -13,12 +14,17 @@ yolov8n segmentando; el modelo `m` cuesta cerca de cinco veces eso y dejaría la
 cámara mirando una imagen de hace dos segundos. Un detector que llega tarde no
 sirve para avisar que alguien entró sin casco: para cuando avisa, ya pasó.
 
-── Por qué 576 y no 416 ni 640 ─────────────────────────────────────────────
+── Por qué 512 y no 416 ni 640 ─────────────────────────────────────────────
 
 Las antiparras ocupan el 0,8% del área de la imagen: alrededor del 9% de cada
 lado. A 416 píxeles eso son 37 píxeles de ancho, al borde de lo que un modelo
-chico puede aprender; a 576 son 52, que alcanza. Ir a 640 mejora poco y cuesta
-un 25% más de tiempo por época, que en CPU se mide en horas.
+chico puede aprender; a 512 son 46, que alcanza. Ir a 640 mejora poco y cuesta
+un 55% más de tiempo por época, que en CPU se mide en horas.
+
+Se bajó de 576 a 512 por una razón de presupuesto, no de precisión: en esta
+máquina (CPU, ocho núcleos) una época a 576 tarda unos 26 minutos, y hacen
+falta decenas de épocas para que aparezcan las clases negativas. A 512 la época
+baja a unos 20 y la corrida entera entra en una noche.
 
 ── Qué se congela y qué no ─────────────────────────────────────────────────
 
@@ -37,6 +43,7 @@ import time
 from pathlib import Path
 
 AQUI = Path(__file__).parent
+sys.path.insert(0, str(AQUI))
 DATOS = AQUI / "data" / "epp.yaml"
 SALIDA = AQUI / "corridas"
 MODELOS = AQUI.parent / "models"
@@ -72,11 +79,17 @@ def _medidas(metricas, nombres: dict[int, str]) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--epocas", type=int, default=12)
-    ap.add_argument("--imgsz", type=int, default=576)
+    ap.add_argument("--epocas", type=int, default=30)
+    ap.add_argument("--imgsz", type=int, default=512)
     ap.add_argument("--lote", type=int, default=8)
     ap.add_argument("--base", default="yolov8n.pt")
     ap.add_argument("--solo-medir", action="store_true")
+    ap.add_argument("--sin-balancear", action="store_true",
+                    help="entrena con el reparto original del dataset")
+    ap.add_argument("--instalar", action="store_true",
+                    help="toma los pesos de la última corrida y los deja como el modelo en uso")
+    ap.add_argument("--adoptar", action="store_true",
+                    help="toma el best.pt de la corrida en curso, lo pone en models/ y lo mide")
     args = ap.parse_args()
 
     if not DATOS.is_file():
@@ -87,10 +100,59 @@ def main() -> int:
 
     destino = MODELOS / "epp.pt"
 
-    if args.solo_medir:
+    # Las clases de ausencia (NO-Hardhat y compañía) tienen tres o cuatro veces
+    # menos ejemplos que sus positivas, y son JUSTO las que disparan la alerta.
+    # Sin balancear, el modelo aprende a ver cascos y no aprende a ver cabezas
+    # descubiertas: medido, 0,81 de mAP contra 0,08. Un módulo así no avisa
+    # nunca y desde afuera se ve igual que uno roto.
+    datos = DATOS
+    if not args.solo_medir and not args.sin_balancear:
+        from balancear import preparar
+
+        lista, resumen = preparar(DATOS)
+        datos = AQUI / "data" / "epp_balanceado.yaml"
+        datos.write_text(
+            DATOS.read_text(encoding="utf-8").replace(
+                "train: train/images", f"train: {lista.resolve().as_posix()}"
+            ),
+            encoding="utf-8",
+        )
+        print(f"Balanceado: {resumen['imagenes']} imágenes -> {resumen['entradas']} entradas")
+        for c in ("NO-Hardhat", "NO-Safety Vest", "NO-Goggles", "NO-Gloves"):
+            print(f"  {c:<16} {resumen['antes'].get(c, 0):>5} -> {resumen['despues'].get(c, 0):>5} fotos")
+        print()
+
+    mejor = SALIDA / "epp" / "weights" / "best.pt"
+
+    if args.instalar:
+        # En CPU un entrenamiento tarda horas y se corta: se apaga la máquina,
+        # se cierra la terminal. Ultralytics guarda `best.pt` en cada época, así
+        # que lo entrenado hasta ahí ya sirve — pero quedaba tirado en la
+        # carpeta de la corrida y el módulo seguía diciendo que no hay modelo.
+        mejor = SALIDA / "epp" / "weights" / "best.pt"
+        if not mejor.is_file():
+            print(f"No hay ninguna corrida con pesos en {mejor}", file=sys.stderr)
+            return 1
+        MODELOS.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(mejor, destino)
+        print(f"Instalado {mejor} -> {destino}")
+        modelo = YOLO(str(destino))
+    elif args.solo_medir:
         if not destino.is_file():
             print(f"No hay modelo entrenado en {destino}", file=sys.stderr)
             return 1
+        modelo = YOLO(str(destino))
+    elif args.adoptar:
+        # Entrenar acá son horas, y ultralytics deja un best.pt actualizado al
+        # final de cada época. Esto permite cortar la corrida cuando las
+        # métricas ya alcanzan y quedarse con lo mejor que hubo, en vez de
+        # tener que llegar hasta la última época o perderlo todo.
+        if not mejor.is_file():
+            print(f"No hay corrida en {mejor}", file=sys.stderr)
+            return 1
+        MODELOS.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(mejor, destino)
+        print(f"Adoptado {mejor} -> {destino}")
         modelo = YOLO(str(destino))
     else:
         print(f"Entrenando desde {args.base}: {args.epocas} épocas, imgsz {args.imgsz}, lote {args.lote}")
@@ -98,7 +160,7 @@ def main() -> int:
         modelo = YOLO(args.base)
         t0 = time.time()
         modelo.train(
-            data=str(DATOS),
+            data=str(datos),
             epochs=args.epocas,
             imgsz=args.imgsz,
             batch=args.lote,
@@ -109,15 +171,25 @@ def main() -> int:
             # El tronco de COCO ya sabe ver personas y objetos; lo que hay que
             # enseñar es qué es un casco.
             freeze=10,
-            # Las imágenes entran en memoria (2.717 de ~39 KB son unos 105 MB) y
-            # ultralytics avisaba que el disco era el cuello de botella: leía a
-            # 3 MB/s. Sin esto cada época tardaba 33 minutos y entrenar era
-            # cuestión de días.
-            cache="ram",
+            # Nada de cache="ram": las imágenes pesan poco en disco pero
+            # descomprimidas ocupan GB, y esta máquina tiene menos de 2 GB
+            # libres. Cachear ahí la manda a swap y cada época pasa a tardar
+            # más que leyendo el JPEG, que con ocho lectores es barato.
+            cache=False,
             workers=8,
-            # Paciencia amplia: con pocas imágenes el mAP se mueve a los saltos
-            # y un corte temprano deja el modelo a mitad de aprender.
-            patience=15,
+            # Sin corte temprano: la corrida anterior murió en la época 1 y las
+            # clases negativas (NO-Hardhat y compañía) son justo las últimas que
+            # el modelo aprende. Cortar por paciencia acá es cortar antes de que
+            # aparezca lo único que hace útil al módulo.
+            patience=args.epocas,
+            # El optimizador se fija a mano en vez de dejarlo en "auto".
+            # En la corrida anterior "auto" eligió AdamW con lr 0,00167 y tres
+            # épocas de calentamiento: la época 1 entrenó a lr 0,0002, es decir
+            # casi no entrenó. Como el tronco está congelado y sólo se mueve la
+            # cabeza, se puede ir bastante más rápido sin desestabilizar nada.
+            optimizer="AdamW",
+            lr0=0.002,
+            warmup_epochs=1.0,
             # Nada de volteo vertical: una persona al revés no existe en una
             # cámara de seguridad, y enseñárselo gasta capacidad en un caso que
             # nunca va a ver.
@@ -132,7 +204,6 @@ def main() -> int:
         )
         print(f"\nEntrenamiento terminado en {(time.time() - t0) / 60:.0f} min")
 
-        mejor = SALIDA / "epp" / "weights" / "best.pt"
         if not mejor.is_file():
             print(f"No apareció {mejor}", file=sys.stderr)
             return 1
