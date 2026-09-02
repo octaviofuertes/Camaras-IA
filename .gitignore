@@ -48,7 +48,21 @@ tools/smoke/build/
 
 # Dataset descargado y modelos entrenados (pesados, se regeneran)
 training/data/
-training/models/
+# Los pesos ENTRENADOS si van al repo. Sin ellos un clon no tiene con que
+# detectar nada: el modulo de EPP arranca y no encuentra el modelo, y el de
+# caidas tampoco. Son 6 MB en total y es lo que hace que `git clone` alcance.
+#
+# Ojo con el orden: `*.pt` y `*.onnx` estan mas arriba, y en gitignore gana la
+# ultima regla que coincide, asi que estas negaciones tienen que quedar aca
+# abajo. Y se excluye `training/models/*` y no `training/models/`, porque a un
+# directorio excluido entero no se le puede volver a meter un archivo con `!`.
+training/models/*
+!training/models/epp.pt
+!training/models/epp.json
+!training/models/fall_classifier.pt
+!training/models/fall_classifier.onnx
+!training/models/fall_classifier.onnx.data
+!training/models/metadata.json
 
 # El dataset de EPP se baja con training/ppe/descargar.py (190 MB, CC BY 4.0).
 # No va al repositorio: es reproducible con un comando y ensucia cada diff.

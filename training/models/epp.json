@@ -1,0 +1,95 @@
+{
+  "modelo": "epp.pt",
+  "base": "C:/Users/octav/AppData/Local/Temp/claude/C--dev-Camaras-IA/f14608a2-1a66-4f9e-96db-bb4204ac4e49/scratchpad/epoca2.pt",
+  "epocas": 10,
+  "imgsz": 512,
+  "dataset": "HB1204/PPE_Detection (CC BY 4.0)",
+  "clases": [
+    "Boots",
+    "Gloves",
+    "Goggles",
+    "Hardhat",
+    "NO-Gloves",
+    "NO-Goggles",
+    "NO-Hardhat",
+    "NO-Safety Vest",
+    "None",
+    "Person",
+    "Safety Vest"
+  ],
+  "metricas": {
+    "mapa50": 0.4859,
+    "mapa50_95": 0.2293,
+    "por_clase": {
+      "Boots": {
+        "map50": 0.7349,
+        "precision": 0.7972,
+        "recall": 0.653
+      },
+      "Gloves": {
+        "map50": 0.7322,
+        "precision": 0.8614,
+        "recall": 0.6822
+      },
+      "Goggles": {
+        "map50": 0.5971,
+        "precision": 0.6674,
+        "recall": 0.5659
+      },
+      "Hardhat": {
+        "map50": 0.8469,
+        "precision": 0.8822,
+        "recall": 0.7683
+      },
+      "NO-Gloves": {
+        "map50": 0.0989,
+        "precision": 0.2595,
+        "recall": 0.0962
+      },
+      "NO-Goggles": {
+        "map50": 0.0962,
+        "precision": 0.4838,
+        "recall": 0.0746
+      },
+      "NO-Hardhat": {
+        "map50": 0.2814,
+        "precision": 0.389,
+        "recall": 0.321
+      },
+      "NO-Safety Vest": {
+        "map50": 0.3076,
+        "precision": 0.41,
+        "recall": 0.4326
+      },
+      "None": {
+        "map50": 0.0105,
+        "precision": 1.0,
+        "recall": 0.0
+      },
+      "Person": {
+        "map50": 0.8058,
+        "precision": 0.7711,
+        "recall": 0.8284
+      },
+      "Safety Vest": {
+        "map50": 0.8334,
+        "precision": 0.8028,
+        "recall": 0.758
+      }
+    }
+  },
+  "umbrales": {
+    "precisionMinima": 0.7,
+    "medidoSobre": "61b1b3b30822b155",
+    "medidoCon": "evaluar_personas.py",
+    "porElemento": {
+      "casco": 0.25,
+      "chaleco": 0.25,
+      "antiparras": 0.25,
+      "guantes": 0.4
+    },
+    "corroborado": {
+      "guantes": 0.25
+    }
+  }
+}
