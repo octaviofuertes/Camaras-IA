@@ -1,4 +1,4 @@
-"""Ensamblado de evidencias: imagen anotada y clip pre/post evento.
+"""Ensamblado de evidencias: la foto del instante y el clip pre/post evento.
 
 El clip cubre unos segundos antes del evento, el momento, y otros tantos
 después. Los previos salen del ring buffer (ya estaban en memoria cuando la
@@ -58,6 +58,47 @@ def annotate(jpeg: bytes, boxes: list[dict], label_prefix: str = "") -> bytes:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (60, 180, 255), 1, cv2.LINE_AA)
     ok, buf = cv2.imencode(".jpg", arr, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
     return buf.tobytes() if ok else jpeg
+
+
+def build_snapshot(
+    src: CameraSource,
+    center_ts: float,
+    dest: Path,
+    *,
+    boxes: list[dict] | None = None,
+) -> Path | None:
+    """Arma la FOTO del evento: un solo frame, el del instante de la alerta.
+
+    Es la evidencia de las alertas que se contestan mirando un instante y no un
+    movimiento: alguien sin casco, alguien sin chaleco, una cara que el sistema
+    no conoce. Para todas ésas, el video no agrega nada —lo que hay que ver está
+    quieto en el cuadro— y sí cuesta: seis segundos de H.264 pesan unas cien
+    veces más que un JPEG, tardan los tres segundos del post-roll en estar
+    listos, y son tres segundos de video de una persona guardados en disco por
+    algo que se resuelve con una imagen.
+
+    La caída es el caso contrario y por eso sigue grabando clip: nadie puede
+    decir si alguien se cayó o se agachó mirando una foto.
+
+    Devuelve la ruta, o None si el buffer estaba vacío (cámara recién arrancada
+    o desconectada), que es el mismo criterio que el clip.
+    """
+    frame = src.frame_at(center_ts)
+    if frame is None:
+        log.warning("[%s] sin frames en el buffer para la foto", src.camera_id)
+        return None
+
+    jpeg = annotate(frame.jpeg, boxes) if boxes else frame.jpeg
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(jpeg)
+    # El desfasaje entre el instante pedido y el frame que se encontró: si sale
+    # grande, la foto es de otro momento y conviene saberlo antes de mirarla.
+    log.info(
+        "[%s] foto del evento a %.2f s del instante pedido (%d KB) -> %s",
+        src.camera_id, abs(frame.ts - center_ts), len(jpeg) // 1024, dest,
+    )
+    _ULTIMO_CLIP[str(dest)] = {"desfasajeSegundos": abs(frame.ts - center_ts)}
+    return dest
 
 
 def _abrir_escritor(dest, fps: float, w: int, h: int):

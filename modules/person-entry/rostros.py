@@ -334,27 +334,76 @@ def coseno(a: list[float], b: list[float]) -> float:
     return num / math.sqrt(na * nb)
 
 
-def asociar_a_cuerpo(rostro: Rostro, cuerpos: list[tuple[float, float, float, float]]) -> int | None:
-    """Índice del cuerpo al que pertenece esta cara, o None.
+def asociar_a_cuerpo(
+    rostro: Rostro,
+    cuerpos: list[tuple[float, float, float, float]],
+    margen: float = 0.12,
+) -> int | None:
+    """Índice del cuerpo al que pertenece esta cara, o None si no está claro.
 
-    La cara tiene que estar dentro del recuadro del cuerpo y en su parte
-    superior. Se usa para atribuir a la persona identificada el uso de teléfono
-    que se detectó sobre SU cuerpo, y no sobre el de al lado — que es justamente
-    el problema que hacía injusto el informe agregado.
+    Devolver None es una respuesta legítima y frecuente, no una falla. De esta
+    asociación cuelga TODO lo que después se afirma sobre la persona: el nombre
+    que se le pone al recuadro, el tiempo que se le acredita y la alerta de
+    acceso. Equivocarla no produce un "no sé": produce el nombre de otro sobre
+    una cara ajena, que nadie mirando la pantalla puede detectar.
+
+    Por eso se piden tres cosas y no una:
+
+    1. Que la cara esté DENTRO del cuerpo (no que su centro caiga en la franja
+       vertical, que es lo que se pedía antes: con dos personas cerca, el centro
+       de una cara cae dentro de la caja del de al lado sin ningún problema).
+    2. Que esté donde va una cabeza: arriba del cuerpo, no en el medio.
+    3. Que UN solo cuerpo sea claramente el mejor candidato. Si hay dos casi
+       igual de plausibles —dos personas superpuestas, una detrás de la otra—
+       no se elige: se devuelve None y esa persona queda "sin identificar", que
+       es visible y corregible, en vez de quedar con el nombre del otro.
+
+    El criterio anterior era "gana el cuerpo más chico". Con alguien parado
+    delante y alguien más lejos detrás, el más chico es el de atrás, así que la
+    cara del de adelante se le atribuía al de atrás.
     """
-    cx = rostro.x + rostro.w / 2
-    cy = rostro.y + rostro.h / 2
-    mejor, mejor_area = None, float("inf")
+    candidatos: list[tuple[float, int]] = []
+    for i, caja in enumerate(cuerpos):
+        dentro = _fraccion_dentro(rostro, caja)
+        if dentro < 0.7:
+            continue
+        arriba = _altura_de_cabeza(rostro, caja)
+        if arriba is None:
+            continue
+        # Las dos cosas pesan igual: estar adentro y estar donde va la cabeza.
+        candidatos.append((0.5 * dentro + 0.5 * arriba, i))
 
-    for i, (bx, by, bw, bh) in enumerate(cuerpos):
-        if not (bx <= cx <= bx + bw):
-            continue
-        # La cara está en el tercio superior del cuerpo.
-        if not (by - 0.02 <= cy <= by + bh * 0.40):
-            continue
-        area = bw * bh
-        # Ante superposición, gana el cuerpo más chico: es el que encierra a esa
-        # cara más ajustadamente.
-        if area < mejor_area:
-            mejor, mejor_area = i, area
-    return mejor
+    if not candidatos:
+        return None
+    candidatos.sort(reverse=True)
+    if len(candidatos) > 1 and candidatos[0][0] - candidatos[1][0] < margen:
+        return None
+    return candidatos[0][1]
+
+
+def _fraccion_dentro(rostro: Rostro, caja: tuple[float, float, float, float]) -> float:
+    """Qué parte de la cara cae dentro del cuerpo, de 0 a 1."""
+    bx, by, bw, bh = caja
+    area = rostro.w * rostro.h
+    if area <= 0 or bw <= 0 or bh <= 0:
+        return 0.0
+    ancho = max(0.0, min(rostro.x + rostro.w, bx + bw) - max(rostro.x, bx))
+    alto = max(0.0, min(rostro.y + rostro.h, by + bh) - max(rostro.y, by))
+    return (ancho * alto) / area
+
+
+def _altura_de_cabeza(rostro: Rostro, caja: tuple[float, float, float, float]) -> float | None:
+    """Cuán arriba del cuerpo está la cara: 1 en la coronilla, 0 al 40% del alto.
+
+    None si está más abajo que eso, o sea si no puede ser la cabeza de ese
+    cuerpo. La tolerancia de arriba cubre el caso normal de que el detector de
+    caras corte un poco más alto que el de personas.
+    """
+    _, by, _, bh = caja
+    if bh <= 0:
+        return None
+    cy = rostro.y + rostro.h / 2
+    banda = bh * 0.40
+    if not (by - 0.02 <= cy <= by + banda):
+        return None
+    return max(0.0, min(1.0, 1.0 - (cy - by) / banda))

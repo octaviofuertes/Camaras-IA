@@ -84,8 +84,8 @@
   display: grid; place-items: center;
   width: 22px; height: 22px;
   border-radius: 5px;
-  background: rgba(0, 0, 0, 0.55);
-  color: #cbd5e1;
+  background: rgba(9, 30, 74, .45);
+  color: var(--text-mute);
 }
 .cam-info { display: flex; flex-direction: column; }
 .cam-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -140,7 +140,7 @@
   border-radius: 50%;
   flex-shrink: 0;
 }
-.a-remove:hover { background: rgba(239, 68, 68, 0.18); color: #fca5a5; }
+.a-remove:hover { background: rgba(224, 50, 63, 0.18); color: var(--red-ink); }
 
 /* Zona de drop */
 .dropzone {
@@ -254,14 +254,14 @@
   padding: 11px 15px;
   border-radius: var(--radius-sm);
   font-size: 13px;
-  background: rgba(34, 197, 94, 0.12);
-  border: 1px solid rgba(34, 197, 94, 0.35);
-  color: #86efac;
+  background: rgba(18, 160, 95, 0.12);
+  border: 1px solid rgba(18, 160, 95, 0.35);
+  color: var(--green-ink);
 }
 .flash.err {
-  background: rgba(239, 68, 68, 0.12);
-  border-color: rgba(239, 68, 68, 0.35);
-  color: #fca5a5;
+  background: rgba(224, 50, 63, 0.12);
+  border-color: rgba(224, 50, 63, 0.35);
+  color: var(--red-ink);
 }
 .banner {
   display: flex; align-items: flex-start; gap: 11px;
@@ -269,20 +269,20 @@
   font-size: 12.5px; line-height: 1.55;
 }
 .banner.err {
-  background: rgba(239, 68, 68, 0.09);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  color: #fca5a5;
+  background: rgba(224, 50, 63, 0.09);
+  border: 1px solid rgba(224, 50, 63, 0.3);
+  color: var(--red-ink);
 }
 /* No es un error: es una instrucción. Ámbar y no rojo, porque no se rompió
    nada — falta un paso de configuración y está a la vista, abajo. */
 .banner.aviso {
-  background: rgba(245, 158, 11, 0.09);
-  border: 1px solid rgba(245, 158, 11, 0.3);
-  color: #fcd34d;
-  strong { color: #fde68a; }
+  background: rgba(224, 122, 0, 0.09);
+  border: 1px solid rgba(224, 122, 0, 0.3);
+  color: var(--orange-ink);
+  strong { color: var(--orange-ink); }
 }
 .banner svg { flex-shrink: 0; margin-top: 1px; }
-code { background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
+code { background: rgba(15, 27, 51, .06); padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
 .loading { display: flex; align-items: center; gap: 10px; padding: 30px; color: var(--text-dim); font-size: 13px; }
 
 .cam.busy { opacity: .6; pointer-events: none; }
@@ -300,12 +300,12 @@ code { background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 4px; 
   color: var(--text-mute); cursor: pointer; padding: 3px; border-radius: 4px;
   display: grid; place-items: center;
 }
-.del:hover { background: rgba(239,68,68,.16); color: #fca5a5; }
+.del:hover { background: rgba(224, 50, 63,.16); color: var(--red-ink); }
 
 /* ─── Modal de alta ────────────────────────────────────── */
 .modal-backdrop {
   position: fixed; inset: 0; z-index: 50;
-  background: rgba(0, 0, 0, 0.62);
+  background: rgba(9, 30, 74, .5);
   display: grid; place-items: center;
   padding: 20px;
 }
@@ -328,8 +328,8 @@ code { background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 4px; 
 .field small { font-size: 11px; color: var(--text-mute); }
 .kind { display: flex; gap: 8px; }
 .form-error {
-  font-size: 12.5px; color: #fca5a5;
-  background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.3);
+  font-size: 12.5px; color: var(--red-ink);
+  background: rgba(224, 50, 63,.1); border: 1px solid rgba(224, 50, 63,.3);
   padding: 9px 12px; border-radius: var(--radius-sm);
 }
 .modal-foot {
@@ -347,7 +347,7 @@ code { background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 4px; 
 /* ─── Qué vigila cada módulo asignado ───────────────────────────── */
 .a-que {
   font-size: 10.5px; color: var(--text-mute);
-  background: rgba(255, 255, 255, .06);
+  background: rgba(15, 27, 51, .06);
   padding: 1px 6px; border-radius: 999px; margin-left: 2px;
   max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -355,13 +355,13 @@ code { background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 4px; 
 .a-config {
   background: none; border: none; color: var(--text-mute); cursor: pointer;
   padding: 2px 3px; border-radius: 4px; display: inline-flex;
-  &:hover { color: var(--text); background: rgba(255, 255, 255, .1); }
+  &:hover { color: var(--brand-ink); background: var(--panel-hover); }
 }
 
 .tapa {
   position: fixed; inset: 0; z-index: 80;
   display: grid; place-items: center;
-  background: rgba(3, 6, 12, .74);
+  background: rgba(9, 30, 74, .45);
 }
 
 .dialogo {
@@ -370,7 +370,7 @@ code { background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 4px; 
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 22px;
-  box-shadow: 0 22px 60px rgba(0, 0, 0, .5);
+  box-shadow: var(--shadow-lg);
 
   h2 { font-size: 16px; font-weight: 650; }
   .d-sub { font-size: 12.5px; color: var(--text-mute); margin-top: 2px; }
@@ -387,7 +387,7 @@ code { background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 4px; 
   padding: 9px 10px; border-radius: var(--radius-sm);
   cursor: pointer; font-size: 13.5px;
 
-  &:hover { background: rgba(255, 255, 255, .04); }
+  &:hover { background: var(--panel-hover); }
   input { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
   span { text-transform: capitalize; }
 }

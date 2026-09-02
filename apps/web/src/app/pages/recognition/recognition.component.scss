@@ -21,7 +21,7 @@
   transition: color .15s, border-color .15s;
 
   &:hover { color: var(--text); }
-  &.active { color: var(--text); border-bottom-color: var(--accent, #3b82f6); font-weight: 600; }
+  &.active { color: var(--text); border-bottom-color: var(--accent, var(--brand)); font-weight: 600; }
 }
 
 .cuenta {
@@ -29,7 +29,7 @@
   background: var(--panel-2); color: var(--text-mute);
   font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
 
-  &.alerta { background: var(--accent, #3b82f6); color: #fff; }
+  &.alerta { background: var(--accent, var(--brand)); color: #fff; }
 }
 
 /* ─── Estados ───────────────────────────────────────────────────── */
@@ -63,7 +63,7 @@
 
   /* Quien no tiene acceso se ve distinto desde lejos: es el dato por el que
      alguien abre esta lista con apuro. */
-  &.sin-acceso { border-color: rgba(239, 68, 68, .45); }
+  &.sin-acceso { border-color: rgba(224, 50, 63, .45); }
 }
 
 .ficha-foto {
@@ -89,12 +89,12 @@
 .etiqueta {
   padding: 2px 9px; border-radius: 999px;
   font-size: 11px; font-weight: 600;
-  background: rgba(34, 197, 94, .14); color: #86efac;
+  background: rgba(18, 160, 95, .14); color: var(--green-ink);
 
-  &.no { background: rgba(239, 68, 68, .18); color: #fca5a5; }
+  &.no { background: rgba(224, 50, 63, .18); color: var(--red-ink); }
   &.neutra { background: var(--panel-2); color: var(--text-mute); }
   /* Una sola foto reconoce de frente y nada más: se avisa sin alarmar. */
-  &.neutra.pocas { color: #fcd34d; }
+  &.neutra.pocas { color: var(--orange-ink); }
 }
 
 .ficha-nota {
@@ -110,8 +110,8 @@
 }
 
 .btn.peligro {
-  border-color: rgba(239, 68, 68, .4); color: #fca5a5;
-  &:hover:not(:disabled) { background: rgba(239, 68, 68, .14); }
+  border-color: rgba(224, 50, 63, .4); color: var(--red-ink);
+  &:hover:not(:disabled) { background: rgba(224, 50, 63, .14); }
 }
 
 /* ─── Barra de la cola ──────────────────────────────────────────── */
@@ -147,7 +147,7 @@
 .cab-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .cab-titulo { font-size: 13px; font-weight: 600; }
 .cab-sub { font-size: 11.5px; color: var(--text-mute); }
-.cab-accion { font-size: 12px; font-weight: 600; color: var(--accent-light, #60a5fa); }
+.cab-accion { font-size: 12px; font-weight: 600; color: var(--accent-light, var(--brand)); }
 
 .chevron {
   color: var(--text-mute); flex: 0 0 auto; transition: transform .18s;
@@ -199,16 +199,16 @@
   font: inherit; font-size: 12.5px; font-weight: 600;
 
   &:hover { color: var(--text); }
-  &.si.elegida { background: rgba(34, 197, 94, .16); border-color: rgba(34, 197, 94, .5); color: #86efac; }
-  &.no.elegida { background: rgba(239, 68, 68, .16); border-color: rgba(239, 68, 68, .5); color: #fca5a5; }
+  &.si.elegida { background: rgba(18, 160, 95, .16); border-color: rgba(18, 160, 95, .5); color: var(--green-ink); }
+  &.no.elegida { background: rgba(224, 50, 63, .16); border-color: rgba(224, 50, 63, .5); color: var(--red-ink); }
 }
 
-.ojo { color: #fca5a5; font-size: 11.5px; line-height: 1.5; }
+.ojo { color: var(--red-ink); font-size: 11.5px; line-height: 1.5; }
 
 .error {
   padding: 10px 12px; border-radius: var(--radius-sm);
-  background: rgba(239, 68, 68, .1); border: 1px solid rgba(239, 68, 68, .35);
-  color: #fca5a5; font-size: 12px; line-height: 1.5;
+  background: rgba(224, 50, 63, .1); border: 1px solid rgba(224, 50, 63, .35);
+  color: var(--red-ink); font-size: 12px; line-height: 1.5;
 }
 
 .acciones { display: flex; gap: 9px; justify-content: flex-end; }
@@ -237,8 +237,8 @@
 }
 
 .paso-listo {
-  font-size: 11.5px; font-weight: 600; color: #86efac;
-  padding: 2px 9px; border-radius: 999px; background: rgba(34, 197, 94, .14);
+  font-size: 11.5px; font-weight: 600; color: var(--green-ink);
+  padding: 2px 9px; border-radius: 999px; background: rgba(18, 160, 95, .14);
 }
 
 .quien { display: flex; flex-wrap: wrap; gap: 7px; }
@@ -251,7 +251,7 @@
   font: inherit; font-size: 12.5px;
 
   &:hover { color: var(--text); }
-  &.active { background: var(--accent, #3b82f6); border-color: transparent; color: #fff; }
+  &.active { background: var(--accent, var(--brand)); border-color: transparent; color: #fff; }
   &.nueva { border-style: dashed; }
 
   .fotos {
@@ -271,8 +271,8 @@
   border: 1px solid var(--border); background: var(--panel-2);
 
   /* Se ve de un vistazo cuál sirvió, sin leer el texto. */
-  &.sirve { border-color: rgba(34, 197, 94, .45); }
-  &.no-sirve { border-color: rgba(251, 191, 36, .4); }
+  &.sirve { border-color: rgba(18, 160, 95, .45); }
+  &.no-sirve { border-color: rgba(224, 122, 0, .4); }
 }
 
 .foto {
@@ -288,13 +288,13 @@
 .sello {
   position: absolute; left: 6px; bottom: 6px;
   width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
-  background: rgba(34, 197, 94, .92); color: #062d13;
+  background: rgba(18, 160, 95, .92); color: #062d13;
   font-size: 11px; font-weight: 800;
 }
 
 .subiendo {
   position: absolute; inset: 0; display: grid; place-items: center;
-  background: rgba(0, 0, 0, .55);
+  background: rgba(9, 30, 74, .45);
 }
 
 .ranura-txt { display: flex; flex-direction: column; gap: 2px; }
@@ -308,8 +308,8 @@
   padding: 7px 9px; border-radius: var(--radius-sm);
   font-size: 11px; line-height: 1.45;
 
-  &.ok { background: rgba(34, 197, 94, .12); color: #86efac; }
-  &.no { background: rgba(251, 191, 36, .1); color: #fcd34d; }
+  &.ok { background: rgba(18, 160, 95, .12); color: var(--green-ink); }
+  &.no { background: rgba(224, 122, 0, .1); color: var(--orange-ink); }
 }
 
 /* ─── Cámara ────────────────────────────────────────────────────── */
@@ -332,7 +332,7 @@
 /* ─── Confirmación de baja ──────────────────────────────────────── */
 .modal-fondo {
   position: fixed; inset: 0; z-index: 60;
-  background: rgba(0, 0, 0, .62); display: grid; place-items: center; padding: 20px;
+  background: rgba(9, 30, 74, .5); display: grid; place-items: center; padding: 20px;
 }
 
 .modal {
@@ -344,7 +344,7 @@
 }
 
 /* Lo irreversible se dice, no se deja para que lo descubran. */
-.modal-irrev { color: #fca5a5 !important; font-weight: 600; }
+.modal-irrev { color: var(--red-ink) !important; font-weight: 600; }
 
 .modal-acciones { display: flex; gap: 9px; justify-content: flex-end; margin-top: 16px; }
 

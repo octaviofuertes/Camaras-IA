@@ -13,12 +13,15 @@ Basado en los mockups aprobados por el usuario el 2026-07-31. Esta es la **direc
 
 | Elemento | Valor |
 |---|---|
-| Tema | **Oscuro por defecto** (`#0d1117`–`#111827` de fondo, paneles `#161b22`/`#1a2130`) |
-| Acento primario | Azul (`#2563eb` / `#3b82f6`) — nav activo, botones primarios, series de gráficos |
-| Bordes | 1px sutiles (`#232b3a`), radio 10–12px, sin sombras duras |
+| Tema | **Claro, sobre el azul de e-Sueldos.** Barra lateral `#0b5cf6`, contenido `#f2f6fd`, tarjetas blancas |
+| Acento primario | Azul de marca `#0b5cf6` — nav activo, series de gráficos, foco de campos |
+| Acción principal | Coral `#f1414e` — el botón que resuelve la pantalla. En azul sobre azul un botón deja de ser un botón |
+| Bordes | 1px sutiles (`#dfe7f5`), radio 10–12px, sombras suaves y azuladas |
+| Sobre el video | **Excepción deliberada**: lo que muestra una cámara va siempre sobre negro, y lo que se dibuja encima usa colores plenos con sombra. El fondo ahí es la escena, no el tema |
 | Tipografía | Sans del sistema; títulos 20–24px semibold, métricas 28–32px bold, meta 12px |
 | Severidad | `Crítico` rojo · `Alto` naranja · `Medio` azul/amarillo · `Bajo` gris |
 | Estado | `En línea` punto verde · `LIVE` badge rojo sobre el video |
+| Marca | Isotipo de nube + `e-Sueldos`. Va dibujado en SVG (`shared/logo.component.ts`) y se pinta con `currentColor`: blanco sobre el azul, azul sobre blanco |
 
 **Layout general:** sidebar fija a la izquierda (~220px) + área de contenido. Sidebar: logo arriba, nav (Dashboard, Cámaras, Eventos, Usuarios), y **usuario al pie** con avatar y rol.
 

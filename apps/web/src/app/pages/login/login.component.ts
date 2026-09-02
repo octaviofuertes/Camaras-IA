@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { AuthService } from '../../core/auth.service';
+import { LogoComponent } from '../../shared/logo.component';
 
 /**
  * Puerta de entrada.
@@ -19,7 +20,7 @@ import { AuthService } from '../../core/auth.service';
 @Component({
   selector: 'px-login',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, LogoComponent],
   templateUrl: './login.component.html',
   styleUrls: ['./login.component.scss'],
 })

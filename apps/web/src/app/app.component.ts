@@ -4,11 +4,12 @@ import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } fro
 import { filter } from 'rxjs';
 import { AuthService } from './core/auth.service';
 import { MODULO_INGRESO, ModulosService } from './core/modulos.service';
+import { LogoComponent } from './shared/logo.component';
 
 @Component({
   selector: 'px-root',
   standalone: true,
-  imports: [CommonModule, RouterOutlet, RouterLink, RouterLinkActive],
+  imports: [CommonModule, RouterOutlet, RouterLink, RouterLinkActive, LogoComponent],
   template: `
     <!-- La pantalla de bienvenida va sola: quien está enfrente no opera nada y
          un menú lateral sólo invitaría a tocarlo. -->
@@ -17,16 +18,8 @@ import { MODULO_INGRESO, ModulosService } from './core/modulos.service';
     <div class="layout" *ngIf="!soloKiosco">
       <aside class="sidebar">
         <div class="brand">
-          <div class="brand-mark">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 2 4 6v6c0 5 3.4 9.4 8 10 4.6-.6 8-5 8-10V6l-8-4Z" />
-              <circle cx="12" cy="11" r="2.5" fill="currentColor" stroke="none" />
-            </svg>
-          </div>
-          <div class="brand-text">
-            <div class="brand-name">VisionAI</div>
-            <div class="brand-sub">Análisis Inteligente de Video</div>
-          </div>
+          <px-logo [alto]="24" />
+          <div class="brand-sub">Análisis Inteligente de Video</div>
         </div>
 
         <nav class="nav">
@@ -110,38 +103,25 @@ import { MODULO_INGRESO, ModulosService } from './core/modulos.service';
         height: 100vh;
         overflow: hidden;
       }
+      /* La barra va en el azul de marca y el contenido en claro. Es el mismo
+         reparto que hace el sitio de e-Sueldos: el azul enmarca, y lo que hay
+         que leer va sobre blanco. */
       .sidebar {
-        background: var(--panel);
-        border-right: 1px solid var(--border);
+        background: var(--brand);
+        color: var(--on-brand);
         display: flex;
         flex-direction: column;
-        padding: 18px 14px;
+        padding: 20px 14px 16px;
       }
       .brand {
-        display: flex;
-        align-items: center;
-        gap: 11px;
-        padding: 4px 6px 22px;
-      }
-      .brand-mark {
-        width: 36px;
-        height: 36px;
-        border-radius: 10px;
-        background: linear-gradient(135deg, var(--accent), #1e40af);
-        display: grid;
-        place-items: center;
-        color: #fff;
-        flex-shrink: 0;
-      }
-      .brand-name {
-        font-size: 16px;
-        font-weight: 700;
-        letter-spacing: -0.2px;
+        padding: 4px 8px 24px;
+        color: var(--on-brand);
       }
       .brand-sub {
         font-size: 10.5px;
-        color: var(--text-mute);
-        margin-top: 1px;
+        color: var(--on-brand-mute);
+        margin-top: 7px;
+        padding-left: 2px;
       }
       .nav {
         display: flex;
@@ -154,20 +134,22 @@ import { MODULO_INGRESO, ModulosService } from './core/modulos.service';
         align-items: center;
         gap: 12px;
         padding: 11px 13px;
-        border-radius: var(--radius-sm);
-        color: var(--text-dim);
+        border-radius: 999px;
+        color: var(--on-brand-dim);
         text-decoration: none;
         font-size: 14px;
-        font-weight: 500;
+        font-weight: 600;
         transition: background 0.15s, color 0.15s;
       }
       .nav-item:hover {
-        background: var(--panel-2);
-        color: var(--text);
+        background: rgba(255, 255, 255, 0.12);
+        color: var(--on-brand);
       }
+      /* La sección abierta se marca en blanco pleno: sobre el azul es lo único
+         que se distingue de pasarle el mouse por encima. */
       .nav-item.active {
-        background: var(--accent);
-        color: #fff;
+        background: var(--on-brand);
+        color: var(--brand);
       }
       .user {
         width: 100%;
@@ -181,23 +163,23 @@ import { MODULO_INGRESO, ModulosService } from './core/modulos.service';
         gap: 10px;
         padding: 11px;
         border-radius: var(--radius-sm);
-        background: var(--panel-2);
-        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.16);
         cursor: pointer;
-        color: var(--text-dim);
+        color: var(--on-brand-dim);
       }
       .user:hover {
-        background: var(--panel-hover);
+        background: rgba(255, 255, 255, 0.18);
       }
       .avatar {
         width: 34px;
         height: 34px;
         border-radius: 50%;
-        background: linear-gradient(135deg, #475569, #334155);
+        background: var(--on-brand);
         display: grid;
         place-items: center;
-        font-weight: 600;
-        color: #fff;
+        font-weight: 800;
+        color: var(--brand);
         font-size: 13px;
         flex-shrink: 0;
       }
@@ -207,15 +189,16 @@ import { MODULO_INGRESO, ModulosService } from './core/modulos.service';
       }
       .user-name {
         font-size: 13px;
-        font-weight: 600;
-        color: var(--text);
+        font-weight: 700;
+        color: var(--on-brand);
       }
       .user-role {
         font-size: 11px;
-        color: var(--text-mute);
+        color: var(--on-brand-mute);
       }
       .content {
         overflow-y: auto;
+        background: var(--bg);
       }
     `,
   ],

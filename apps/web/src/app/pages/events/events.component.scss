@@ -16,19 +16,19 @@
   line-height: 1.55;
 }
 .notice {
-  background: rgba(59, 130, 246, 0.09);
-  border: 1px solid rgba(59, 130, 246, 0.28);
-  color: #bfdbfe;
+  background: rgba(11, 92, 246, 0.09);
+  border: 1px solid rgba(11, 92, 246, 0.28);
+  color: var(--brand-ink);
 }
 .demo-banner {
-  background: rgba(245, 158, 11, 0.09);
-  border: 1px solid rgba(245, 158, 11, 0.3);
-  color: #fcd34d;
+  background: rgba(224, 122, 0, 0.09);
+  border: 1px solid rgba(224, 122, 0, 0.3);
+  color: var(--orange-ink);
 }
 .notice svg,
 .demo-banner svg { flex-shrink: 0; margin-top: 1px; }
 code {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(15, 27, 51, .06);
   padding: 1px 5px;
   border-radius: 4px;
   font-size: 11.5px;
@@ -97,15 +97,15 @@ code {
   color: var(--text-dim);
   border: 1px solid var(--border);
 }
-.status[data-s='new'] { background: rgba(59, 130, 246, 0.16); color: #93c5fd; border-color: transparent; }
-.status[data-s='acknowledged'] { background: rgba(234, 179, 8, 0.16); color: #fcd34d; border-color: transparent; }
-.status[data-s='confirmed'] { background: rgba(239, 68, 68, 0.16); color: #fca5a5; border-color: transparent; }
-.status[data-s='false_positive'] { background: rgba(34, 197, 94, 0.14); color: #86efac; border-color: transparent; }
+.status[data-s='new'] { background: rgba(11, 92, 246, 0.16); color: var(--brand-ink); border-color: transparent; }
+.status[data-s='acknowledged'] { background: rgba(217, 154, 0, 0.16); color: var(--orange-ink); border-color: transparent; }
+.status[data-s='confirmed'] { background: rgba(224, 50, 63, 0.16); color: var(--red-ink); border-color: transparent; }
+.status[data-s='false_positive'] { background: rgba(18, 160, 95, 0.14); color: var(--green-ink); border-color: transparent; }
 
 .actions { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
 .btn.sm { padding: 6px 11px; font-size: 12px; }
-.btn.sm.ok { border-color: rgba(34, 197, 94, 0.4); color: #86efac; }
-.btn.sm.ok:hover { background: rgba(34, 197, 94, 0.14); }
+.btn.sm.ok { border-color: rgba(18, 160, 95, 0.4); color: var(--green-ink); }
+.btn.sm.ok:hover { background: rgba(18, 160, 95, 0.14); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .closed { font-size: 12px; }
 
@@ -132,35 +132,35 @@ code {
 .fall-alert {
   display: flex; align-items: center; gap: 13px;
   padding: 14px 16px; border-radius: var(--radius-sm);
-  background: rgba(239, 68, 68, 0.12);
-  border: 1px solid rgba(239, 68, 68, 0.45);
+  background: rgba(224, 50, 63, 0.12);
+  border: 1px solid rgba(224, 50, 63, 0.45);
   animation: latir 2s ease-in-out infinite;
 }
 @keyframes latir {
-  0%, 100% { border-color: rgba(239, 68, 68, 0.45); }
-  50%      { border-color: rgba(239, 68, 68, 0.9); }
+  0%, 100% { border-color: rgba(224, 50, 63, 0.45); }
+  50%      { border-color: rgba(224, 50, 63, 0.9); }
 }
 .fa-icon {
   width: 40px; height: 40px; border-radius: 10px;
-  background: rgba(239, 68, 68, 0.22); color: #fca5a5;
+  background: rgba(224, 50, 63, 0.22); color: var(--red-ink);
   display: grid; place-items: center; flex-shrink: 0;
 }
 .fa-body { flex: 1; min-width: 0; }
-.fa-title { font-weight: 700; font-size: 14px; color: #fecaca; }
+.fa-title { font-weight: 700; font-size: 14px; color: var(--red-ink); }
 .fa-meta { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
 .fa-x {
   background: transparent; border: none; color: var(--text-mute);
   cursor: pointer; padding: 5px; border-radius: 6px; display: grid; place-items: center;
 }
-.fa-x:hover { background: rgba(255,255,255,.08); color: var(--text); }
+.fa-x:hover { background: var(--panel-hover); color: var(--brand-ink); }
 
 /* ─── Estado del aprendizaje ───────────────────────────── */
 .learning {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 14px; border-radius: var(--radius-sm);
-  background: rgba(139, 92, 246, 0.09);
-  border: 1px solid rgba(139, 92, 246, 0.28);
-  color: #c4b5fd; font-size: 12.5px;
+  background: rgba(124, 77, 219, 0.09);
+  border: 1px solid rgba(124, 77, 219, 0.28);
+  color: var(--purple-ink); font-size: 12.5px;
 }
 .learning svg { flex-shrink: 0; }
 
@@ -218,7 +218,7 @@ code {
 /* ─── Modal de confirmación ────────────────────────────── */
 .modal-backdrop {
   position: fixed; inset: 0; z-index: 60;
-  background: rgba(0,0,0,.62); display: grid; place-items: center; padding: 20px;
+  background: rgba(9, 30, 74, .5); display: grid; place-items: center; padding: 20px;
 }
 .modal { width: 100%; max-width: 470px; box-shadow: var(--shadow); }
 .icon-x {

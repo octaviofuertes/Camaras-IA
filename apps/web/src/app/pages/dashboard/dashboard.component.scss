@@ -190,3 +190,7 @@
 .t-bar { width: 108px; height: 6px; background: var(--panel-2); border-radius: 4px; overflow: hidden; flex-shrink: 0; }
 .t-bar i { display: block; height: 100%; border-radius: 4px; }
 .t-pct { width: 36px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Un número que no se pudo consultar. Ni verde ni rojo: no es una subida ni
+   una bajada, es que no hay dato. */
+.kpi-delta.sin-dato { color: var(--text-mute); font-style: italic; }

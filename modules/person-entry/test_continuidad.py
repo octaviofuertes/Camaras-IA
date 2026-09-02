@@ -357,3 +357,51 @@ if __name__ == "__main__":
             print(f"  ERROR {nombre}: {e!r}")
     print(f"\n{len(pruebas) - fallos}/{len(pruebas)} pruebas OK")
     sys.exit(1 if fallos else 0)
+
+
+# ── dar de baja a alguien tiene que borrar lo que se dedujo de él ───
+
+
+def test_la_baja_de_una_persona_se_lleva_su_identidad_sostenida():
+    """Sin esto, a quien se borra mientras está frente a la cámara se le sigue
+    mostrando el nombre en pantalla hasta que se vaya del cuadro.
+
+    Pasó de verdad: la pantalla decía un nombre y al mismo tiempo no sabía si
+    esa persona tenía acceso, porque el nombre salía del anclaje y el acceso de
+    la galería, que ya no la tenía.
+    """
+    s = IdentidadSostenida(ConfigContinuidad())
+    s.anclar_por_rostro(
+        track_id=7, persona_id="p1", nombre="Juan",
+        apariencia=[1.0, 0.0], posicion=(0.5, 0.8), ahora=1000.0,
+    )
+    assert s.resolver(7, [1.0, 0.0], (0.5, 0.8), 1001.0).persona_id == "p1"
+
+    olvidados = s.conservar_solo({"p2", "p3"})   # a p1 se le dio de baja
+
+    assert olvidados == 1
+    r = s.resolver(7, [1.0, 0.0], (0.5, 0.8), 1002.0)
+    assert r.persona_id is None, "se le sigue poniendo el nombre a alguien dado de baja"
+    assert r.via == "ninguna"
+
+
+def test_conservar_solo_no_toca_a_los_que_siguen_dados_de_alta():
+    s = IdentidadSostenida(ConfigContinuidad())
+    s.anclar_por_rostro(7, "p1", "Juan", [1.0, 0.0], (0.5, 0.8), 1000.0)
+    s.anclar_por_rostro(8, "p2", "Ana", [0.0, 1.0], (0.2, 0.8), 1000.0)
+
+    assert s.conservar_solo({"p1", "p2"}) == 0
+    assert s.resolver(7, [1.0, 0.0], (0.5, 0.8), 1001.0).persona_id == "p1"
+    assert s.resolver(8, [0.0, 1.0], (0.2, 0.8), 1001.0).persona_id == "p2"
+
+
+def test_la_baja_tampoco_deja_al_puesto_reconociendo_al_que_se_fue():
+    """El puesto identifica solo cuando hay un único candidato en ese lugar.
+
+    Si el anclaje sobreviviera a la baja, ese candidato seguiría siendo la
+    persona borrada y cualquiera que se sentara ahí heredaría su nombre.
+    """
+    s = IdentidadSostenida(ConfigContinuidad())
+    s.anclar_por_rostro(7, "p1", "Juan", None, (0.5, 0.8), 1000.0)
+    s.conservar_solo(set())
+    assert s.resolver(99, None, (0.5, 0.8), 1010.0).persona_id is None

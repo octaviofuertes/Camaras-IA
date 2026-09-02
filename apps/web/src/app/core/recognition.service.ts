@@ -41,6 +41,24 @@ export interface AltaManual {
   consentBasis: string;
   /** Miniatura, cuando el alta viene de una cara ya detectada. */
   photo?: string;
+  /** Vector facial, para que la persona quede reconocible desde el alta. */
+  embedding?: number[];
+  /** El operador ya vio el aviso de parecido y afirma que es otra persona. */
+  forzarNueva?: boolean;
+}
+
+/**
+ * Resultado del alta.
+ *
+ * `yaExiste` no es un error que haya que esconder: es el servidor avisando que
+ * esa cara ya es de alguien dado de alta. Sin ese aviso, la misma persona vista
+ * de otro ángulo se cargaba dos veces y el informe le partía las horas entre
+ * dos filas con el mismo nombre.
+ */
+export interface ResultadoAlta {
+  id?: string;
+  yaExiste?: { id: string; displayName: string; parecido: number };
+  error?: string;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -56,12 +74,32 @@ export class RecognitionService {
   }
 
   /** Alta manual: se crea la ficha y después se le suman las fotos. */
-  alta(datos: AltaManual): Observable<{ id: string } | { error: string }> {
+  alta(datos: AltaManual): Observable<ResultadoAlta> {
     return this.http.post<{ id: string }>(this.base, datos).pipe(
-      catchError((err: HttpErrorResponse) =>
-        of({ error: err?.error?.message ?? 'No se pudo dar de alta a la persona' }),
-      ),
+      map((r) => ({ id: r.id })),
+      catchError((err: HttpErrorResponse) => {
+        if (err.status === 409) {
+          const cuerpo = err.error ?? {};
+          return of({ yaExiste: cuerpo.parecidaA, error: cuerpo.message } as ResultadoAlta);
+        }
+        return of({
+          error: err?.error?.message ?? 'No se pudo dar de alta a la persona',
+        } as ResultadoAlta);
+      }),
     );
+  }
+
+  /**
+   * Suma este ángulo a alguien ya dado de alta.
+   *
+   * Es lo que hace que el reconocimiento mejore con el uso: el módulo compara
+   * contra TODAS las plantillas de cada persona y se queda con la mejor, así
+   * que de frente y de perfil se reconocen las dos.
+   */
+  sumarRostro(personId: string, embedding: number[]): Observable<boolean> {
+    return this.http
+      .post(`${this.base}/${personId}/faces`, { embedding })
+      .pipe(map(() => true), catchError(() => of(false)));
   }
 
   /**

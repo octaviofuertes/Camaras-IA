@@ -501,6 +501,84 @@ export class EventsRepository {
     };
   }
 
+  /**
+   * Los números del panel: qué pasó hoy, comparado con ayer.
+   *
+   * ── Por qué "ayer" se corta a esta misma hora ───────────────────────
+   *
+   * Comparar el día en curso contra el día entero de ayer da siempre una
+   * caída: a las diez de la mañana no se lleva ni medio día contra veinticuatro
+   * horas. La comparación se hace contra el MISMO tramo de ayer —de las 00:00 a
+   * esta hora—, que es la única que responde "¿hoy viene más movido que ayer?".
+   *
+   * Todo sale de `events` con la conexión del inquilino, así que las políticas
+   * de fila ya acotan a su organización.
+   */
+  async estadisticas(client: PoolClient): Promise<{
+    hoy: number;
+    ayer: number;
+    criticosHoy: number;
+    criticosAyer: number;
+    porHora: number[];
+    porTipo: { eventType: string; moduleKey: string; total: number }[];
+    porModulo: { moduleKey: string; total: number }[];
+  }> {
+    const HOY = "occurred_at >= date_trunc('day', now())";
+    const AYER =
+      "occurred_at >= date_trunc('day', now()) - interval '1 day' " +
+      "AND occurred_at < now() - interval '1 day'";
+    const CRITICO = "severity IN ('critical','high')";
+
+    const totales = await client.query<{
+      hoy: string; ayer: string; criticos_hoy: string; criticos_ayer: string;
+    }>(
+      `SELECT count(*) FILTER (WHERE ${HOY})                      AS hoy,
+              count(*) FILTER (WHERE ${AYER})                     AS ayer,
+              count(*) FILTER (WHERE ${HOY} AND ${CRITICO})       AS criticos_hoy,
+              count(*) FILTER (WHERE ${AYER} AND ${CRITICO})      AS criticos_ayer
+         FROM events
+        WHERE occurred_at >= date_trunc('day', now()) - interval '1 day'`,
+    );
+
+    const horas = await client.query<{ hora: string; total: string }>(
+      `SELECT date_part('hour', occurred_at)::int AS hora, count(*) AS total
+         FROM events
+        WHERE ${HOY}
+        GROUP BY 1`,
+    );
+    // Las 24 horas siempre, con cero donde no hubo nada: un gráfico al que le
+    // faltan las horas vacías miente sobre la forma del día.
+    const porHora = Array<number>(24).fill(0);
+    for (const r of horas.rows) porHora[Number(r.hora)] = Number(r.total);
+
+    // El módulo viaja con el tipo para que la pantalla lo pinte con el color
+    // que ese módulo ya tiene en el catálogo, en vez de estrenar una paleta.
+    const tipos = await client.query<{ event_type: string; module_key: string; total: string }>(
+      `SELECT event_type, module_key, count(*) AS total
+         FROM events WHERE ${HOY}
+        GROUP BY 1, 2 ORDER BY 3 DESC`,
+    );
+
+    const modulos = await client.query<{ module_key: string; total: string }>(
+      `SELECT module_key, count(*) AS total
+         FROM events WHERE ${HOY}
+        GROUP BY 1 ORDER BY 2 DESC LIMIT 6`,
+    );
+
+    const t = totales.rows[0];
+    return {
+      hoy: Number(t?.hoy ?? 0),
+      ayer: Number(t?.ayer ?? 0),
+      criticosHoy: Number(t?.criticos_hoy ?? 0),
+      criticosAyer: Number(t?.criticos_ayer ?? 0),
+      porHora,
+      porTipo: tipos.rows.map((r) => ({
+        eventType: r.event_type, moduleKey: r.module_key, total: Number(r.total),
+      })),
+      porModulo: modulos.rows.map((r) => ({ moduleKey: r.module_key, total: Number(r.total) })),
+    };
+  }
+
   /** Rastro de auditoría append-only, en la MISMA transacción que la transición. */
   async writeAudit(
     client: PoolClient,

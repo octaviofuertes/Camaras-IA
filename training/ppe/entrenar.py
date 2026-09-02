@@ -225,6 +225,9 @@ def main() -> int:
             continue
         print(f"{nombre:<18} {m['map50']:>7.3f} {m['precision']:>10.3f} {m['recall']:>8.3f}")
 
+    # Se escribe de cero a propósito: los umbrales que hubiera guardados se
+    # midieron sobre el modelo anterior y no valen para éste. Lo que NO puede
+    # pasar es quedarse ahí, porque sin umbrales el módulo no alerta de nada.
     ficha = MODELOS / "epp.json"
     ficha.write_text(json.dumps({
         "modelo": "epp.pt",
@@ -236,6 +239,26 @@ def main() -> int:
         "metricas": resultado,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\nModelo en {destino}\nMétricas en {ficha}")
+
+    # Y se calibra acá mismo. Entrenar y calibrar eran dos pasos, y el segundo
+    # se olvidaba: el modelo quedaba instalado y mudo, sin nada en pantalla que
+    # dijera por qué no avisaba nunca. Cuesta un minuto sobre horas de
+    # entrenamiento.
+    print("\nEligiendo los umbrales de alerta para el modelo nuevo…")
+    sys.path.insert(0, str(AQUI))
+    try:
+        from evaluar_personas import calibrar_y_guardar
+
+        calibrar_y_guardar(destino, recalcular=True)
+    except Exception as exc:  # noqa: BLE001
+        # No se pierde el entrenamiento por esto, pero se dice fuerte: el
+        # modelo está entrenado y todavía no puede alertar.
+        print(f"\nNo se pudo calibrar: {exc!r}", file=sys.stderr)
+        print("El modelo quedó entrenado pero SIN umbrales, así que el módulo "
+              "no va a alertar. Corré:\n"
+              "    python training/ppe/evaluar_personas.py --calibrar",
+              file=sys.stderr)
+        return 1
     return 0
 
 

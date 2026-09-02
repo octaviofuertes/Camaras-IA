@@ -33,6 +33,16 @@ interface Paged<T> {
 export class EventsController {
   constructor(private readonly events: EventsService) {}
 
+  /**
+   * Los números del panel. Van todos de la base: no hay nada calculado en la
+   * pantalla ni ningún valor de ejemplo.
+   */
+  @Get('stats')
+  @RequirePermissions('events:read')
+  async estadisticas(@Req() req: Request) {
+    return this.events.estadisticas(req.auth as AuthContext);
+  }
+
   /** Cuántas muestras de entrenamiento se acumularon con el feedback humano. */
   @Get('training/stats')
   @RequirePermissions('events:read')

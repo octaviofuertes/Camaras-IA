@@ -1,4 +1,4 @@
-<px-page-header title="Eventos" subtitle="Alertas de asistencia para revisión humana" [showDateRange]="true" />
+<px-page-header title="Eventos" subtitle="Alertas de asistencia para revisión humana" />
 
 <div class="page">
   <!-- Aviso: los eventos son asistencia, no decisiones automáticas -->
@@ -12,14 +12,14 @@
     </span>
   </div>
 
-  <div class="demo-banner" *ngIf="demoMode">
+  <div class="demo-banner" *ngIf="sinApi">
     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
       <path d="M12 3 2 20h20L12 3Z" /><path d="M12 10v4M12 17.5v.5" />
     </svg>
     <span>
-      <strong>Modo demostración</strong> — la API no respondió. Se muestran datos de ejemplo y las
-      acciones de revisión están deshabilitadas. Levantá <code>event-service</code> y guardá un token
-      con <code>localStorage.setItem('px_token', '&lt;token&gt;')</code>.
+      <strong>No se pudieron cargar los eventos</strong> — la API no respondió. La lista está
+      vacía porque no hay nada que mostrar, no porque no haya eventos: los que existan siguen
+      guardados. Levantá <code>event-service</code> y volvé a entrar.
     </span>
   </div>
 
@@ -135,7 +135,7 @@
                 <button
                   class="btn sm"
                   *ngIf="e.status === 'new'"
-                  [disabled]="demoMode"
+                  [disabled]="sinApi"
                   (click)="acknowledge(e)"
                 >
                   Reconocer
@@ -143,12 +143,12 @@
                 <ng-container *ngIf="e.status === 'acknowledged'">
                   <button
                     class="btn sm ok"
-                    [disabled]="demoMode"
+                    [disabled]="sinApi"
                     (click)="esCaida(e) ? abrirConfirmacion(e) : resolve(e, 'confirmed')"
                   >
                     {{ esCaida(e) ? 'Fue una caída real' : 'Confirmar' }}
                   </button>
-                  <button class="btn sm" [disabled]="demoMode" (click)="resolve(e, 'false_positive')">
+                  <button class="btn sm" [disabled]="sinApi" (click)="resolve(e, 'false_positive')">
                     Falso positivo
                   </button>
                 </ng-container>
@@ -196,7 +196,7 @@
             <!-- Quién es. Se calcula ACÁ, cuando alguien lo pide: el sistema no
                  reconoce caras en cada alerta ni guarda el nombre en la base. -->
             <div class="reconocer" *ngIf="fotoDelEvento">
-              <button class="btn sm" (click)="reconocerPersona()" [disabled]="reconociendo || demoMode">
+              <button class="btn sm" (click)="reconocerPersona()" [disabled]="reconociendo || sinApi">
                 <span class="spinner" *ngIf="reconociendo"></span>
                 {{ reconociendo ? 'Consultando…' : 'Reconocer persona' }}
               </button>

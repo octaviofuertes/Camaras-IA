@@ -15,7 +15,7 @@ export const AI_MODULES: AiModule[] = [
     name: 'Posible robo / Actividad sospechosa',
     description: 'Señala comportamientos atípicos para revisión humana',
     category: 'security',
-    color: '#ef4444',
+    color: '#e0323f',
     icon: 'run',
   },
   {
@@ -24,7 +24,7 @@ export const AI_MODULES: AiModule[] = [
     name: 'Ingreso de personas',
     description: 'Reconoce quién entra, registra a qué hora y alerta si no tiene acceso',
     category: 'security',
-    color: '#0ea5e9',
+    color: '#0284c7',
     icon: 'people',
   },
   {
@@ -33,7 +33,7 @@ export const AI_MODULES: AiModule[] = [
     name: 'Registro de caídas',
     description: 'Detecta posibles caídas de personas',
     category: 'security',
-    color: '#8b5cf6',
+    color: '#7c4ddb',
     icon: 'fall',
   },
   {
@@ -42,8 +42,17 @@ export const AI_MODULES: AiModule[] = [
     name: 'Elementos de protección (EPP)',
     description: 'Avisa cuando falta el casco, el chaleco, las antiparras o los guantes',
     category: 'security',
-    color: '#f59e0b',
+    color: '#d97706',
     icon: 'helmet',
+  },
+  {
+    id: 'm-person-detection',
+    moduleKey: 'person-detection',
+    name: 'Detección de personas',
+    description: 'Avisa cuando aparece alguien en el cuadro',
+    category: 'security',
+    color: '#0b5cf6',
+    icon: 'people',
   },
   {
     id: 'm-people-count',
@@ -51,7 +60,7 @@ export const AI_MODULES: AiModule[] = [
     name: 'Conteo de personas',
     description: 'Cuenta y analiza el flujo de personas',
     category: 'hr',
-    color: '#3b82f6',
+    color: '#0b5cf6',
     icon: 'people',
   },
   {
@@ -60,7 +69,7 @@ export const AI_MODULES: AiModule[] = [
     name: 'Zona restringida',
     description: 'Ingreso o permanencia en zonas delimitadas',
     category: 'security',
-    color: '#22c55e',
+    color: '#12a05f',
     icon: 'zone',
   },
   {
@@ -69,7 +78,7 @@ export const AI_MODULES: AiModule[] = [
     name: 'Objetos abandonados',
     description: 'Objetos que quedan sin supervisión',
     category: 'security',
-    color: '#f59e0b',
+    color: '#d97706',
     icon: 'bag',
   },
   {
@@ -78,7 +87,7 @@ export const AI_MODULES: AiModule[] = [
     name: 'Detección de humo / fuego',
     description: 'Indicios de humo o fuego en el área',
     category: 'security',
-    color: '#14b8a6',
+    color: '#0d9488',
     icon: 'fire',
   },
   {
@@ -87,7 +96,7 @@ export const AI_MODULES: AiModule[] = [
     name: 'Detección de vehículos',
     description: 'Detecta y clasifica vehículos',
     category: 'logistics',
-    color: '#8b5cf6',
+    color: '#7c4ddb',
     icon: 'truck',
   },
   {
@@ -96,7 +105,7 @@ export const AI_MODULES: AiModule[] = [
     name: 'Conteo de mercancías / pallets',
     description: 'Cuenta pallets, cajas u otros objetos',
     category: 'logistics',
-    color: '#3b82f6',
+    color: '#0b5cf6',
     icon: 'box',
   },
   {
@@ -105,7 +114,7 @@ export const AI_MODULES: AiModule[] = [
     name: 'Permanencia excesiva',
     description: 'Permanencia mayor a la esperada en un sector',
     category: 'hr',
-    color: '#22c55e',
+    color: '#12a05f',
     icon: 'clock',
   },
   {
@@ -114,7 +123,7 @@ export const AI_MODULES: AiModule[] = [
     name: 'Merodeo',
     description: 'Permanencia prolongada sin actividad clara',
     category: 'security',
-    color: '#a855f7',
+    color: '#9333ea',
     icon: 'people',
   },
   {
@@ -123,7 +132,7 @@ export const AI_MODULES: AiModule[] = [
     name: 'Longitud de filas',
     description: 'Mide filas y tiempos de espera',
     category: 'retail',
-    color: '#0ea5e9',
+    color: '#0284c7',
     icon: 'people',
   },
   {
@@ -132,7 +141,7 @@ export const AI_MODULES: AiModule[] = [
     name: 'Cercanía a maquinaria',
     description: 'Personas próximas a equipos en operación',
     category: 'industry',
-    color: '#ef4444',
+    color: '#e0323f',
     icon: 'zone',
   },
   {
@@ -141,7 +150,7 @@ export const AI_MODULES: AiModule[] = [
     name: 'Zonas sin actividad',
     description: 'Sectores sin movimiento durante el turno',
     category: 'productivity',
-    color: '#64748b',
+    color: '#5a6b85',
     icon: 'clock',
   },
 ];

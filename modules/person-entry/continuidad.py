@@ -260,6 +260,35 @@ class IdentidadSostenida:
             t: (p, v) for t, (p, v) in self._por_track.items() if ahora - v <= gracia * 4
         }
 
+    def conservar_solo(self, vigentes: set[str]) -> int:
+        """Olvida a quien ya no está dado de alta. Devuelve cuántos se olvidaron.
+
+        ES LA CONTRACARA DE LA BAJA
+        ---------------------------
+        Dar de baja a una persona borra su biometría, y tiene que borrar
+        también todo lo que se dedujo de ella. Sin esto no pasaba: la identidad
+        anclada a un seguimiento vive en memoria de este proceso, así que a
+        alguien que se borraba de la base mientras estaba frente a la cámara se
+        le seguía mostrando el nombre en pantalla —y acreditándole tiempo— hasta
+        que se fuera del cuadro o se reiniciara el worker.
+
+        Visto de verdad: la pantalla decía "Franco Coria" y al mismo tiempo no
+        sabía si tenía acceso, porque el nombre salía del anclaje y el acceso de
+        la galería, que ya no lo tenía. Una baja que deja el nombre dando vueltas
+        no es una baja.
+
+        Pasa igual, y por el mismo camino, cuando a alguien se le borran todas
+        las fotos: deja de estar en la galería y no se lo puede volver a
+        reconocer, así que tampoco corresponde sostener su identidad.
+        """
+        sobran = [pid for pid in self._anclajes if pid not in vigentes]
+        for pid in sobran:
+            del self._anclajes[pid]
+        self._por_track = {
+            t: (pid, v) for t, (pid, v) in self._por_track.items() if pid in vigentes
+        }
+        return len(sobran)
+
     # ── diagnóstico ─────────────────────────────────────────────────
     def estado(self) -> dict:
         return {

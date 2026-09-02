@@ -208,6 +208,19 @@ class CameraSource:
             ts, seq = self._latest_meta
             return self._latest_raw.copy(), ts, seq
 
+    def frame_at(self, center_ts: float) -> BufferedFrame | None:
+        """El frame del buffer más cercano a ese instante — la foto del evento.
+
+        No se usa `latest_jpeg()`: entre que la alerta se detecta y llega el
+        pedido pasan unas décimas, y en ese rato la persona sin casco puede
+        haber salido del cuadro. La foto tiene que ser del momento del que habla
+        la alerta, no del momento en que alguien la fue a buscar.
+        """
+        with self._lock:
+            if not self._buf:
+                return None
+            return min(self._buf, key=lambda f: abs(f.ts - center_ts))
+
     def window(self, center_ts: float, pre: float, post: float) -> list[BufferedFrame]:
         """Frames del buffer en [center-pre, center+post] — el clip del evento."""
         with self._lock:

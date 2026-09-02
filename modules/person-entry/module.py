@@ -30,6 +30,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import math
 import sys
 import threading
 import time
@@ -50,8 +51,7 @@ from percepta_contracts import (
 )
 
 sys.path.insert(0, str(Path(__file__).parent))
-from accesos import RegistroDePasos  # noqa: E402
-from siluetas import siluetas_de  # noqa: E402
+from accesos import Permanencia, RegistroDePasos  # noqa: E402
 from rostros import (  # noqa: E402
     ConfigRostros,
     Identificador,
@@ -89,6 +89,19 @@ class PersonIdentificationModule(PerceptaModule):
         # en memoria y se pisa en cada frame: es el presente, no un registro.
         self._en_vivo: list[dict] = []
         self._en_vivo_ts: float = 0.0
+        # La mejor cara que se le vio a cada cuerpo TODAVÍA sin identificar,
+        # para que el operador pueda ponerle un nombre desde la pantalla sin
+        # esperar a que la cámara le agarre otro buen ángulo.
+        #
+        # Es el mismo trato que la alerta "¿reconocés a esta persona?": vive en
+        # memoria, se pisa cuando aparece una foto mejor, y se borra en cuanto
+        # esa persona sale del cuadro o deja de ser un desconocido. De quien no
+        # está dado de alta no queda nada en ninguna parte.
+        self._para_nombrar: dict[int, dict] = {}
+        # Desde cuándo está en el cuadro cada cuerpo. Es lo que permite
+        # cronometrar a alguien ANTES de saber quién es —y a quien nunca se
+        # sepa—. Ver `Permanencia` en accesos.py.
+        self._permanencia = Permanencia()
         # persona -> si tiene acceso. Se refresca con la galería.
         self._acceso_de: dict[str, bool] = {}
         self._alertas_acceso = 0
@@ -129,17 +142,18 @@ class PersonIdentificationModule(PerceptaModule):
                 except (TypeError, ValueError):
                     log.warning("config: %s inválido, se usa el valor por omisión", campo)
         self._sostenida = IdentidadSostenida(cfg_cont)
+        # El mismo parpadeo que sostiene la identidad sostiene el cronómetro:
+        # si el seguidor pierde a alguien un instante, no es que se haya ido.
+        self._permanencia = Permanencia(cfg_cont.trackGraciaSegundos)
 
-        # Con el modelo de segmentación cada persona viene además con su
-        # contorno, que es lo que permite marcarla en pantalla sin pintar
-        # también la pared de atrás. Cuesta alrededor del doble de CPU por
-        # frame, así que se puede volver al de detección con `personWeights`.
-        pesos = str(ctx.config.get("personWeights", "yolov8n-seg.pt"))
+        # Detección, no segmentación. La pantalla marca a cada persona con un
+        # recuadro sobre la CARA —que es donde está su identidad— y para eso el
+        # contorno del cuerpo no aporta nada. Se usaba el modelo `-seg`, que
+        # cuesta alrededor del doble de CPU por frame, para pintar una silueta
+        # que ya no se dibuja.
+        pesos = str(ctx.config.get("personWeights", "yolov8n.pt"))
         self._yolo = YOLO(pesos)
         self._yolo.to("cpu" if ctx.device.startswith("cpu") else ctx.device)
-        self._hay_siluetas = "-seg" in pesos
-        if not self._hay_siluetas:
-            log.info("sin siluetas: %s no segmenta, se marca con la caja", pesos)
 
         # Sólo detección y reconocimiento. `buffalo_l` trae además estimación de
         # edad, género y puntos faciales: cuesta tiempo de CPU y produce
@@ -149,8 +163,23 @@ class PersonIdentificationModule(PerceptaModule):
             allowed_modules=["detection", "recognition"],
             providers=["CPUExecutionProvider"],
         )
-        det = int(ctx.config.get("detSize", 640))
-        self._app.prepare(ctx_id=-1, det_size=(det, det))
+        # `detSize` es el LADO LARGO, no un cuadrado. Ver `_ajustar_detector`.
+        self._det_lado = int(ctx.config.get("detSize", 640))
+        # Resolución con la que se buscan los CUERPOS. Es distinta de la de las
+        # caras: una cara chica hay que verla con detalle para reconocerla, un
+        # cuerpo se ve igual de bien con menos.
+        #
+        # Estaba sin fijar, así que ultralytics usaba 640 y cada cuadro costaba
+        # 265 ms —medido en esta máquina, con la CPU libre—. A 512 baja a 157,
+        # un 41% menos, y el cuerpo se sigue detectando igual: lo que se pierde
+        # a esta resolución son objetos chicos, y una persona no lo es.
+        #
+        # Importa porque de acá sale la velocidad con la que los recuadros
+        # siguen a la gente en pantalla: con el pipeline a 1 cuadro por segundo
+        # y el video a 18, las cajas quedaban flotando en el aire.
+        self._cuerpo_lado = int(ctx.config.get("cuerpoDetSize", 512))
+        self._det_forma: tuple[int, int] | None = None
+        self._app.prepare(ctx_id=-1, det_size=(self._det_lado, self._det_lado))
 
         # Estimador de pose, POR SEPARADO y no dentro del pipeline de arriba.
         #
@@ -331,6 +360,17 @@ class PersonIdentificationModule(PerceptaModule):
             # no tiene nada que hacer.
             firma = self._firma_galeria(personas)
             self._ident.galeria.actualizar(personas)
+            # Y con la galería, lo que se dedujo de ella. Una baja tiene que
+            # llevarse el nombre que quedó anclado a un seguimiento en curso:
+            # si no, a quien se borra mientras está frente a la cámara se le
+            # sigue mostrando el nombre hasta que se vaya del cuadro.
+            if self._sostenida is not None:
+                olvidados = self._sostenida.conservar_solo({p.id for p in personas})
+                if olvidados:
+                    log.info(
+                        "%d identidad(es) sostenida(s) se olvidaron: ya no están dadas de alta",
+                        olvidados,
+                    )
             if firma != self._firma_actual:
                 if self._firma_actual is not None:
                     # Sólo se olvida a quien ya ES alguien. Olvidar a todos haría
@@ -362,29 +402,27 @@ class PersonIdentificationModule(PerceptaModule):
 
         t0 = time.perf_counter()
         h, w = frame.image.shape[:2]
+        self._ajustar_detector(h, w)
 
         # 1. Cuerpos con identidad de seguimiento. Es lo que permite sostener
         #    quién es alguien cuando se da vuelta.
         cuerpos: list[tuple[int, tuple[float, float, float, float]]] = []
-        siluetas: dict[int, Any] = {}
         for r in self._yolo.track(
             frame.image, classes=[0], conf=0.35, persist=True,
             tracker="bytetrack.yaml", verbose=False, device="cpu",
+            imgsz=self._cuerpo_lado,
         ):
             cajas = getattr(r, "boxes", None)
             if cajas is None:
                 continue
-            ids_del_resultado: list[int] = []
             for b in cajas:
                 tid = int(b.id.item()) if getattr(b, "id", None) is not None else -1
-                ids_del_resultado.append(tid)
                 if tid < 0:
                     continue
                 x1, y1, x2, y2 = (float(v) for v in b.xyxy[0].tolist())
                 cuerpos.append((tid, (x1 / w, y1 / h, (x2 - x1) / w, (y2 - y1) / h)))
-            # Los contornos vienen en el mismo orden que las cajas, incluidas
-            # las que no tienen track: por eso se pasa la lista completa.
-            siluetas.update(siluetas_de(r, ids_del_resultado))
+
+        self._permanencia.ver([t for t, _ in cuerpos], frame.captured_at)
 
         # 2. Caras visibles en este frame.
         rostros: list[Rostro] = []
@@ -416,14 +454,34 @@ class PersonIdentificationModule(PerceptaModule):
         # partir una visita en pedazos, y la vista en vivo no puede tolerar
         # nada. Son dos preguntas distintas y necesitan dos respuestas.
         en_cuadro: dict[str, tuple[str, bool]] = {}
-        # Quién es cada cuerpo que se ve. Se llena en los dos caminos —por cara
-        # y por continuidad— porque la pantalla tiene que poder marcar también
-        # a quien está de espaldas, que es la mitad de la jornada.
-        quien_es: dict[int, tuple[str, str]] = {}
+        # Quién es cada cuerpo que se ve, y por qué vía se supo. Se llena en los
+        # dos caminos —por cara y por continuidad— porque la pantalla tiene que
+        # poder marcar también a quien está de espaldas, que es la mitad de la
+        # jornada.
+        quien_es: dict[int, tuple[str, str, str]] = {}
+        # Dónde está exactamente la cara de cada cuerpo. Es lo que la pantalla
+        # dibuja: un recuadro sobre la cara y no sobre el cuerpo entero, que
+        # incluye la pared, el escritorio y medio compañero de al lado.
+        caras: dict[int, tuple[float, float, float, float]] = {}
+        # Por qué no se reconoció a quien no se reconoció. Viaja hasta la
+        # pantalla: "sin identificar" a secas deja al operador sin saber si el
+        # módulo está roto, si la persona está de espaldas o si está tan lejos
+        # que no hay nada que se pueda hacer desde el software.
+        motivos: dict[int, str] = {}
 
         # 3. Las caras reconocidas ANCLAN su identidad al cuerpo que las lleva.
         for res in identificaciones:
             idx = asociar_a_cuerpo(res.rostro, cajas_cuerpo)
+            if idx is not None:
+                caras[cuerpos[idx][0]] = (
+                    res.rostro.x, res.rostro.y, res.rostro.w, res.rostro.h,
+                )
+                if not res.persona_id:
+                    # Todavía no es nadie: se guarda su mejor foto para que el
+                    # operador pueda darle un nombre desde la pantalla, y se
+                    # anota por qué no se lo reconoció.
+                    motivos[cuerpos[idx][0]] = res.motivo
+                    self._recordar_para_nombrar(frame.image, cuerpos[idx][0], res.rostro)
 
             if res.persona_id and idx is not None:
                 tid, caja = cuerpos[idx]
@@ -438,7 +496,7 @@ class PersonIdentificationModule(PerceptaModule):
                 anclados.add(tid)
                 self._identificados += 1
                 en_cuadro[res.persona_id] = (res.nombre or "", True)
-                quien_es[tid] = (res.persona_id, res.nombre or "")
+                quien_es[tid] = (res.persona_id, res.nombre or "", "rostro")
                 detecciones += self._registrar_paso(
                     res.persona_id, res.nombre or "", caja,
                     ahora=frame.captured_at, parecido=res.parecido, por_rostro=True,
@@ -494,7 +552,7 @@ class PersonIdentificationModule(PerceptaModule):
             )
             if r.persona_id:
                 self._identificados += 1
-                quien_es[tid] = (r.persona_id, r.nombre or "")
+                quien_es[tid] = (r.persona_id, r.nombre or "", r.via)
                 if r.persona_id not in en_cuadro:
                     en_cuadro[r.persona_id] = (r.nombre or "", False)
                 detecciones += self._registrar_paso(
@@ -517,12 +575,13 @@ class PersonIdentificationModule(PerceptaModule):
         for paso in self._pasos.cerrar_vencidos(frame.captured_at):
             detecciones.append(self._a_deteccion_paso(paso))
 
-        # Lo que va a dibujar la pantalla: cada cuerpo con su contorno y, si se
-        # sabe, quién es. Se rehace entero en cada frame en vez de acumularse:
-        # una silueta que sobrevive al frame en el que se vio es una marca verde
-        # pegada a una pared vacía.
-        self._en_vivo = self._armar_en_vivo(cuerpos, siluetas, quien_es, frame.captured_at)
+        # Lo que va a dibujar la pantalla: cada persona con el recuadro de su
+        # cara y, si se sabe, quién es. Se rehace entero en cada frame en vez de
+        # acumularse: un recuadro que sobrevive al frame en el que se vio es una
+        # marca verde pegada a una pared vacía.
+        self._en_vivo = self._armar_en_vivo(cuerpos, caras, quien_es, motivos, frame.captured_at)
         self._en_vivo_ts = frame.captured_at
+        self._olvidar_fotos_que_ya_no_hacen_falta(quien_es, {t for t, _ in cuerpos})
 
         # Y en cada frame, quién está en el cuadro ahora. Va SIEMPRE, aunque no
         # haya nadie: es lo que hace que la lista se vacíe apenas se van, en vez
@@ -547,6 +606,46 @@ class PersonIdentificationModule(PerceptaModule):
         ))
 
         return InferenceResult(detections=detecciones, inference_ms=elapsed_ms)
+
+    def _ajustar_detector(self, alto: int, ancho: int) -> None:
+        """Le da al detector de caras la forma del video, no un cuadrado.
+
+        El detector recibe la imagen encajada en un lienzo del tamaño que se le
+        haya pedido, rellenando con negro lo que sobra. Pidiéndole 640×640 para
+        un video 16:9, el 44% de lo que procesa es relleno: la imagen entra
+        como 640×360 y las 280 filas de abajo son negras. Se paga tiempo de CPU
+        por mirar nada.
+
+        Ajustando el lienzo a la proporción del video —640×384 para 16:9— la
+        imagen entra EXACTAMENTE igual de grande: la escala la fija el lado
+        largo, que no cambia. Se detectan las mismas caras, del mismo tamaño
+        mínimo, con la misma confianza; lo único que desaparece es el relleno.
+        Medido sobre este modelo: 319 ms el cuadrado, 196 ms la proporción real.
+
+        Se hace acá y no al cargar porque la proporción es del video, y el
+        módulo no la conoce hasta que llega el primer cuadro. Se recalcula sólo
+        cuando cambia.
+        """
+        if self._app is None or self._det_forma == (alto, ancho):
+            return
+        # Se redondea PARA ARRIBA al múltiplo de 32 que pide la red. Para abajo
+        # el lienzo quedaría más chico que la imagen encajada y el detector la
+        # achicaría un poco más, que es justo lo que no se quiere: la escala
+        # tiene que quedar igual que con el cuadrado. Medido, además, 640×352
+        # sale más lento que 640×384 pese a ser más chico.
+        lado = self._det_lado
+        if ancho >= alto:
+            w = lado
+            h = max(32, math.ceil(lado * alto / ancho / 32) * 32)
+        else:
+            h = lado
+            w = max(32, math.ceil(lado * ancho / alto / 32) * 32)
+        modelo = getattr(self._app, "det_model", None)
+        if modelo is not None:
+            # (ancho, alto): es el orden que espera el detector.
+            modelo.input_size = (w, h)
+        self._det_forma = (alto, ancho)
+        log.info("detector de caras ajustado a %dx%d para un video de %dx%d", w, h, ancho, alto)
 
     def _medir_pose_de_candidatas(self, imagen, rostros: list[Rostro], crudos: list) -> None:
         """Estima la pose sólo de las caras que podrían generar una pregunta.
@@ -701,26 +800,52 @@ class PersonIdentificationModule(PerceptaModule):
     def _armar_en_vivo(
         self,
         cuerpos: list[tuple[int, tuple[float, float, float, float]]],
-        siluetas: dict[int, Any],
-        quien_es: dict[int, tuple[str, str]],
+        caras: dict[int, tuple[float, float, float, float]],
+        quien_es: dict[int, tuple[str, str, str]],
+        motivos: dict[int, str],
         ahora: float,
     ) -> list[dict]:
         """Lo que se ve en la cámara ahora mismo, listo para dibujar.
 
         Va todo el mundo, tenga nombre o no: alguien sin identificar igual está
-        ahí y la pantalla tiene que poder mostrarlo. Lo que cambia es que sin
-        identidad no hay acceso que informar ni hora de llegada que contar.
+        ahí y la pantalla tiene que poder mostrarlo —y dejar que le pongan un
+        nombre—. Lo que cambia es que sin identidad no hay acceso que informar
+        ni hora de llegada que contar.
         """
         salida: list[dict] = []
         for tid, caja in cuerpos:
-            persona_id, nombre = quien_es.get(tid, ("", ""))
-            desde = self._pasos.desde_de(persona_id) if persona_id else None
+            persona_id, nombre, via = quien_es.get(tid, ("", "", "ninguna"))
+            motivo = motivos.get(tid, "")
             tiene_acceso: bool | None = None
-            if persona_id and self._ident is not None:
-                p = self._ident.galeria.por_id(persona_id)
-                if p is not None:
-                    tiene_acceso = bool(p.tiene_acceso)
-            sil = siluetas.get(tid)
+            if persona_id:
+                ficha = self._ident.galeria.por_id(persona_id) if self._ident else None
+                if ficha is None:
+                    # Hay un identificador que la galería ya no conoce: se dio
+                    # de baja a esa persona, o se le borraron todas las fotos.
+                    # No se muestra el nombre. Sostenerlo dejaría la pantalla
+                    # diciendo quién es alguien y a la vez que no sabe si puede
+                    # estar ahí, que es contradecirse a la vista de todos.
+                    persona_id, nombre, via = "", "", "ninguna"
+                    motivo = "esa persona ya no está dada de alta"
+                else:
+                    tiene_acceso = bool(ficha.tiene_acceso)
+            desde = self._pasos.desde_de(persona_id) if persona_id else None
+
+            # El recuadro va sobre la cara. Cuando en este frame no se le ve
+            # —está de espaldas, o mirando su pantalla— se marca dónde está la
+            # cabeza y se dice que es una estimación, para que la pantalla lo
+            # dibuje distinto: un recuadro punteado sobre una nuca es honesto,
+            # uno lleno diría que se le está viendo la cara.
+            cara = caras.get(tid)
+            estimada = cara is None
+            if cara is None:
+                cara = cabeza_estimada(caja)
+
+            # Acá va sólo SI HAY foto, no la foto. La imagen sale del módulo
+            # cuando alguien la pide para nombrar a esa persona —ver
+            # `en_vivo`—, y no en cada cuadro para todo el que mire la pantalla.
+            hay_foto = not persona_id and tid in self._para_nombrar
+
             salida.append({
                 "trackId": tid,
                 "personId": persona_id,
@@ -728,19 +853,119 @@ class PersonIdentificationModule(PerceptaModule):
                 # None y False no son lo mismo: None es "no sé quién es", False
                 # es "sé quién es y no tendría que estar acá".
                 "tieneAcceso": tiene_acceso,
-                # Hace cuánto está, en segundos. La pantalla lo redacta.
-                "haceSegundos": round(ahora - desde, 1) if desde else None,
+                # Por qué vía se sabe quién es. La pantalla lo muestra: decir
+                # "Juan" cuando en realidad se dedujo por el puesto y no por
+                # haberle visto la cara es esconder de dónde sale el nombre.
+                "via": via,
+                # Los dos instantes en que empezó a contar, en epoch. Van
+                # como marcas de tiempo y no como "hace tantos segundos" para
+                # que el cronómetro de la pantalla corra con el reloj del
+                # navegador: un número calculado acá llega tan seguido como
+                # cuadros procese la cámara —dos por segundo—, y un contador
+                # que salta de a medio segundo no es un contador.
+                #
+                # `desdeTs` es la visita del registro de accesos: tolera que la
+                # persona se tape o salga un momento sin volver a arrancar.
+                "desdeTs": round(desde, 3) if desde else None,
+                # `enCuadroDesdeTs` es este cuerpo en el cuadro, se sepa o no
+                # quién es. Es lo único que hay para cronometrar a un
+                # desconocido, y es exacto desde el primer frame en que aparece.
+                "enCuadroDesdeTs": round(self._permanencia.desde_de(tid, ahora), 3),
                 "bbox": [round(v, 4) for v in caja],
-                "silueta": sil.como_lista() if sil is not None else None,
+                "rostro": [round(v, 4) for v in cara],
+                "rostroEstimado": estimada,
+                # Si se le puede poner un nombre ahora mismo. La foto en sí
+                # no viaja hasta que alguien la pide.
+                "hayFoto": hay_foto,
+                # Por qué no se lo reconoció, cuando no se lo reconoció.
+                # Vacío si no se le vio la cara en este frame: ahí el motivo es
+                # justamente ése y la pantalla ya lo sabe por `rostroEstimado`.
+                "motivo": "" if persona_id else motivo,
             })
         return salida
 
-    def en_vivo(self) -> dict:
-        """Lo último que vio la cámara. Lo consume la pantalla del dashboard."""
+    def _recordar_para_nombrar(self, imagen: np.ndarray, track_id: int, r: Rostro) -> None:
+        """Guarda la mejor foto de un cuerpo sin identificar, para poder nombrarlo.
+
+        Mismo listón que para preguntar en la cola de revisión, y por las mismas
+        dos razones: el recorte tiene que poder reconocerlo una persona, y ese
+        vector va a ser la PRIMERA plantilla de quien se dé de alta. Una nuca no
+        sirve para ninguna de las dos cosas.
+
+        Se queda con la mejor y no con la última: la cara mejora cuando la
+        persona levanta la vista, y sería una lástima pisarla con el frame
+        siguiente, en el que ya volvió a mirar su pantalla.
+        """
+        if self._ident is None:
+            return
+        cfg = self._ident.cfg
+        if r.calidad < cfg.askMinScore or r.h < cfg.askMinFaceSize:
+            return
+        if r.yaw is None or r.pitch is None:
+            return
+        if abs(r.yaw) > cfg.askMaxYaw or abs(r.pitch) > cfg.askMaxPitch:
+            return
+
+        guardada = self._para_nombrar.get(track_id)
+        if guardada is not None and guardada["calidad"] >= r.calidad:
+            return
+        recorte = self._recorte(imagen, r)
+        if not recorte:
+            return
+        self._para_nombrar[track_id] = {
+            "foto": recorte,
+            "vector": _empaquetar(r.vector),
+            "calidad": float(r.calidad),
+        }
+
+    def _olvidar_fotos_que_ya_no_hacen_falta(
+        self, quien_es: dict[int, tuple[str, str, str]], presentes: set[int]
+    ) -> None:
+        """Borra las caras de quien se fue del cuadro o ya dejó de ser un desconocido.
+
+        Es la contracara de guardarlas: existen mientras sirven para contestar
+        "¿quién es este?" y desaparecen en cuanto la pregunta deja de tener
+        sentido. Sin esto, el módulo iría juntando las caras de todos los que
+        pasaron en el día, que es exactamente lo que no hace.
+        """
+        self._para_nombrar = {
+            t: v for t, v in self._para_nombrar.items()
+            if t in presentes and not quien_es.get(t, ("", "", ""))[0]
+        }
+
+    def en_vivo(self, nombrar: int | None = None) -> dict:
+        """Lo último que vio la cámara. Lo consume la pantalla del dashboard.
+
+        La cara de un desconocido viaja SÓLO si se pide con `nombrar`, y sólo
+        la de ese cuerpo. Mandarla siempre significaría que la imagen de alguien
+        que no está dado de alta sale del proceso varias veces por segundo, para
+        todo el que tenga la pantalla abierta, la mire o no. Acá sale cuando un
+        operador tocó a esa persona para ponerle un nombre, que es el único
+        momento en que hace falta —el mismo criterio que usa el reconocimiento
+        a pedido desde una alerta—.
+        """
+        personas = self._en_vivo
+        if nombrar is not None:
+            guardada = self._para_nombrar.get(nombrar)
+            if guardada is not None:
+                personas = [
+                    ({**p, "foto": guardada["foto"], "vector": guardada["vector"]}
+                     if p["trackId"] == nombrar else p)
+                    for p in personas
+                ]
         return {
             "ts": self._en_vivo_ts,
-            "siluetas": bool(getattr(self, "_hay_siluetas", False)),
-            "personas": self._en_vivo,
+            # El reloj del worker AHORA, al contestar, no cuando se procesó el
+            # cuadro. Es lo que deja que el cronómetro de la pantalla sea
+            # exacto sin comparar relojes de dos máquinas: la resta
+            # `ahora - desdeTs` se hace entera acá, con un solo reloj, y el
+            # navegador nada más la sigue contando.
+            #
+            # Con `ts` no alcanzaba: entre que se captura un cuadro y se
+            # termina de analizarlo pasan segundos —los modelos corren en CPU—,
+            # y contar desde ahí daba un cronómetro atrasado por ese tanto.
+            "ahora": time.time(),
+            "personas": personas,
         }
 
     def health(self) -> dict[str, Any]:
@@ -762,6 +987,8 @@ class PersonIdentificationModule(PerceptaModule):
             "minFaceSize": self._ident.cfg.minFaceSize if self._ident else None,
             "desconocidosEnMemoria": self._ident.desconocidos.recordados if self._ident else 0,
             "cuerposYaPreguntados": len(self._preguntados),
+            "carasListasParaNombrar": len(self._para_nombrar),
+            "cuerposCronometrados": len(self._permanencia),
             "alertasDeAccesoDenegado": self._alertas_acceso,
             **self._pasos.estado(),
             # Lo que sostiene la identidad cuando la cara no se ve: a cuánta
@@ -773,6 +1000,27 @@ class PersonIdentificationModule(PerceptaModule):
             ),
             "loadedAt": self._loaded_at or None,
         }
+
+
+def cabeza_estimada(
+    caja: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    """Dónde está la cabeza de un cuerpo al que no se le ve la cara.
+
+    No es una detección: es la parte de arriba del cuerpo, que es donde la
+    cabeza está siempre. Se usa para poder marcar igual a quien está de
+    espaldas —la mitad de la jornada en una oficina— sin dibujarle encima el
+    cuerpo entero. La pantalla lo distingue de una cara detectada de verdad.
+
+    Las proporciones salen del cuerpo y no de un tamaño fijo: alguien cerca de
+    la cámara tiene una caja grande y una cabeza grande.
+    """
+    x, y, w, h = caja
+    alto = h * 0.24
+    # Una cara es más alta que ancha. El tope por el ancho del cuerpo evita que
+    # un cuerpo recortado por el borde del cuadro produzca una cabeza enorme.
+    ancho = min(w * 0.6, alto * 0.8)
+    return (x + w / 2 - ancho / 2, y + h * 0.02, ancho, alto)
 
 
 def _empaquetar(vector: list[float]) -> str:

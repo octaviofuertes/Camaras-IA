@@ -26,6 +26,8 @@ import requests
 
 from percepta_contracts import Frame, ModuleContext, PerceptaModule
 
+from ai_worker import hilos as _hilos
+
 log = logging.getLogger("pipeline")
 
 
@@ -173,14 +175,30 @@ class CameraPipeline(threading.Thread):
     def _por_tipo(self, mod_cfg: dict, alertas: list) -> list[tuple[dict, list]]:
         """Agrupa las detecciones por el tipo de evento que le corresponde a cada una.
 
-        El manifiesto declara los tipos que el módulo emite. Una detección cuya
-        clase coincide con uno de ellos va con ESE tipo y ESA severidad; el
-        resto queda en el tipo principal, que es como se comportaba antes.
+        El manifiesto declara los tipos que el módulo emite. Una detección va
+        con ESE tipo y ESA severidad; el resto queda en el tipo principal.
+
+        De qué tipo es cada detección lo dice el módulo en `eventType`, y sólo
+        si no lo dice se prueba con el nombre de la clase. Al revés no
+        alcanzaba: el nombre de la clase es el del MODELO, no el del evento, y
+        coinciden por casualidad —'person.unknown' se llama igual en los dos—.
+        En el módulo de EPP no coincidían: sus clases son 'NO-Hardhat',
+        'NO-Safety Vest', 'NO-Goggles' y 'NO-Gloves', ninguna aparece en la
+        lista de tipos, así que las cuatro caían en el tipo principal y TODAS
+        las faltas se guardaban como 'ppe.helmet_missing'. Al operador le
+        llegaba "le falta el casco" cuando lo que faltaba era el chaleco, con
+        la severidad del casco además. 276 eventos así antes de encontrarlo.
         """
         tipos = {t["type"]: t for t in (mod_cfg.get("eventTypes") or [])}
         grupos: dict[str, list] = {}
         for d in alertas:
-            propio = d.class_label if d.class_label in tipos else mod_cfg["eventType"]
+            declarado = d.attributes.get("eventType")
+            if declarado in tipos:
+                propio = declarado
+            elif d.class_label in tipos:
+                propio = d.class_label
+            else:
+                propio = mod_cfg["eventType"]
             grupos.setdefault(propio, []).append(d)
 
         salida = []
@@ -475,6 +493,13 @@ class CameraPipeline(threading.Thread):
                         log.exception("[%s] %s falló al recibir el contexto", self.a.camera_id, key)
 
                 try:
+                    # Ultralytics sube los hilos de torch a `cpu_count()-1` la
+                    # primera vez que usa cada camino de inferencia, y con un
+                    # pipeline por cámara eso pide 14 hilos sobre 8 núcleos.
+                    # Medido: con 4 el módulo tarda 154 ms por cuadro y con 7
+                    # tarda medio segundo. Esto es una lectura salvo la primera
+                    # vez de cada camino; ver ai_worker/hilos.py.
+                    _hilos.reafirmar()
                     res = inst.infer(frame)
                 except Exception as exc:  # un módulo que falla no frena a los demás
                     self.last_error = f"{key}: {exc!r}"

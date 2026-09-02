@@ -174,3 +174,51 @@ class RegistroDePasos:
             "pasosEnCurso": len(self._abiertos),
             "sinAccesoAdentro": sum(1 for p in self._abiertos.values() if not p.tenia_acceso),
         }
+
+
+class Permanencia:
+    """Desde cuándo está en el cuadro cada cuerpo, sepa o no quién es.
+
+    ES OTRA PREGUNTA QUE EL PASO
+    ----------------------------
+    El paso responde "¿desde cuándo está Juan en el lugar?" y para eso hay que
+    saber que es Juan: arranca cuando se le reconoce la cara. Esto responde
+    "¿desde cuándo está ESE cuerpo en el cuadro?", que se puede contestar desde
+    el primer instante en que aparece y también de alguien que nunca se llegue
+    a identificar.
+
+    Las dos hacen falta y miden cosas distintas. Alguien que entra de espaldas
+    y recién se da vuelta a los dos minutos tiene un paso que empieza dos
+    minutos tarde, y un cronómetro que muestre eso está mintiendo sobre cuánto
+    hace que esa persona está ahí.
+
+    POR QUÉ HAY GRACIA
+    ------------------
+    El seguidor pierde a la gente todo el tiempo por un cuadro o dos: alguien
+    pasa por delante, la persona se agacha, se tapa sola con el brazo. Sin
+    tolerancia, el cronómetro volvería a cero varias veces por minuto y no
+    serviría para nada. La gracia es la misma que sostiene la identidad cuando
+    se corta el seguimiento (ver `continuidad.py`): es el mismo parpadeo.
+    """
+
+    def __init__(self, gracia_segundos: float = 5.0) -> None:
+        self.gracia_segundos = gracia_segundos
+        # track_id -> (desde, última vez que se lo vio)
+        self._vistos: dict[int, tuple[float, float]] = {}
+
+    def ver(self, presentes: list[int], ahora: float) -> None:
+        """Anota qué cuerpos hay en este cuadro y olvida a los que ya no están."""
+        for tid in presentes:
+            desde, _ = self._vistos.get(tid, (ahora, ahora))
+            self._vistos[tid] = (desde, ahora)
+        self._vistos = {
+            t: v for t, v in self._vistos.items() if ahora - v[1] <= self.gracia_segundos
+        }
+
+    def desde_de(self, track_id: int, ahora: float) -> float:
+        """Desde cuándo está este cuerpo. `ahora` si es la primera vez que se ve."""
+        desde, _ = self._vistos.get(track_id, (ahora, ahora))
+        return desde
+
+    def __len__(self) -> int:
+        return len(self._vistos)

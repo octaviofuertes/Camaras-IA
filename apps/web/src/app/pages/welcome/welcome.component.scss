@@ -3,7 +3,14 @@
   position: fixed; inset: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   padding: 28px;
-  background: radial-gradient(circle at 50% 0%, #16243a 0%, var(--bg, #0b0f17) 62%);
+  /* El azul de e-Sueldos, con las nubes insinuadas: es la misma imagen que
+     recibe a alguien en el sitio, y acá recibe a alguien en la puerta. */
+  background: var(--brand);
+  background-image:
+    radial-gradient(circle at 84% 16%, rgba(255, 255, 255, .14) 0 17%, transparent 18%),
+    radial-gradient(circle at 10% 84%, rgba(255, 255, 255, .1) 0 22%, transparent 23%),
+    linear-gradient(165deg, var(--brand-light) 0%, var(--brand) 48%, var(--brand-strong) 100%);
+  color: var(--on-brand);
   overflow: hidden;
   user-select: none;
 }
@@ -12,7 +19,7 @@
 .espejo-caja {
   position: absolute; top: 22px; right: 24px;
   width: 132px; height: 99px; border-radius: 12px; overflow: hidden;
-  border: 1px solid var(--border); background: #000;
+  border: 1px solid rgba(255, 255, 255, .28); background: var(--video-bg);
   opacity: .5; transition: opacity .3s;
 
   &.activa { opacity: .85; }
@@ -21,20 +28,20 @@
 
 .punto {
   position: absolute; top: 8px; left: 8px;
-  width: 8px; height: 8px; border-radius: 50%; background: #4ade80;
-  box-shadow: 0 0 0 0 rgba(74, 222, 128, .6);
+  width: 8px; height: 8px; border-radius: 50%; background: var(--mint);
+  box-shadow: 0 0 0 0 rgba(75, 227, 174, .6);
   animation: latido 2s ease-out infinite;
 }
 @keyframes latido {
-  0%   { box-shadow: 0 0 0 0 rgba(74, 222, 128, .55); }
-  70%  { box-shadow: 0 0 0 8px rgba(74, 222, 128, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+  0%   { box-shadow: 0 0 0 0 rgba(75, 227, 174, .55); }
+  70%  { box-shadow: 0 0 0 8px rgba(75, 227, 174, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(75, 227, 174, 0); }
 }
 
 .hora {
   position: absolute; top: 26px; left: 30px;
   font-size: 26px; font-weight: 300; letter-spacing: 1px;
-  color: var(--text-mute); font-variant-numeric: tabular-nums;
+  color: var(--on-brand-mute); font-variant-numeric: tabular-nums;
 }
 
 .centro {
@@ -45,11 +52,13 @@
 /* ─── Sin nadie enfrente ────────────────────────────────────────── */
 .esperando {
   display: flex; flex-direction: column; align-items: center; gap: 14px;
-  color: var(--text-mute); text-align: center;
+  color: var(--on-brand-dim); text-align: center;
 
-  h1 { margin: 0; font-size: 30px; font-weight: 300; color: var(--text); }
+  h1 { margin: 0; font-size: 30px; font-weight: 300; color: var(--on-brand); }
   p { margin: 0; font-size: 15px; }
-  .error { color: #fca5a5; max-width: 44ch; line-height: 1.6; }
+  /* Un problema de la pantalla, sobre azul. En ámbar claro y no en el rojo
+     del tema: sobre este fondo el rojo oscuro directamente no se lee. */
+  .error { color: #ffd8a8; max-width: 44ch; line-height: 1.6; }
   svg { opacity: .35; }
 }
 
@@ -65,27 +74,27 @@
 
 .retrato {
   width: 132px; height: 132px; border-radius: 50%; overflow: hidden; flex: 0 0 auto;
-  border: 3px solid rgba(74, 222, 128, .55);
-  background: var(--panel-2); display: grid; place-items: center;
+  border: 3px solid rgba(75, 227, 174, .55);
+  background: var(--panel); display: grid; place-items: center;
 
   img { width: 100%; height: 100%; object-fit: cover; }
-  .inicial { font-size: 52px; font-weight: 300; color: var(--text-mute); }
+  .inicial { font-size: 52px; font-weight: 300; color: var(--brand); }
 }
 
 .texto { min-width: 0; }
-.hola { font-size: 19px; color: var(--text-mute); }
+.hola { font-size: 19px; color: var(--on-brand-mute); }
 .nombre {
   margin: 2px 0 10px; font-size: 54px; font-weight: 600; line-height: 1.05;
   letter-spacing: -1px;
 }
 
 .zona-txt {
-  font-size: 17px; color: var(--text-mute);
-  strong { color: #86efac; font-weight: 600; }
+  font-size: 17px; color: var(--on-brand-dim);
+  strong { color: var(--mint); font-weight: 700; }
 
-  &.sin { color: var(--text-mute); }
+  &.sin { color: var(--on-brand-mute); }
   /* Que no tenga acceso no puede leerse igual que el resto del saludo. */
-  &.negado { color: #fca5a5; font-weight: 600; }
+  &.negado { color: #ffc9c9; font-weight: 700; }
 }
 
 /* ─── El plano ──────────────────────────────────────────────────── */
@@ -100,12 +109,12 @@
 }
 
 .edificio {
-  fill: none; stroke: var(--border); stroke-width: 3;
+  fill: none; stroke: rgba(255, 255, 255, .32); stroke-width: 3;
 }
 
 .zona {
   fill: rgba(255, 255, 255, .035);
-  stroke: var(--border); stroke-width: 2;
+  stroke: rgba(255, 255, 255, .3); stroke-width: 2;
   transition: fill .4s, stroke .4s;
 
   /* Sobre el plano de la empresa las zonas desaparecen: lo que tiene que verse
@@ -115,28 +124,28 @@
   /* La zona de esta persona: verde, encendida y latiendo despacio, para que se
      encuentre desde lejos sin tener que leer los nombres. */
   &.suya {
-    fill: rgba(34, 197, 94, .28);
-    stroke: #4ade80; stroke-width: 4;
+    fill: rgba(75, 227, 174, .3);
+    stroke: var(--mint); stroke-width: 4;
     animation: respirar 2.4s ease-in-out infinite;
   }
 }
 @keyframes respirar {
-  0%, 100% { fill: rgba(34, 197, 94, .22); }
-  50%      { fill: rgba(34, 197, 94, .42); }
+  0%, 100% { fill: rgba(75, 227, 174, .24); }
+  50%      { fill: rgba(75, 227, 174, .46); }
 }
 
 .etiqueta {
-  fill: var(--text-mute); font-size: 26px; font-weight: 500;
+  fill: var(--on-brand-mute); font-size: 26px; font-weight: 500;
   font-family: inherit; pointer-events: none;
 
-  &.suya { fill: #dcfce7; font-weight: 700; font-size: 30px; }
+  &.suya { fill: var(--mint); font-weight: 700; font-size: 30px; }
 
   /* Igual que las zonas: sobre el plano, sólo se nombra la del saludo. */
   &.sobre-imagen { fill: transparent; }
   &.sobre-imagen.suya {
     fill: #fff;
     paint-order: stroke;
-    stroke: rgba(6, 45, 19, .85); stroke-width: 6px; stroke-linejoin: round;
+    stroke: rgba(6, 25, 70, .85); stroke-width: 6px; stroke-linejoin: round;
   }
 }
 

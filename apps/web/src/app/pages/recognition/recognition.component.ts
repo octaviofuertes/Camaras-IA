@@ -414,8 +414,8 @@ export class RecognitionComponent implements OnInit, OnDestroy {
       })
       .subscribe((res) => {
         this.guardando = false;
-        if ('error' in res) {
-          this.errorAlta = res.error;
+        if (!res.id) {
+          this.errorAlta = res.error ?? 'No se pudo dar de alta a la persona';
           return;
         }
         // La ficha existe: ahora sí se pueden guardar las plantillas.

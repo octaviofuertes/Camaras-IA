@@ -47,7 +47,7 @@ export class EventsComponent implements OnInit, OnDestroy {
 
   events: EventItem[] = [];
   loading = true;
-  demoMode = false;
+  sinApi = false;
   activeFilter: FilterKey = 'all';
   selected: EventItem | null = null;
   busy: string | null = null;
@@ -154,7 +154,7 @@ export class EventsComponent implements OnInit, OnDestroy {
       // ponerle nombre a una cara no es eso: es completar una ficha, y tiene su
       // propia pantalla. Mezcladas, lo urgente quedaba enterrado entre trámites.
       this.events = res.items.filter((e) => e.eventType !== 'person.unknown');
-      this.demoMode = res.demo;
+      this.sinApi = res.sinApi;
       this.loading = false;
       if (this.selected) {
         const actualizado = res.items.find((e) => e.id === this.selected!.id);
@@ -274,7 +274,7 @@ export class EventsComponent implements OnInit, OnDestroy {
 
   /** Human-in-the-loop: el operador toma la alerta. */
   acknowledge(e: EventItem): void {
-    if (this.demoMode) return;
+    if (this.sinApi) return;
     this.busy = e.id;
     this.api.acknowledge(e.id).subscribe(() => {
       this.busy = null;
@@ -284,7 +284,7 @@ export class EventsComponent implements OnInit, OnDestroy {
 
   /** Human-in-the-loop: el operador resuelve la alerta revisada. */
   resolve(e: EventItem, resolution: 'confirmed' | 'dismissed' | 'false_positive'): void {
-    if (this.demoMode) return;
+    if (this.sinApi) return;
     this.busy = e.id;
     this.api.resolve(e.id, resolution).subscribe(() => {
       this.busy = null;
@@ -294,7 +294,7 @@ export class EventsComponent implements OnInit, OnDestroy {
 
   moduleIcon(key: string): { icon: string; color: string } {
     const m = AI_MODULES.find((x) => x.moduleKey === key);
-    return { icon: m?.icon ?? 'zone', color: m?.color ?? '#3b82f6' };
+    return { icon: m?.icon ?? 'zone', color: m?.color ?? '#0b5cf6' };
   }
 
   confidencePct(c: number): number {

@@ -8,9 +8,13 @@ import { CameraLiveComponent } from '../../shared/camera-live.component';
 import { ZonasService } from '../../core/zonas.service';
 import { ModuleIconComponent } from '../../shared/module-icon.component';
 import { AI_MODULES } from '../../core/catalog';
-import { EVENTS_BY_HOUR, EVENTS_BY_TYPE, TOP_MODULES } from '../../core/demo-data';
 import { CamerasService, type ApiCamera, type LiveDetection, type MediaStatus } from '../../core/cameras.service';
-import { EventsService } from '../../core/events.service';
+import { EventsService, TITULOS_EVENTO } from '../../core/events.service';
+import {
+  StatsService,
+  type Almacenamiento,
+  type EstadisticasEventos,
+} from '../../core/stats.service';
 import { SEVERITY_CLASS, SEVERITY_LABEL, type EventItem } from '../../core/models';
 
 interface DonutSlice {
@@ -20,6 +24,15 @@ interface DonutSlice {
   pct: number;
   dash: string;
   offset: number;
+}
+
+interface ModuloConEventos {
+  name: string;
+  icon: string;
+  color: string;
+  total: number;
+  /** Ancho de la barra respecto del módulo que más eventos generó hoy. */
+  pct: number;
 }
 
 @Component({
@@ -33,6 +46,7 @@ interface DonutSlice {
 export class DashboardComponent implements OnInit, OnDestroy {
   private readonly camsApi = inject(CamerasService);
   private readonly eventsApi = inject(EventsService);
+  private readonly statsApi = inject(StatsService);
   private readonly zonasApi = inject(ZonasService);
   private subs = new Subscription();
 
@@ -40,34 +54,128 @@ export class DashboardComponent implements OnInit, OnDestroy {
   events: EventItem[] = [];
   detections: Record<string, LiveDetection[]> = {};
   camsDemo = false;
-  eventsDemo = false;
+  eventosSinApi = false;
 
-  readonly topModules = TOP_MODULES;
-  readonly byType = EVENTS_BY_TYPE;
-  readonly totalByType = EVENTS_BY_TYPE.reduce((a, b) => a + b.value, 0);
+  /**
+   * Los agregados del día, medidos sobre la base.
+   *
+   * `null` mientras no se pudo consultar. La pantalla muestra un guión: no hay
+   * ningún valor de ejemplo detrás, y un cero se leería como "hoy no pasó
+   * nada", que es una afirmación distinta a "no pude preguntar".
+   */
+  stats: EstadisticasEventos | null = null;
+  almacenamiento: Almacenamiento | null = null;
+  /** Personas distintas identificadas hoy. Null sin el módulo de ingreso. */
+  personasHoy: number | null = null;
+
+  /** El período que abarcan los números de esta pantalla: el día de hoy. */
+  readonly periodo = `Hoy · ${new Date().toLocaleDateString('es-AR')}`;
+
   readonly sevLabel = SEVERITY_LABEL;
   readonly sevClass = SEVERITY_CLASS;
 
-  readonly donut: DonutSlice[] = (() => {
+  // ── lo que se dibuja, derivado de `stats` ──────────────────────────
+
+  get donut(): DonutSlice[] {
+    const tipos = this.stats?.porTipo ?? [];
+    const total = tipos.reduce((a, b) => a + b.total, 0);
+    if (!total) return [];
+
     const C = 2 * Math.PI * 42;
-    const total = EVENTS_BY_TYPE.reduce((a, b) => a + b.value, 0);
     let acc = 0;
-    return EVENTS_BY_TYPE.map((s) => {
-      const frac = s.value / total;
+    return tipos.map((t) => {
+      const frac = t.total / total;
       const len = frac * C;
       const slice: DonutSlice = {
-        ...s,
+        label: TITULOS_EVENTO[t.eventType] ?? t.eventType,
+        value: t.total,
+        color: this.moduleIcon(t.moduleKey).color,
         pct: Math.round(frac * 100),
-        dash: `${len - 2} ${C - len + 2}`,
+        dash: `${Math.max(len - 2, 0)} ${C - len + 2}`,
         offset: -acc,
       };
       acc += len;
       return slice;
     });
-  })();
+  }
 
-  readonly areaPath = this.buildArea(EVENTS_BY_HOUR);
-  readonly linePath = this.buildLine(EVENTS_BY_HOUR);
+  get totalByType(): number {
+    return (this.stats?.porTipo ?? []).reduce((a, b) => a + b.total, 0);
+  }
+
+  get topModules(): ModuloConEventos[] {
+    const mods = this.stats?.porModulo ?? [];
+    const max = Math.max(...mods.map((m) => m.total), 1);
+    return mods.map((m) => {
+      const cat = AI_MODULES.find((x) => x.moduleKey === m.moduleKey);
+      return {
+        name: cat?.name ?? m.moduleKey,
+        icon: cat?.icon ?? 'zone',
+        color: cat?.color ?? '#0b5cf6',
+        total: m.total,
+        pct: Math.round((m.total / max) * 100),
+      };
+    });
+  }
+
+  /** ¿Hubo algún evento hoy? Sin eso, los gráficos no tienen nada que decir. */
+  get hayActividad(): boolean {
+    return !!this.stats && this.stats.hoy > 0;
+  }
+
+  get areaPath(): string {
+    return this.buildArea(this.stats?.porHora ?? []);
+  }
+
+  get linePath(): string {
+    return this.buildLine(this.stats?.porHora ?? []);
+  }
+
+  /**
+   * Cuánto cambió respecto de ayer, en porcentaje.
+   *
+   * `null` cuando ayer fue cero: no hay porcentaje que calcular contra cero, y
+   * escribir "+100%" o "+∞" sería inventar una comparación que no existe.
+   */
+  variacion(hoy: number, ayer: number): number | null {
+    if (!ayer) return null;
+    return Math.round(((hoy - ayer) / ayer) * 100);
+  }
+
+  /** El texto de la comparación, ya redactado. */
+  textoVariacion(hoy: number, ayer: number): string {
+    const v = this.variacion(hoy, ayer);
+    if (v === null) return ayer === 0 && hoy > 0 ? 'ayer a esta hora, ninguno' : 'sin comparación';
+    const signo = v > 0 ? '↑' : v < 0 ? '↓' : '=';
+    return `${signo} ${Math.abs(v)}% vs ayer a esta hora`;
+  }
+
+  /** Si la variación es una mala noticia. Más eventos críticos no es un logro. */
+  claseVariacion(hoy: number, ayer: number, masEsPeor = false): string {
+    const v = this.variacion(hoy, ayer);
+    if (v === null || v === 0) return '';
+    const sube = v > 0;
+    return sube === masEsPeor ? 'down' : 'up';
+  }
+
+  // ── almacenamiento ────────────────────────────────────────────────
+
+  /** Bytes en la unidad que corresponda, sin inventar precisión. */
+  enTamano(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    const u = ['KB', 'MB', 'GB', 'TB', 'PB'];
+    let v = bytes / 1024;
+    let i = 0;
+    while (v >= 1024 && i < u.length - 1) { v /= 1024; i += 1; }
+    return `${v.toFixed(v < 10 ? 2 : 1).replace('.', ',')} ${u[i]}`;
+  }
+
+  /** Qué parte del disco está ocupada (por todo, no sólo por las evidencias). */
+  get discoUsadoPct(): number | null {
+    const a = this.almacenamiento;
+    if (!a || !a.discoTotalBytes) return null;
+    return Math.round(((a.discoTotalBytes - a.discoLibreBytes) / a.discoTotalBytes) * 100);
+  }
 
   ngOnInit(): void {
     // Los nombres de las áreas, para poder decir "tiene acceso a Recepción" en
@@ -112,8 +220,31 @@ export class DashboardComponent implements OnInit, OnDestroy {
         .pipe(startWith(0), switchMap(() => this.eventsApi.list()))
         .subscribe((res) => {
           this.events = res.items.slice(0, 5);
-          this.eventsDemo = res.demo;
+          this.eventosSinApi = res.sinApi;
         }),
+    );
+
+    // Los agregados del día. Cada 30 s y no cada 5: son cuentas sobre toda la
+    // tabla del día, y no cambian lo suficiente como para pagarlas más seguido.
+    this.subs.add(
+      interval(30000)
+        .pipe(startWith(0), switchMap(() => this.statsApi.eventos()))
+        .subscribe((s) => (this.stats = s)),
+    );
+
+    // El disco, cada minuto: recorre el árbol de evidencias.
+    this.subs.add(
+      interval(60000)
+        .pipe(startWith(0), switchMap(() => this.statsApi.almacenamiento()))
+        .subscribe((a) => (this.almacenamiento = a)),
+    );
+
+    // Personas identificadas hoy. Sólo existe con el módulo de ingreso
+    // asignado; sin él contesta 409 y queda en null, y la tarjeta no se dibuja.
+    this.subs.add(
+      interval(30000)
+        .pipe(startWith(0), switchMap(() => this.statsApi.personasIdentificadasHoy()))
+        .subscribe((n) => (this.personasHoy = n)),
     );
   }
 
@@ -172,19 +303,23 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   private buildLine(data: number[]): string {
-    const max = Math.max(...data);
+    if (data.length < 2) return '';
+    // Un día sin eventos da todos ceros: dividir por el máximo sería dividir
+    // por cero y el gráfico saldría con NaN en cada punto.
+    const max = Math.max(...data, 1);
     return data
       .map((v, i) => `${i === 0 ? 'M' : 'L'}${this.scaleX(i, data.length).toFixed(2)},${this.scaleY(v, max).toFixed(2)}`)
       .join(' ');
   }
 
   private buildArea(data: number[]): string {
-    return `${this.buildLine(data)} L100,100 L0,100 Z`;
+    const linea = this.buildLine(data);
+    return linea ? `${linea} L100,100 L0,100 Z` : '';
   }
 
   moduleIcon(key: string): { icon: string; color: string } {
     const m = AI_MODULES.find((x) => x.moduleKey === key);
-    return { icon: m?.icon ?? 'zone', color: m?.color ?? '#3b82f6' };
+    return { icon: m?.icon ?? 'zone', color: m?.color ?? '#0b5cf6' };
   }
 
   trackEvent(_: number, e: EventItem): string {

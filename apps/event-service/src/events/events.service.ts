@@ -126,11 +126,19 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
       //     existen: el clip NUNCA se armaba. Verificado contra el servicio:
       //     503 "no se pudo armar el clip (¿buffer vacío?)".
       //
-      // Queda como `pending`: es un clip provisional, sujeto a revisión. Si el
-      // operador dice que no fue una caída, se borra.
-      if (evento && this.mereceEvidencia(evento)) {
+      // Queda como `pending`: es evidencia provisional, sujeta a revisión. Si el
+      // operador dice que no fue nada, se borra.
+      //
+      // Qué se graba —foto o video— lo decide `evidenciaQueCorresponde`, y no
+      // es lo mismo para todas las alertas: ver abajo.
+      const evidencia = evento && this.evidenciaQueCorresponde(evento);
+      if (evento && evidencia === 'clip') {
         void this.capturarClipProvisional(auth, evento).catch((err) =>
           this.logger.warn(`no se pudo grabar el clip provisional de ${evento.id}: ${err}`),
+        );
+      } else if (evento && evidencia === 'image') {
+        void this.capturarFotoProvisional(auth, evento).catch((err) =>
+          this.logger.warn(`no se pudo sacar la foto de ${evento.id}: ${err}`),
         );
       }
       return evento;
@@ -138,13 +146,31 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Qué alertas se graban en video mientras esperan revisión.
+   * Qué evidencia le corresponde a cada alerta: una foto, un video, o nada.
    *
-   * Sólo las graves: un clip por cada detección de persona llenaría el disco y
-   * significaría filmar a todo el mundo todo el tiempo sin que nadie lo mire.
+   * La pregunta que decide es qué tiene que mirar el humano para contestar la
+   * alerta:
+   *
+   *  - Una CAÍDA sólo se puede juzgar viendo el movimiento. Una foto de alguien
+   *    en el piso no distingue una caída de alguien agachado, y ésa es
+   *    exactamente la decisión que se le pide al operador. Va video.
+   *  - "No se le ve el casco" o "no conozco esta cara" se contestan mirando UN
+   *    instante: lo que hay que ver está quieto en el cuadro. Va foto. El video
+   *    ahí no agregaba nada y costaba tres cosas: cien veces más disco, tres
+   *    segundos de demora hasta que la alerta tenía qué mostrar (hay que
+   *    esperar el post-roll), y segundos de video de una persona guardados por
+   *    algo que se resuelve con una imagen.
+   *  - El resto de las alertas graves conserva el video, que es como venía.
+   *
+   * Nada de esto se decide por severidad: una alerta de guantes es leve y
+   * merece su foto igual, porque sin ninguna imagen el operador no tiene con
+   * qué contestarla.
    */
-  private mereceEvidencia(evento: EventDto): boolean {
-    return evento.severity === 'high' || evento.severity === 'critical';
+  private evidenciaQueCorresponde(evento: EventDto): 'clip' | 'image' | null {
+    if (evento.eventType === 'person.unknown') return 'image';
+    if (evento.eventType.startsWith('ppe.')) return 'image';
+    if (evento.severity === 'high' || evento.severity === 'critical') return 'clip';
+    return null;
   }
 
   async findOne(auth: AuthContext, id: string, occurredAt?: string): Promise<EventDto> {
@@ -210,9 +236,16 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
           // alerta, o el evento es anterior a esta función. Se intenta ahora,
           // aunque para una alerta vieja lo más probable es que ya no haya
           // frames — por eso existe la captura al detectar.
-          this.logger.warn(`el evento ${id} no tenía clip provisional; se intenta grabarlo ahora`);
-          void this.captureEvidence(auth, evento, title, 'ready').catch((err) =>
-            this.logger.warn(`tampoco se pudo grabar la evidencia de ${id}: ${err}`),
+          this.logger.warn(`el evento ${id} no tenía evidencia provisional; se intenta ahora`);
+          // Se reintenta con la evidencia que le corresponde a ESTE evento:
+          // pedirle un clip a una alerta de EPP sería buscar en el buffer un
+          // video que nunca se iba a grabar, y el reintento fallaría siempre.
+          const reintento =
+            this.evidenciaQueCorresponde(evento) === 'image'
+              ? this.capturarFotoProvisional(auth, evento, 'ready', title)
+              : this.captureEvidence(auth, evento, title, 'ready');
+          void reintento.catch((err) =>
+            this.logger.warn(`tampoco se pudo guardar la evidencia de ${id}: ${err}`),
           );
         }
       } else {
@@ -271,6 +304,77 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
   /** Graba el clip apenas suena la alerta, para que haya QUÉ revisar. */
   private async capturarClipProvisional(auth: AuthContext, evento: EventDto): Promise<void> {
     await this.captureEvidence(auth, evento, undefined, 'pending');
+  }
+
+  /**
+   * Saca la foto del instante de la alerta. Mismo rol que el clip provisional:
+   * queda `pending` y se conserva sólo si el operador confirma.
+   */
+  private async capturarFotoProvisional(
+    auth: AuthContext,
+    evento: EventDto,
+    status: 'pending' | 'ready' = 'pending',
+    title?: string,
+  ): Promise<void> {
+    const base = process.env.MEDIA_SERVICE_URL ?? 'http://127.0.0.1:3020';
+    const centerTs = new Date(evento.occurredAt).getTime() / 1000;
+
+    const res = await fetch(`${base}/cameras/${evento.cameraId}/snapshot`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ eventId: evento.id, centerTs, boxes: this.cajasDe(evento) }),
+    });
+    if (!res.ok) throw new Error(`media-service respondió ${res.status}`);
+    const info = (await res.json()) as { path?: string; bytes?: number; sha256?: string };
+    if (!info?.path) throw new Error('media-service no devolvió la ruta de la foto');
+
+    try {
+      await this.db.withTenant(auth.organizationId, (c) =>
+        this.repo.saveEvidence(c, {
+          organizationId: auth.organizationId,
+          eventId: evento.id,
+          eventOccurredAt: evento.occurredAt,
+          kind: 'image',
+          storageKey: info.path!,
+          contentType: 'image/jpeg',
+          bytes: info.bytes ?? 0,
+          sha256: info.sha256 ?? '',
+          title: status === 'pending' ? undefined : title,
+          createdBy: status === 'pending' ? undefined : auth.userId,
+          status,
+        }),
+      );
+    } catch (err) {
+      // Mismo motivo que con el clip: una imagen de una persona sin fila que la
+      // respalde es invisible para la retención y para el borrado, y no la
+      // borra nadie nunca.
+      await this.borrarClip(info.path!);
+      throw err;
+    }
+    this.logger.log(
+      status === 'pending'
+        ? `foto guardada para ${evento.id} (a la espera de revisión)`
+        : `foto conservada como evidencia del evento ${evento.id}`,
+    );
+  }
+
+  /**
+   * Las cajas de la detección, para dibujarlas sobre la foto.
+   *
+   * Sin esto, una foto de un grupo de gente no dice de quién habla la alerta y
+   * el operador tiene que adivinar a cuál de los cuatro le falta el casco.
+   */
+  private cajasDe(evento: EventDto): { bbox: number[]; classLabel?: string; confidence?: number }[] {
+    const d = evento.detection ?? {};
+    const bbox = d['bbox'];
+    if (!Array.isArray(bbox) || bbox.length !== 4) return [];
+    return [
+      {
+        bbox: bbox as number[],
+        classLabel: typeof d['classLabel'] === 'string' ? d['classLabel'] : undefined,
+        confidence: evento.confidence,
+      },
+    ];
   }
 
   /** Borra el archivo del clip. Devuelve si el archivo ya no está. */
@@ -392,6 +496,11 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
 
   async listEvidences(auth: AuthContext, eventId: string): Promise<Record<string, unknown>[]> {
     return this.db.withTenant(auth.organizationId, (c) => this.repo.listEvidences(c, eventId));
+  }
+
+  /** Los números del panel, calculados sobre los eventos reales. */
+  async estadisticas(auth: AuthContext) {
+    return this.db.withTenant(auth.organizationId, (c) => this.repo.estadisticas(c));
   }
 
   async trainingStats(auth: AuthContext): Promise<Record<string, number>> {

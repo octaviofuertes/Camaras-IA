@@ -59,8 +59,8 @@
   }
 
   &[data-tipo='pasillo'] rect {
-    fill: rgba(148, 163, 184, .14);
-    stroke: rgba(148, 163, 184, .5);
+    fill: rgba(123, 138, 163, .14);
+    stroke: rgba(123, 138, 163, .5);
     stroke-dasharray: 7 5;
   }
   &[data-tipo='otro'] rect {
@@ -69,15 +69,15 @@
   }
 
   &.sel rect {
-    fill: rgba(34, 197, 94, .2);
-    stroke: #22c55e;
+    fill: rgba(18, 160, 95, .2);
+    stroke: var(--green);
     stroke-width: 3;
     stroke-dasharray: none;
   }
 }
 
 .manija {
-  fill: #22c55e;
+  fill: var(--green);
   stroke: rgba(0, 0, 0, .35);
   stroke-width: 1.5;
   cursor: nwse-resize;
@@ -96,7 +96,7 @@
 }
 .cuenta {
   font-size: 11px; font-weight: 600; color: var(--text-mute);
-  background: rgba(255, 255, 255, .06); padding: 2px 7px; border-radius: 999px;
+  background: rgba(15, 27, 51, .06); padding: 2px 7px; border-radius: 999px;
 }
 
 .ayuda, .vacio {
@@ -113,8 +113,8 @@
     padding: 6px; border-radius: var(--radius-sm);
     border: 1px solid transparent; cursor: pointer;
 
-    &:hover { background: rgba(255, 255, 255, .03); }
-    &.sel { background: rgba(34, 197, 94, .09); border-color: rgba(34, 197, 94, .35); }
+    &:hover { background: var(--panel-hover); }
+    &.sel { background: rgba(18, 160, 95, .09); border-color: rgba(18, 160, 95, .35); }
   }
 }
 
@@ -133,15 +133,15 @@
 }
 
 .gente {
-  font-size: 10.5px; font-weight: 600; color: #86efac;
-  background: rgba(34, 197, 94, .14); border-radius: 999px;
+  font-size: 10.5px; font-weight: 600; color: var(--green-ink);
+  background: rgba(18, 160, 95, .14); border-radius: 999px;
   padding: 2px 7px; flex-shrink: 0;
 }
 
 .quitar {
   background: none; border: none; color: var(--text-mute); cursor: pointer;
   font-size: 17px; line-height: 1; padding: 2px 5px; border-radius: 4px;
-  &:hover { color: #fca5a5; background: rgba(239, 68, 68, .12); }
+  &:hover { color: var(--red-ink); background: rgba(224, 50, 63, .12); }
 }
 
 .camaras {
@@ -157,10 +157,10 @@
   font-size: 12.5px; line-height: 1.55;
 }
 .error {
-  background: rgba(239, 68, 68, .1); border: 1px solid rgba(239, 68, 68, .3); color: #fca5a5;
+  background: rgba(224, 50, 63, .1); border: 1px solid rgba(224, 50, 63, .3); color: var(--red-ink);
 }
 .ok {
-  background: rgba(34, 197, 94, .1); border: 1px solid rgba(34, 197, 94, .3); color: #86efac;
+  background: rgba(18, 160, 95, .1); border: 1px solid rgba(18, 160, 95, .3); color: var(--green-ink);
 }
 
 .cargando { padding: 34px; color: var(--text-mute); font-size: 13px; }
@@ -169,7 +169,7 @@
 .pisos { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 
 .piso-tab {
-  background: rgba(255, 255, 255, .04);
+  background: var(--panel-2);
   border: 1px solid var(--border); border-radius: 999px;
   color: var(--text-mute); font-size: 12.5px; font-family: inherit;
   padding: 6px 14px; cursor: pointer; transition: all .15s;
@@ -177,7 +177,7 @@
   &:hover { color: var(--text); }
   &.active { background: rgba(14, 165, 233, .16); border-color: rgba(14, 165, 233, .5); color: #7dd3fc; font-weight: 600; }
   /* Un piso sin plano todavía no sirve para nada: se marca sin gritar. */
-  .marca { color: #fbbf24; font-weight: 700; margin-left: 2px; }
+  .marca { color: var(--orange); font-weight: 700; margin-left: 2px; }
   &.agregar { border-style: dashed; }
 }
 
@@ -203,7 +203,7 @@
   gap: 12px; text-align: center;
   min-height: 320px; padding: 36px;
   border: 1px dashed var(--border); border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, .015);
+  background: var(--panel-2);
   color: var(--text-mute);
 
   svg { opacity: .45; }

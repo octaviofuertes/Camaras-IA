@@ -2,7 +2,6 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Observable, catchError, map, of, switchMap } from 'rxjs';
 import type { EventItem, EventStatus, Severity } from './models';
-import { DEMO_EVENTS } from './demo-data';
 
 /** Respuesta paginada de `event-service`. */
 interface ApiPage {
@@ -94,12 +93,25 @@ export interface TrainingStats {
 export interface EventsResult {
   items: EventItem[];
   total: number;
-  /** true si la API no respondió y se están mostrando datos de demostración. */
-  demo: boolean;
+  /**
+   * true si la API no respondió.
+   *
+   * Antes acá se devolvían eventos de ejemplo con este mismo aviso. El problema
+   * no era el aviso —la pantalla de Eventos lo mostraba— sino que el panel
+   * dibujaba esos eventos sin decir nada, y quedaban cinco alertas inventadas
+   * con nombre de cámara y hora, indistinguibles de las reales. Ahora no hay
+   * nada que mostrar: una lista vacía con el motivo escrito.
+   */
+  sinApi: boolean;
 }
 
-/** Títulos legibles por tipo de evento (los emite el manifest de cada módulo). */
-const TITLES: Record<string, string> = {
+/**
+ * Títulos legibles por tipo de evento (los emite el manifest de cada módulo).
+ *
+ * Exportado porque el panel nombra los mismos tipos en su gráfico: con dos
+ * listas, el mismo evento terminaría llamándose distinto en cada pantalla.
+ */
+export const TITULOS_EVENTO: Record<string, string> = {
   // Se dice "no se le ve" y no "no tiene": el sistema vio una cabeza sin
   // casco, y quien lea la alerta tiene que ir a mirar, no a sancionar.
   'ppe.helmet_missing': 'No se le ve el casco',
@@ -109,6 +121,7 @@ const TITLES: Record<string, string> = {
   'zone.restricted_entry': 'Zona restringida',
   'object.abandoned': 'Objeto abandonado',
   'person.loitering': 'Merodeo detectado',
+  'person.detected': 'Persona detectada',
   'person.fall': 'Caída detectada',
   'person.unknown': '¿Reconocés a esta persona?',
   'access.denied': 'ACCESO DENEGADO',
@@ -125,14 +138,11 @@ export class EventsService {
       map((page) => ({
         items: page.items.map((e) => this.toItem(e)),
         total: page.total,
-        demo: false,
+        sinApi: false,
       })),
       catchError((err: HttpErrorResponse) => {
-        // Sin API disponible se muestra el set de demostración, pero la UI lo
-        // dice explícitamente: nunca hacer pasar datos falsos por reales.
-        console.warn('[events] API no disponible, usando datos de demo:', err.status);
-        const items = status ? DEMO_EVENTS.filter((e) => e.status === status) : DEMO_EVENTS;
-        return of({ items, total: items.length, demo: true });
+        console.warn('[events] la API no respondió:', err.status);
+        return of({ items: [], total: 0, sinApi: true });
       }),
     );
   }
@@ -283,7 +293,7 @@ export class EventsService {
       id: e.id,
       occurredAt: new Date(e.occurredAt).toLocaleTimeString('es-AR', { hour12: false }),
       eventType: e.eventType,
-      title: TITLES[e.eventType] ?? e.eventType,
+      title: TITULOS_EVENTO[e.eventType] ?? e.eventType,
       moduleKey: e.moduleKey,
       cameraId: e.cameraId,
       cameraName: `Cámara ${e.cameraId.slice(-4)}`,

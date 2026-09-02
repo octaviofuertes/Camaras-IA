@@ -77,11 +77,11 @@
     },
     "minConfidence": {
       "type": "number",
-      "title": "Calidad mínima para que la alerta llegue a Eventos",
-      "description": "Filtro del pipeline, aparte del del módulo. El módulo ya decidió que la falta es real; esto sólo recorta las más dudosas.",
+      "title": "Filtro de confianza del pipeline",
+      "description": "Segundo filtro, aparte del del módulo y aplicado ya fuera de él. Va en el mínimo a propósito: el módulo NO entrega confianza cruda, entrega faltas que ya pasaron un umbral medido sobre este modelo, y ese umbral es distinto en cada elemento (0,25 para el casco, 0,40 para los guantes). Un piso fijo acá vuelve a decidir con un número que nadie midió, y descarta alertas correctas: medido sobre el split de prueba, el 0,45 que había se comía 4 de cada 5 faltas de antiparras, 1 de cada 3 de guantes y casi 1 de cada 5 de casco, todas ya confirmadas por el módulo. La persistencia, por la misma razón, ya estaba en 1.",
       "minimum": 0.1,
       "maximum": 1.0,
-      "default": 0.45
+      "default": 0.1
     },
     "minPersistenceFrames": {
       "type": "integer",
@@ -102,7 +102,7 @@
     "minConfianzaFalta": {
       "type": "number",
       "title": "Confianza mínima para afirmar que FALTA",
-      "description": "Los dos errores no cuestan lo mismo: pasar por alto un casco puesto no le hace nada a nadie, y decir que alguien no lo tiene cuando sí lo tiene es acusarlo delante de su jefe. Pero el número NO se elige a ojo: sale de `python training/ppe/umbral.py`, que lo deriva de la curva de precisión del modelo. Un 0,60 puesto a criterio descartaba 18 de cada 19 faltas reales.",
+      "description": "Los dos errores no cuestan lo mismo: pasar por alto un casco puesto no le hace nada a nadie, y decir que alguien no lo tiene cuando sí lo tiene es acusarlo delante de su jefe. Pero el número NO se elige a ojo, y tampoco se usa: los umbrales con los que el módulo decide salen de medir el veredicto por persona con `python training/ppe/evaluar_personas.py --calibrar`, y sin esa medición el módulo no alerta. Esto es sólo el valor de referencia.",
       "minimum": 0.1,
       "maximum": 0.95,
       "default": 0.45
@@ -119,7 +119,16 @@
         "type": "number"
       },
       "title": "Umbral propio de cada elemento",
-      "description": "El modelo está seguro de un chaleco y mucho menos de unas antiparras. Un solo número para los cuatro obliga a elegir entre no avisar de lo que ve bien, o avisar de más con lo que ve mal. Lo llena `training/ppe/umbral.py`.",
+      "description": "El modelo está seguro de un chaleco y mucho menos de unas antiparras. Un solo número para los cuatro obliga a elegir entre no avisar de lo que ve bien, o avisar de más con lo que ve mal. Normalmente NO se toca: lo mide `training/ppe/evaluar_personas.py --calibrar` y viaja con el modelo, no con la cámara. Ponerlo acá lo pisa, y es para el caso raro de un encuadre propio.",
+      "default": {}
+    },
+    "umbralCorroborado": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number"
+      },
+      "title": "Umbral cuando nada contradice a la ausencia",
+      "description": "Umbral más bajo, que se aplica sólo cuando el detector no le vio ese elemento a esa persona por ningún lado. Una caja floja de \"sin casco\" sobre alguien a quien TAMBIÉN se le encontró un casco es casi siempre un error; la misma caja sobre alguien a quien no se le encontró ninguno es otra cosa, porque el modelo acierta el elemento puesto mucho mejor que su ausencia. Sigue haciendo falta que el modelo vea la ausencia: sin caja no se avisa nada. Lo mide `training/ppe/evaluar_personas.py --calibrar`.",
       "default": {}
     },
     "sinAlertar": {

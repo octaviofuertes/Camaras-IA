@@ -6,12 +6,17 @@ cámara. Expone /health con el estado real de cada uno.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import threading
 import time
 from pathlib import Path
+
+# Antes que nada lo que traiga torch: OpenMP lee la cantidad de hilos cuando
+# arranca y después ya no la mira. Ver ai_worker/hilos.py.
+from ai_worker import hilos as _hilos
 
 import requests
 from fastapi import FastAPI
@@ -264,6 +269,16 @@ def _arrancar_pipelines() -> None:
             try:
                 inst.load(ctx)
                 inst.warmup()
+                # El pisotón de ultralytics ocurre en la PRIMERA inferencia
+                # —el warmup—, no al importarse: ahí deja los hilos de torch en
+                # `cpu_count()-1`. Medido: se repone una sola vez, así que
+                # alcanza con corregirlo acá y queda puesto.
+                #
+                # Y tiene que ser acá y no por cuadro: `set_num_threads`
+                # rearma el pool de hilos, y llamarlo desde los dos pipelines a
+                # la vez, en cada cuadro, lo rearmaba en medio de la inferencia
+                # del otro. Eso llevó el cuadro de 0,5 s a 25 s.
+                _hilos.reafirmar()
                 instancias[disc.module_key] = inst
                 _instances[f"{a.camera_id}:{disc.module_key}"] = inst
                 log.info("[%s] módulo listo: %s v%s", a.camera_id, disc.module_key, disc.version)
@@ -283,10 +298,58 @@ def _arrancar_pipelines() -> None:
 
 
 def _firma(assignments) -> str:
-    """Huella de la configuración: cambia si se agregó o quitó una asignación."""
-    return "|".join(
-        sorted(f"{a.camera_id}:{','.join(sorted(m['moduleKey'] for m in a.modules))}" for a in assignments)
-    )
+    """Huella de la configuración: cambia si se agregó, se quitó o se RECONFIGURÓ.
+
+    Antes sólo miraba qué módulos corría cada cámara. Con eso, asignar y
+    desasignar se detectaba, pero cambiar la configuración —qué EPP se exige,
+    cada cuánto puede repetir el aviso, con cuánta evidencia alerta— no movía
+    nada: el worker seguía con lo que había leído al arrancar, y el cambio
+    hecho en el dashboard sólo tenía efecto si alguien lo reiniciaba a mano.
+
+    Es el mismo error que se venía arrastrando en el módulo de EPP visto desde
+    el otro lado: la configuración que corre y la que está guardada eran dos
+    cosas distintas sin que nada lo dijera.
+    """
+    partes = []
+    for a in sorted(assignments, key=lambda x: x.camera_id):
+        modulos = sorted(a.modules, key=lambda m: m["moduleKey"])
+        partes.append(f"{a.camera_id}:{json.dumps(modulos, sort_keys=True, default=str)}")
+    return hashlib.sha1("|".join(partes).encode("utf-8")).hexdigest()
+
+
+#: Si device-service contestó alguna vez. Ver `_asignaciones_para_comparar`.
+_hubo_api = False
+
+
+def _asignaciones_para_comparar() -> list[CameraAssignment] | None:
+    """Las asignaciones, o None cuando no hay con qué decidir si algo cambió.
+
+    El archivo de respaldo sirve para ARRANCAR sin device-service, pero no para
+    decidir que la configuración cambió. Sus datos son de cuando se lo escribió
+    y casi nunca coinciden con los de la base: si device-service se cae un
+    segundo y se lee el respaldo, la firma da distinta, y el worker tira abajo
+    los dos pipelines y recarga todos los modelos por una caída que ya pasó.
+
+    Visto en el log: a las 14:16:03 se leyó el respaldo, se reconstruyó todo, y
+    a las 14:16:07 device-service ya contestaba de nuevo. Los cuadros pasaron de
+    150 ms a 25 s mientras los modelos volvían a cargar, y en pantalla eso son
+    las cámaras trabadas y los recuadros clavados.
+
+    Es el mismo error que ya se había arreglado en media-service, del otro lado:
+    ante la duda no se toca nada. Devolver None es exactamente eso.
+
+    Si device-service NUNCA contestó, el respaldo sí manda: es la única fuente
+    que hay, y sin esto no se podría cambiar nada en una instalación que corre
+    sólo con el archivo.
+    """
+    global _hubo_api
+    api = _assignments_from_api()
+    if api is not None:
+        _hubo_api = True
+        return api
+    if _hubo_api:
+        return None
+    return _load_assignments()
 
 
 def _vigilar_asignaciones() -> None:
@@ -299,11 +362,14 @@ def _vigilar_asignaciones() -> None:
     while True:
         time.sleep(SYNC_SECONDS)
         try:
-            nuevas = _load_assignments()
+            nuevas = _asignaciones_para_comparar()
+            if nuevas is None:
+                continue
             firma = _firma(nuevas)
             if firma == actual:
                 continue
-            log.info("cambiaron las asignaciones: reconstruyendo pipelines")
+            log.info("cambiaron las asignaciones o su configuración: "
+                     "reconstruyendo pipelines")
             actual = firma
             for p in _pipelines:
                 p.stop()
@@ -339,12 +405,37 @@ def _shutdown() -> None:
             pass
 
 
+def _hilos_de_calculo() -> dict:
+    """Con cuántos hilos corre cada modelo, que es lo que fija su velocidad.
+
+    Va en /health porque no es evidente y cambia todo: los modelos corren en
+    CPU y con un solo hilo tardan varias veces más. `ultralytics` toca
+    `OMP_NUM_THREADS` al importarse y lo deja en 1, que en CPU cuesta casi el
+    doble por cuadro. `ai_worker.hilos` lo vuelve a poner; esto es para ver que
+    haya quedado puesto de verdad y no confiar en que sí.
+    """
+    datos: dict = {
+        "cpus": os.cpu_count(),
+        "OMP_NUM_THREADS": os.environ.get("OMP_NUM_THREADS"),
+        "elegidos": _hilos.elegir(),
+        "reescrituras": _hilos.ESCRITURAS,
+    }
+    try:
+        import torch
+
+        datos["torch"] = torch.get_num_threads()
+    except Exception:  # noqa: BLE001
+        datos["torch"] = None
+    return datos
+
+
 @app.get("/health")
 def health() -> dict:
     return {
         "ok": not _discovery.failed and bool(_instances),
         "service": "ai-worker",
         "device": DEVICE,
+        "hilos": _hilos_de_calculo(),
         "modules": [
             {
                 "moduleKey": m.module_key,
@@ -367,18 +458,32 @@ def detections() -> dict:
 
 
 @app.get("/live/{camera_id}")
-def live(camera_id: str) -> dict:
-    """Quién se ve en esta cámara ahora mismo, con su contorno y su identidad.
+def live(camera_id: str, nombrar: int | None = None) -> dict:
+    """Quién se ve en esta cámara ahora mismo, con su cara y su identidad.
 
     Lo consume la vista ampliada del dashboard para marcar a una persona sobre
     el video. Es el presente y nada más: no hay historia acá, y si el módulo no
     está corriendo en esa cámara la respuesta es una lista vacía, no un error
     —la pantalla tiene que poder mostrar el video igual.
+
+    `nombrar` es el seguimiento de una persona sin identificar a la que se le
+    quiere poner un nombre: sólo para ésa viaja el recorte de su cara. Sin el
+    parámetro, la respuesta son recuadros y nombres, ninguna imagen.
     """
     salida: dict = {
-        "ts": 0, "siluetas": False, "personas": [], "modulo": False,
+        # `ts` es DE CUÁNDO son los recuadros —el instante del cuadro que se
+        # analizó— y `ahora` es el reloj del worker al contestar. La pantalla
+        # necesita los dos para dibujar bien: entre que se captura un cuadro y
+        # llega la respuesta pasan unos 200 ms, y en ese rato la persona se
+        # movió. Con la diferencia, la pantalla adelanta el recuadro hasta
+        # donde la persona está AHORA en vez de dejarlo donde estaba.
+        #
+        # `ahora` se pone acá y no en cada módulo: con una cámara que sólo
+        # tiene EPP asignado se quedaba en cero, y sin él la pantalla no puede
+        # comparar su reloj con el del worker.
+        "ts": 0, "ahora": time.time(), "personas": [], "modulo": False,
         "epp": [], "exigidos": [], "moduloEpp": False, "eppPersonas": [],
-        "sinAlertarEpp": [],
+        "sinAlertarEpp": [], "tsEpp": 0,
     }
 
     # Los dos módulos son independientes: una cámara puede tener uno, el otro,
@@ -387,7 +492,7 @@ def live(camera_id: str) -> dict:
     inst = _instances.get(f"{camera_id}:{MODULO_INGRESO}")
     if inst is not None and hasattr(inst, "en_vivo"):
         try:
-            salida.update({**inst.en_vivo(), "modulo": True})
+            salida.update({**inst.en_vivo(nombrar), "modulo": True})
         except Exception as exc:  # noqa: BLE001
             log.error("no se pudo leer el ingreso de personas de %s: %r", camera_id, exc)
 
@@ -403,6 +508,11 @@ def live(camera_id: str) -> dict:
                 # modelo y otro orden. Mezclarlas en una sola lista fue el
                 # error que le atribuía el casco de uno al de al lado.
                 "eppPersonas": v.get("personas", []),
+                # De cuándo son ESTOS recuadros. Va aparte del `ts` del ingreso
+                # de personas porque son dos modelos con dos ritmos: mezclarlos
+                # haría que la pantalla adelante los de uno con la antigüedad
+                # del otro.
+                "tsEpp": v.get("ts", 0),
                 "moduloEpp": True,
             })
         except Exception as exc:  # noqa: BLE001

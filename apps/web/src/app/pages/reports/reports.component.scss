@@ -19,15 +19,15 @@
   transition: background .15s, color .15s, border-color .15s;
 
   &:hover { color: var(--text); border-color: var(--border-strong, var(--border)); }
-  &.active { background: var(--accent, #3b82f6); border-color: transparent; color: #fff; }
+  &.active { background: var(--accent, var(--brand)); border-color: transparent; color: #fff; }
 
   /* El filtro de accesos denegados se distingue del resto: no es una vista
      más, es el motivo por el que alguien abre esta pantalla apurado. */
   &.alerta {
     margin-left: auto;
-    border-color: rgba(239, 68, 68, .45);
-    color: #fca5a5;
-    &.active { background: #ef4444; border-color: transparent; color: #fff; }
+    border-color: rgba(224, 50, 63, .45);
+    color: var(--red-ink);
+    &.active { background: var(--red); border-color: transparent; color: #fff; }
   }
 }
 
@@ -40,12 +40,12 @@
 .urgente {
   display: flex; align-items: center; gap: 12px;
   padding: 13px 16px; border-radius: var(--radius-sm);
-  background: rgba(239, 68, 68, .12);
-  border: 1px solid rgba(239, 68, 68, .45);
-  color: #fecaca; font-size: 13px; line-height: 1.5;
+  background: rgba(224, 50, 63, .12);
+  border: 1px solid rgba(224, 50, 63, .45);
+  color: var(--red-ink); font-size: 13px; line-height: 1.5;
 
-  svg { flex: 0 0 auto; color: #fca5a5; }
-  strong { color: #fff; }
+  svg { flex: 0 0 auto; color: var(--red-ink); }
+  strong { color: var(--text); }
 }
 
 /* ─── Sin permiso ───────────────────────────────────────────────── */
@@ -73,7 +73,7 @@
   }
   .kpi-value {
     margin-top: 7px; font-size: 27px; font-weight: 650; line-height: 1;
-    &.mal { color: #fca5a5; }
+    &.mal { color: var(--red-ink); }
   }
   .kpi-sub { margin-top: 6px; font-size: 11.5px; color: var(--text-mute); }
 }
@@ -112,21 +112,21 @@
 /* Una fila de acceso denegado se ve distinta desde lejos: es lo que se busca
    cuando se abre esta pantalla. */
 tr.negado {
-  background: rgba(239, 68, 68, .07);
-  td { border-bottom-color: rgba(239, 68, 68, .2); }
+  background: rgba(224, 50, 63, .07);
+  td { border-bottom-color: rgba(224, 50, 63, .2); }
 }
 
 .acceso {
   font-size: 11.5px; font-weight: 600;
   padding: 3px 9px; border-radius: 999px; white-space: nowrap;
-  background: rgba(34, 197, 94, .14); color: #86efac;
+  background: rgba(18, 160, 95, .14); color: var(--green-ink);
 
-  &.no { background: rgba(239, 68, 68, .18); color: #fca5a5; letter-spacing: .4px; }
+  &.no { background: rgba(224, 50, 63, .18); color: var(--red-ink); letter-spacing: .4px; }
 }
 
 /* "Deducido" no puede leerse igual que "se le vio la cara": es la diferencia
    entre un dato y una inferencia, y de eso depende qué se puede afirmar. */
-.deducido { color: #fbbf24; }
+.deducido { color: var(--orange); }
 
 /* ─── Advertencias ──────────────────────────────────────────────── */
 .advertencias { display: flex; flex-direction: column; gap: 7px; }
@@ -135,12 +135,12 @@ tr.negado {
   display: flex; align-items: flex-start; gap: 9px;
   padding: 9px 13px;
   border: 1px solid var(--border);
-  border-left: 3px solid #60a5fa;
+  border-left: 3px solid var(--brand);
   border-radius: var(--radius-sm);
-  background: rgba(96, 165, 250, .05);
+  background: rgba(11, 92, 246, .05);
   font-size: 12px; line-height: 1.5; color: var(--text-mute);
 
-  svg { flex: 0 0 auto; margin-top: 2px; color: #60a5fa; }
+  svg { flex: 0 0 auto; margin-top: 2px; color: var(--brand); }
 }
 
 .spinner {
@@ -166,13 +166,13 @@ tr.negado {
 /* Late para que se vea que es el presente y no una foto vieja. */
 .punto {
   width: 8px; height: 8px; border-radius: 50%;
-  background: #4ade80; box-shadow: 0 0 0 0 rgba(74, 222, 128, .6);
+  background: var(--green); box-shadow: 0 0 0 0 rgba(18, 160, 95, .6);
   animation: latido 2s ease-out infinite;
 }
 @keyframes latido {
-  0%   { box-shadow: 0 0 0 0 rgba(74, 222, 128, .55); }
-  70%  { box-shadow: 0 0 0 7px rgba(74, 222, 128, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+  0%   { box-shadow: 0 0 0 0 rgba(18, 160, 95, .55); }
+  70%  { box-shadow: 0 0 0 7px rgba(18, 160, 95, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(18, 160, 95, 0); }
 }
 
 .vivo-nadie { font-size: 12.5px; color: var(--text-mute); padding: 4px 0 2px; }
@@ -188,19 +188,19 @@ tr.negado {
   background: var(--panel-2); border: 1px solid var(--border);
 
   &.sin-acceso {
-    background: rgba(239, 68, 68, .12);
-    border-color: rgba(239, 68, 68, .5);
+    background: rgba(224, 50, 63, .12);
+    border-color: rgba(224, 50, 63, .5);
   }
 }
 
 .vp-nombre { font-size: 13px; font-weight: 600; }
 .vp-detalle { margin-top: 3px; font-size: 11px; color: var(--text-mute); }
-.vp-via.deducido { color: #fbbf24; }
+.vp-via.deducido { color: var(--orange); }
 
 .vp-alerta {
   margin-left: 7px; padding: 1px 7px; border-radius: 999px;
   font-size: 10px; font-weight: 700; letter-spacing: .4px;
-  background: rgba(239, 68, 68, .25); color: #fca5a5;
+  background: rgba(224, 50, 63, .25); color: var(--red-ink);
 }
 
 /* Sin señal no puede verse igual que "no hay nadie": son dos estados

@@ -1,37 +1,101 @@
-/* Percepta — sistema visual. Tema oscuro por defecto (docs/10-especificacion-ui.md §1). */
+/* e-Sueldos — sistema visual.
+ *
+ * Tema claro sobre azul de marca. Las superficies son blancas y el color
+ * fuerte se reserva para la navegación y para las acciones: si todo grita, no
+ * se distingue lo que hay que mirar.
+ *
+ * ── Una excepción deliberada: el video ──────────────────────────────────
+ *
+ * Lo que muestra una cámara va SIEMPRE sobre negro, en cualquier tema. No es
+ * una decisión estética: un marco claro alrededor de una imagen oscura hace
+ * que la pupila se cierre y la escena se vea peor, y acá la escena es el
+ * producto. Por eso `--video-bg` no cambia con el tema.
+ */
 
 :root {
-  /* Superficies */
-  --bg:            #0d1117;
-  --panel:         #161b22;
-  --panel-2:       #1a2130;
-  --panel-hover:   #1f2937;
-  --border:        #232b3a;
-  --border-strong: #2f3a4d;
+  /* ── Marca ──────────────────────────────────────────────────── */
+  --brand:        #0b5cf6;   /* el azul de e-Sueldos */
+  --brand-strong: #0842c4;   /* presionado / bordes sobre azul */
+  --brand-light:  #4a86ff;
+  --brand-pale:   #79c4f2;   /* el azul de las nubes del isotipo */
+  --brand-soft:   #e8f0ff;   /* fondos de estado sobre blanco */
+  --brand-ink:    #06297a;   /* texto azul legible sobre claro */
 
-  /* Texto */
-  --text:      #e6edf3;
-  --text-dim:  #9aa7b8;
-  --text-mute: #6b7a8f;
+  --coral:        #f1414e;   /* el rojo de los botones de acción */
+  --coral-strong: #d02b38;
+  --mint:         #4be3ae;   /* el verde de acento del hero */
 
-  /* Acento */
-  --accent:       #2563eb;
-  --accent-light: #3b82f6;
-  --accent-soft:  rgba(37, 99, 235, 0.14);
+  /* ── Superficies ────────────────────────────────────────────── */
+  --bg:            #f2f6fd;
+  --panel:         #ffffff;
+  --panel-2:       #f6f9fe;
+  --panel-hover:   #edf3ff;
+  --border:        #dfe7f5;
+  --border-strong: #c2d2ec;
 
-  /* Semánticos */
-  --red:    #ef4444;
-  --orange: #f59e0b;
-  --yellow: #eab308;
-  --green:  #22c55e;
-  --blue:   #3b82f6;
-  --purple: #8b5cf6;
+  /* ── Texto ──────────────────────────────────────────────────── */
+  --text:      #0f1b33;
+  --text-dim:  #4a5b75;
+  --text-mute: #7b8aa3;
+  /* Sobre el azul de marca. Existe como token para que nadie tenga que
+     adivinar si en este tema el texto de la barra va claro u oscuro. */
+  --on-brand:      #ffffff;
+  --on-brand-dim:  rgba(255, 255, 255, 0.72);
+  --on-brand-mute: rgba(255, 255, 255, 0.5);
+
+  /* ── Acento (alias de marca; muchas pantallas lo usan así) ──── */
+  --accent:       var(--brand);
+  --accent-light: var(--brand-light);
+  --accent-soft:  var(--brand-soft);
+
+  /* ── Semánticos ─────────────────────────────────────────────
+   * Cada uno viene en tres: el color pleno (bordes, puntos, barras), el
+   * `-ink` para TEXTO —que sobre blanco tiene que ser oscuro para leerse— y
+   * el `-soft` para rellenos. En el tema oscuro alcanzaba con un tono pastel
+   * para las tres cosas; sobre blanco ese pastel desaparece. */
+  --red:       #e0323f;
+  --red-ink:   #a81420;
+  --red-soft:  #fdeaec;
+
+  --orange:      #e07a00;
+  --orange-ink:  #8a4b00;
+  --orange-soft: #fff2dd;
+
+  --yellow:      #d99a00;
+  --yellow-ink:  #7a5300;
+  --yellow-soft: #fff6dc;
+
+  --green:      #12a05f;
+  --green-ink:  #0a6b3f;
+  --green-soft: #e2f7ed;
+
+  --blue:      var(--brand);
+  --blue-ink:  var(--brand-ink);
+  --blue-soft: var(--brand-soft);
+
+  --purple:      #7c4ddb;
+  --purple-ink:  #4c2b91;
+  --purple-soft: #f0eaff;
+
+  /* ── El video, y lo que se dibuja encima ────────────────────── */
+  --video-bg:      #000000;
+  --video-panel:   rgba(8, 16, 34, 0.9);
+  --video-text:    #ffffff;
+  --video-dim:     rgba(255, 255, 255, 0.62);
+  --video-mute:    rgba(255, 255, 255, 0.42);
+  --video-line:    rgba(255, 255, 255, 0.18);
+  /* Los tres estados de una marca sobre la imagen. Son plenos y saturados a
+     propósito: tienen que leerse sobre cualquier cosa que muestre la cámara. */
+  --marca-ok:      #16c46e;
+  --marca-alerta:  #ff4a57;
+  --marca-neutra:  #d7e2f2;
 
   --radius:    12px;
   --radius-sm: 8px;
   --gap:       16px;
 
-  --shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow:     0 6px 20px rgba(15, 40, 95, 0.08);
+  --shadow-lg:  0 18px 46px rgba(9, 30, 74, 0.18);
 }
 
 * { box-sizing: border-box; }
@@ -50,8 +114,8 @@ html, body {
 /* Scrollbars discretas, coherentes con el tema */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #2a3444; border-radius: 6px; border: 2px solid var(--bg); }
-::-webkit-scrollbar-thumb:hover { background: #3a4658; }
+::-webkit-scrollbar-thumb { background: #cbd8ec; border-radius: 6px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background: #aebfdd; }
 
 /* ─── Primitivas reutilizables ─────────────────────────────── */
 
@@ -59,6 +123,7 @@ html, body {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  box-shadow: var(--shadow);
 }
 
 .panel-head {
@@ -71,7 +136,7 @@ html, body {
 
 .panel-title {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 700;
   margin: 0;
   display: flex;
   align-items: center;
@@ -86,16 +151,16 @@ html, body {
   align-items: center;
   gap: 5px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   padding: 3px 9px;
   border-radius: 999px;
   white-space: nowrap;
 }
-.badge-critico { background: rgba(239, 68, 68, 0.16);  color: #fca5a5; }
-.badge-alto    { background: rgba(245, 158, 11, 0.16); color: #fcd34d; }
-.badge-medio   { background: rgba(59, 130, 246, 0.16); color: #93c5fd; }
-.badge-bajo    { background: rgba(107, 122, 143, 0.18); color: var(--text-dim); }
-.badge-cat     { background: var(--panel-2); color: var(--text-dim); border: 1px solid var(--border); }
+.badge-critico { background: var(--red-soft);    color: var(--red-ink); }
+.badge-alto    { background: var(--orange-soft); color: var(--orange-ink); }
+.badge-medio   { background: var(--blue-soft);   color: var(--blue-ink); }
+.badge-bajo    { background: var(--panel-2);     color: var(--text-dim); border: 1px solid var(--border); }
+.badge-cat     { background: var(--panel-2);     color: var(--text-dim); border: 1px solid var(--border); }
 
 .dot {
   width: 7px; height: 7px;
@@ -109,43 +174,51 @@ html, body {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: var(--panel-2);
+  background: var(--panel);
   color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 9px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 9px 16px;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
   font-family: inherit;
 }
-.btn:hover { background: var(--panel-hover); border-color: var(--border-strong); }
-.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btn-primary:hover { background: var(--accent-light); border-color: var(--accent-light); }
+.btn:hover { background: var(--panel-hover); border-color: var(--brand-light); color: var(--brand-ink); }
+
+/* La acción principal va en el coral de e-Sueldos y no en el azul: sobre una
+   barra azul un botón azul no es un botón, es parte del fondo. */
+.btn-primary {
+  background: var(--coral);
+  border-color: var(--coral);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(241, 65, 78, 0.28);
+}
+.btn-primary:hover { background: var(--coral-strong); border-color: var(--coral-strong); color: #fff; }
 
 .chip {
   padding: 6px 14px;
   border-radius: 999px;
   font-size: 12.5px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
-  background: transparent;
+  background: var(--panel);
   border: 1px solid var(--border);
   color: var(--text-dim);
   transition: all 0.15s;
   font-family: inherit;
 }
-.chip:hover { color: var(--text); border-color: var(--border-strong); }
-.chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chip:hover { color: var(--brand-ink); border-color: var(--brand-light); }
+.chip.active { background: var(--brand); border-color: var(--brand); color: #fff; }
 
-.up   { color: var(--green); }
-.down { color: var(--red); }
+.up   { color: var(--green-ink); }
+.down { color: var(--red-ink); }
 
 .spinner {
   width: 18px; height: 18px;
   border: 2px solid var(--border-strong);
-  border-top-color: var(--accent-light);
+  border-top-color: var(--brand);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }

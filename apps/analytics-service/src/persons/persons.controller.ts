@@ -244,6 +244,25 @@ export class PersonsController {
   }
 
   /**
+   * ¿Quién es la persona de la foto de esta alerta? A pedido, desde Eventos.
+   *
+   * Detrás de `reports:identified` y NO de `events:read`, que es lo que tiene
+   * un operador. La diferencia es deliberada: ver que alguien anda sin casco es
+   * el trabajo del operador; ponerle nombre y apellido a esa persona es un dato
+   * sobre ella, y es la misma puerta que la de los informes con nombre.
+   *
+   * Tampoco usa `kiosk:identify`: ese permiso vive en una pantalla colgada en
+   * la entrada, y lo que habilita es saludar a quien está parado enfrente, no
+   * identificar a alguien en una foto guardada.
+   */
+  @Post('recognize')
+  @RequirePermissions('reports:identified')
+  async reconocer(@Req() req: Request, @Body() body: { image?: string }) {
+    if (!body?.image) throw new BadRequestException('Falta la imagen');
+    return this.persons.reconocerEnFoto(req.auth as AuthContext, body.image);
+  }
+
+  /**
    * El plano del lugar.
    *
    * Lo lee también la pantalla de bienvenida, así que alcanza con el permiso

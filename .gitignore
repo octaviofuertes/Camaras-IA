@@ -56,3 +56,5 @@ training/ppe/data/
 training/ppe/corridas*/
 # Salidas de prueba del modulo (imagenes anotadas).
 training/ppe/salida/
+# Donde ultralytics escribe por omision al correr desde la raiz.
+runs/

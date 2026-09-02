@@ -115,6 +115,15 @@ export interface Reconocido {
   parecido: number;
 }
 
+export interface ResultadoReconocimiento {
+  /** Quién es, o null si no hay una respuesta segura. */
+  reconocido: Reconocido | null;
+  /** Por qué no se pudo. Vacío cuando sí se pudo. */
+  motivo: string;
+  /** Cuántas caras había en la foto: ayuda a entender un "no se pudo". */
+  caras: number;
+}
+
 export interface ResultadoFoto {
   tipo: TipoFoto;
   /** Si se pudo crear una plantilla facial con esta foto. */
@@ -143,6 +152,20 @@ export interface RegistroAccesos {
   sinAcceso: number;
   advertencias: string[];
 }
+
+/**
+ * Parecido mínimo para ponerle un nombre a la persona de una alerta.
+ *
+ * Más exigente que el 0.42 con el que se identifica en el registro de accesos,
+ * y por el mismo motivo que la pantalla de bienvenida: acá el nombre queda
+ * pegado a "esta persona andaba sin casco". Equivocarse no produce un renglón
+ * flojo en un informe, produce una acusación contra quien no era. Ante la duda,
+ * el sistema dice que no sabe.
+ */
+const RECONOCER_PARECIDO_MINIMO = 0.5;
+
+/** Ventaja mínima sobre el segundo candidato. Dos hermanos existen. */
+const RECONOCER_MARGEN = 0.06;
 
 const DIM_EMBEDDING = 512;
 
@@ -765,6 +788,130 @@ export class PersonsService {
         workZone: primera.p.workZone,
         parecido: Math.round(primera.parecido * 1000) / 1000,
         entrada,
+      };
+    });
+  }
+
+  /**
+   * ¿Quién es la persona de la foto de esta alerta? Se corre A PEDIDO.
+   *
+   * Es el botón "Reconocer persona" de la pantalla de eventos. La diferencia
+   * con hacerlo automáticamente al detectar es todo el punto:
+   *
+   *  - PROCESAMIENTO. Reconocer una cara cuesta un modelo de rostros por frame.
+   *    Hacerlo en cada alerta de EPP significaría correrlo miles de veces por
+   *    día para que nadie lea el resultado la mayoría de las veces. Acá corre
+   *    una vez, cuando alguien efectivamente quiere saber quién es.
+   *  - DATOS. Al no correr solo, el nombre de la persona NO queda escrito en la
+   *    alerta: se calcula, se muestra a quien preguntó, y no se guarda. La base
+   *    no termina con un registro de quién anduvo sin casco cada día armado sin
+   *    que nadie lo pidiera.
+   *
+   * Por eso tampoco registra un paso ni toca `person_sightings`, a diferencia
+   * de `identificar()`: mirar una foto vieja no es que la persona haya entrado
+   * ahora.
+   *
+   * Devuelve SIEMPRE un motivo. "No se pudo" tiene causas muy distintas —no hay
+   * cara en la foto, no coincide con nadie, hay dos candidatos parecidos— y
+   * mostrarlas todas como un mismo "desconocido" haría que el operador
+   * insistiera con un botón que nunca le va a contestar.
+   */
+  async reconocerEnFoto(
+    auth: AuthContext,
+    imagenBase64: string,
+  ): Promise<ResultadoReconocimiento> {
+    if (!imagenBase64) throw new BadRequestException('Falta la imagen');
+
+    const base = process.env.AI_WORKER_URL ?? 'http://127.0.0.1:3010';
+    let caras: { embedding: number[]; score: number; alto: number }[] = [];
+    try {
+      const r = await fetch(`${base}/faces/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: imagenBase64 }),
+      });
+      const cuerpo = (await r.json()) as { ok?: boolean; error?: string; caras?: typeof caras };
+      if (!cuerpo.ok) {
+        return { reconocido: null, caras: 0, motivo: cuerpo.error ?? 'No se pudo analizar la foto.' };
+      }
+      caras = cuerpo.caras ?? [];
+    } catch (err) {
+      this.logger.error(`no se pudo hablar con el worker para reconocer: ${err}`);
+      throw new BadRequestException(
+        'El servicio de reconocimiento no responde. Revisá que el worker esté corriendo.',
+      );
+    }
+
+    const mejor = caras[0];
+    if (!mejor) {
+      return {
+        reconocido: null,
+        caras: 0,
+        motivo:
+          'No se le ve la cara a nadie en esta foto. Puede estar de espaldas, de perfil o ' +
+          'demasiado lejos de la cámara.',
+      };
+    }
+
+    return this.db.withTenant(auth.organizationId, async (c) => {
+      const galeria = await this.repo.galeriaConDatos(c);
+      if (!galeria.length) {
+        return {
+          reconocido: null,
+          caras: caras.length,
+          motivo:
+            'Todavía no hay ninguna persona dada de alta, así que no hay contra qué comparar.',
+        };
+      }
+
+      // Mismo criterio que el saludo: el mejor parecido POR PERSONA primero, y
+      // recién después se comparan entre sí. Ver `identificar()`.
+      const porPersona = galeria
+        .map((p) => ({
+          p,
+          parecido: p.embeddings.reduce((max, v) => Math.max(max, coseno(mejor.embedding, v)), -1),
+        }))
+        .sort((a, b) => b.parecido - a.parecido);
+
+      const primera = porPersona[0];
+      if (!primera || primera.parecido < RECONOCER_PARECIDO_MINIMO) {
+        return {
+          reconocido: null,
+          caras: caras.length,
+          motivo:
+            'Esta cara no coincide con ninguna persona dada de alta. Puede ser alguien de ' +
+            'afuera, o alguien que todavía no está cargado en el sistema.',
+        };
+      }
+
+      const segunda = porPersona[1];
+      if (segunda && primera.parecido - segunda.parecido < RECONOCER_MARGEN) {
+        return {
+          reconocido: null,
+          caras: caras.length,
+          motivo:
+            `La cara se parece casi igual a ${primera.p.displayName} y a ` +
+            `${segunda.p.displayName}. No se arriesga un nombre: ponerle el de otro a una ` +
+            'alerta es peor que dejarla sin nombre.',
+        };
+      }
+
+      // Se registra QUE se preguntó, no la respuesta. Poner a quién identificó
+      // en el log sería guardar por la ventana el dato que este endpoint
+      // justamente no persiste.
+      this.logger.log(`reconocimiento a pedido resuelto para ${auth.userId}`);
+
+      return {
+        caras: caras.length,
+        motivo: '',
+        reconocido: {
+          personId: primera.p.id,
+          displayName: primera.p.displayName,
+          photo: primera.p.photo,
+          hasAccess: primera.p.hasAccess,
+          workZone: primera.p.workZone,
+          parecido: Math.round(primera.parecido * 1000) / 1000,
+        },
       };
     });
   }

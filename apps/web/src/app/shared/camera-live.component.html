@@ -15,8 +15,13 @@
       </div>
     </header>
 
-    <!-- El video, con la proporción real para que lo dibujado caiga encima -->
-    <div class="video-caja" [style.aspect-ratio]="proporcion">
+    <!-- El video, con la proporción real para que lo dibujado caiga encima.
+         El tope de ancho va junto con el de alto: limitando sólo el alto, la
+         caja quedaba más ancha que el video, el navegador dejaba franjas negras
+         a los costados y todo lo dibujado —que va en fracciones del cuadro—
+         caía corrido respecto de la imagen. -->
+    <div class="video-caja" [style.aspect-ratio]="proporcion"
+         [style.max-width]="'calc(74vh * ' + proporcion + ')'">
       <img class="video" [src]="stream" alt="Cámara en vivo"
            (load)="alCargar($event)" (error)="alFallar()" />
 
@@ -24,27 +29,9 @@
         Sin señal de esta cámara. Revisá que esté conectada y que media-service esté corriendo.
       </div>
 
-      <!-- Las personas. El viewBox es de mil por mil y se estira a la caja:
+      <!-- La capa del EPP. El viewBox es de mil por mil y se estira a la caja:
            las coordenadas que manda el worker son fracciones del cuadro. -->
       <svg class="capa" viewBox="0 0 1000 1000" preserveAspectRatio="none">
-        <!-- Las clases van una por una y NO con [attr.class]: escribir el
-             atributo entero pisa los bindings de clase de Angular, y la capa
-             de color al seleccionar no llegaba a aplicarse nunca. -->
-        <g *ngFor="let p of personas" class="persona"
-           [class.con-acceso]="p.tieneAcceso === true"
-           [class.sin-acceso]="p.tieneAcceso === false"
-           [class.sin-saber]="p.tieneAcceso === null || p.tieneAcceso === undefined"
-           [class.elegida]="estaElegida(p)" (click)="tocar(p)">
-
-          <!-- El contorno del cuerpo. Sólo se pinta al seleccionar; sin
-               seleccionar es apenas una línea que dice "acá hay alguien". -->
-          <polygon *ngIf="p.silueta?.length" [attr.points]="puntos(p)" />
-
-          <!-- Sin modelo de segmentación queda la caja, que es lo que hay. -->
-          <rect *ngIf="!p.silueta?.length"
-                [attr.x]="p.bbox[0] * 1000" [attr.y]="p.bbox[1] * 1000"
-                [attr.width]="p.bbox[2] * 1000" [attr.height]="p.bbox[3] * 1000" rx="6" />
-        </g>
 
         <!-- El estado de cada persona: la caja del cuerpo pintada según le
              falte algo obligatorio o no, y al lado un renglón por elemento.
@@ -83,10 +70,47 @@
         </g>
       </svg>
 
+      <!-- Las personas, marcadas en la CARA y no en el cuerpo: lo que se está
+           afirmando es una identidad, y la identidad está en la cara.
+
+           Van siempre visibles y no sólo al tocarlas: la pregunta del módulo es
+           "¿quién es cada uno y puede estar acá?", y responderla sólo al
+           seleccionar obligaba a ir persona por persona para descubrir que
+           había alguien sin acceso.
+
+           Van en HTML y no en el SVG de arriba porque esa capa se estira sin
+           conservar la proporción, y con ella se estiraba también el texto: los
+           nombres salían anchos y deformados. -->
+      <div class="caras">
+        <div *ngFor="let p of personas" class="cara" [ngClass]="clase(p)"
+             [class.estimado]="p.rostroEstimado"
+             [class.elegida]="estaElegida(p)"
+             [ngStyle]="estiloCara(p)" (click)="tocar(p)"
+             [title]="p.rostroEstimado
+               ? 'No se le ve la cara en este momento: el recuadro marca dónde está la cabeza'
+               : ''">
+          <span class="etiqueta" [class.abajo]="etiquetaAbajo(p)">{{ nombreDe(p) }}</span>
+          <!-- El cronómetro, del otro lado del recuadro para que no pelee con
+               el nombre. Corre con el reloj del navegador, así que avanza
+               parejo aunque la cámara procese dos cuadros por segundo. -->
+          <span class="tiempo" [class.arriba]="etiquetaAbajo(p)">{{ cronometro(p) }}</span>
+        </div>
+      </div>
+
       <!-- La ficha, sobre el video, del que se tocó -->
       <div class="ficha" *ngIf="elegida as p" [attr.data-acceso]="clase(p)">
         <div class="f-linea"><span>Nombre:</span> <strong>{{ nombreDe(p) }}</strong></div>
-        <div class="f-linea"><span>En el lugar:</span> <strong>{{ haceCuanto(p) }}</strong></div>
+        <!-- De dónde sale el nombre. "Juan" porque se le vio la cara y "Juan"
+             deducido del escritorio donde está sentado no valen lo mismo, y
+             quien mira la pantalla tiene que poder distinguirlos. -->
+        <div class="f-linea" *ngIf="comoSeSabe(p) as via">
+          <span>Se sabe porque:</span> <strong>{{ via }}</strong>
+        </div>
+        <div class="f-linea">
+          <span>{{ queMide(p) }}:</span>
+          <strong class="f-cron">{{ cronometro(p) }}</strong>
+          <em class="f-desde">desde las {{ desdeQueHora(p) }}</em>
+        </div>
         <div class="f-linea f-acceso"><span>Acceso:</span> <strong>{{ acceso(p) }}</strong></div>
         <!-- Cada elemento obligatorio con su estado, siempre los tres: que el
              casco no aparezca por no haberse detectado dejaba la duda de si la
@@ -95,15 +119,92 @@
           <span>{{ e.nombre | titlecase }}:</span>
           <strong [attr.data-epp]="e.estado">{{ textoEstado(e.estado) }}</strong>
         </div>
+
+        <!-- La salida al "Sin identificar". El sistema no adivina un nombre:
+             lo pone una persona, que es la única que puede saberlo. -->
+        <div class="alta" *ngIf="!p.personId">
+          <p class="a-titulo">El sistema no sabe quién es y no lo asocia a nadie. Ponele vos el nombre.</p>
+
+          <p class="a-nota" *ngIf="!puedeNombrar">
+            Para esto hace falta permiso de administración: dar de alta a alguien es afirmar que
+            existe su consentimiento para guardar su cara, y esa no es una decisión operativa.
+          </p>
+
+          <ng-container *ngIf="puedeNombrar">
+            <p class="a-nota" *ngIf="!hayCaraUtilizable(p)">
+              Todavía no se le agarró una cara que sirva como primera foto.
+              <ng-container *ngIf="porQueNo(p) as motivo"><br />Ahora mismo: <em>{{ motivo }}</em>.</ng-container>
+              En cuanto mire hacia la cámara una vez, acá aparece su foto y se la puede dar de alta.
+            </p>
+
+            <ng-container *ngIf="hayCaraUtilizable(p)">
+              <p class="a-guardado" *ngIf="guardado">
+                Guardado. La cámara vuelve a leer la lista de personas cada 30 segundos: en menos de
+                un minuto empieza a reconocerlo con su nombre.
+              </p>
+
+              <ng-container *ngIf="!guardado">
+                <div class="a-cara" *ngIf="p.foto; else buscandoLaCara">
+                  <img [src]="'data:image/jpeg;base64,' + p.foto" alt="La cara que se va a guardar" />
+                  <span>Es la cara que se va a guardar como su primera plantilla.</span>
+                </div>
+                <!-- La cara se pide al tocar a la persona, así que llega en el
+                     refresco siguiente. Es menos de un segundo. -->
+                <ng-template #buscandoLaCara>
+                  <p class="a-nota">Buscando su cara…</p>
+                </ng-template>
+
+                <label class="a-campo">
+                  <span>Nombre y apellido</span>
+                  <input type="text" [(ngModel)]="nombreNuevo" name="nombreNuevo"
+                         placeholder="Juan Pérez" autocomplete="off" />
+                </label>
+
+                <div class="a-campo">
+                  <span>¿Tiene acceso a este lugar?</span>
+                  <div class="a-opciones">
+                    <button type="button" class="si" [class.activo]="accesoNuevo === true"
+                            (click)="accesoNuevo = true">Sí, tiene acceso</button>
+                    <button type="button" class="no" [class.activo]="accesoNuevo === false"
+                            (click)="accesoNuevo = false">No tiene acceso</button>
+                  </div>
+                </div>
+
+                <label class="a-campo">
+                  <span>Base del consentimiento</span>
+                  <input type="text" [(ngModel)]="consentimiento" name="consentimiento"
+                         placeholder="Ej.: consentimiento firmado el 12/03" autocomplete="off" />
+                  <small>Es lo que hace legal guardar su cara, y queda registrado que lo afirmaste vos.</small>
+                </label>
+
+                <p class="a-error" *ngIf="errorAlta">{{ errorAlta }}</p>
+
+                <!-- El servidor avisó que esa cara ya es de alguien. No se
+                     decide por el operador: se le ofrecen las dos salidas. -->
+                <div class="a-botones" *ngIf="yaExiste as otra">
+                  <button type="button" class="secundario" [disabled]="guardando"
+                          (click)="sumarAExistente(p)">
+                    Es {{ otra.displayName }}: sumale esta foto
+                  </button>
+                  <button type="button" class="peligro" [disabled]="guardando"
+                          (click)="darDeAlta(p, true)">
+                    Es otra persona: darla de alta igual
+                  </button>
+                </div>
+
+                <button *ngIf="!yaExiste" type="button" class="a-guardar"
+                        [disabled]="!puedeGuardar(p)" (click)="darDeAlta(p)">
+                  {{ guardando ? 'Guardando…' : 'Dar de alta con este nombre' }}
+                </button>
+              </ng-container>
+            </ng-container>
+          </ng-container>
+        </div>
       </div>
 
       <div class="aviso" *ngIf="!hayModulo && !fallo">
         Esta cámara no tiene asignado el módulo <strong>Ingreso de personas</strong>, así que no
         puede decir quién es cada uno. Asignáselo desde Cámaras.
-      </div>
-      <div class="aviso suave" *ngIf="hayModulo && !haySiluetas && personas.length">
-        Marcando con recuadro: esta cámara está configurada con el modelo de detección, que no
-        recorta el contorno del cuerpo.
       </div>
     </div>
 
@@ -122,7 +223,11 @@
       </span>
     </p>
     <p class="pie" *ngIf="hayModulo">
-      Tocá a una persona para ver quién es. Se pinta de verde si puede estar acá y de rojo si no.
+      Cada cara va marcada con su nombre: <strong>verde</strong> si tiene acceso a este lugar,
+      <strong>rojo</strong> si no lo tiene y <strong>gris</strong> si el sistema no sabe quién es.
+      El recuadro punteado quiere decir que en ese momento no se le ve la cara y se marca dónde
+      está la cabeza. Tocá a alguien para ver su ficha, y a un
+      <strong>Sin identificar</strong> para ponerle un nombre.
     </p>
   </div>
 </div>

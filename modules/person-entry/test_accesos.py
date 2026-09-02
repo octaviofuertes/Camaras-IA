@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 
-from accesos import ConfigAccesos, RegistroDePasos
+from accesos import Permanencia, ConfigAccesos, RegistroDePasos
 
 
 def registro(**kw) -> RegistroDePasos:
@@ -201,3 +201,57 @@ if __name__ == "__main__":
             print(f"  ERROR {nombre}: {e!r}")
     print(f"\n{len(pruebas) - fallos}/{len(pruebas)} pruebas OK")
     sys.exit(1 if fallos else 0)
+
+
+# ── el cronómetro de un cuerpo en el cuadro ─────────────────────────
+
+
+def test_el_cronometro_arranca_cuando_aparece_el_cuerpo():
+    """Y no cuando se le reconoce la cara, que puede ser mucho después."""
+    p = Permanencia(gracia_segundos=5.0)
+    p.ver([7], 1000.0)
+    assert p.desde_de(7, 1000.0) == 1000.0
+    p.ver([7], 1030.0)
+    assert p.desde_de(7, 1030.0) == 1000.0, "seguir viéndolo no puede reiniciar el conteo"
+
+
+def test_un_parpadeo_del_seguidor_no_reinicia_el_cronometro():
+    """Pasa varias veces por minuto: alguien se tapa, se agacha, pasa otro por delante.
+
+    Si cada parpadeo volviera el conteo a cero, el número que muestra la
+    pantalla no significaría nada.
+    """
+    p = Permanencia(gracia_segundos=5.0)
+    p.ver([7], 1000.0)
+    p.ver([], 1002.0)          # se lo perdió dos segundos
+    p.ver([7], 1004.0)
+    assert p.desde_de(7, 1004.0) == 1000.0
+
+
+def test_si_se_fue_de_verdad_el_cronometro_empieza_de_nuevo():
+    p = Permanencia(gracia_segundos=5.0)
+    p.ver([7], 1000.0)
+    p.ver([], 1020.0)          # veinte segundos sin verlo: se fue
+    p.ver([7], 1021.0)
+    assert p.desde_de(7, 1021.0) == 1021.0
+
+
+def test_cada_cuerpo_lleva_su_propio_tiempo():
+    p = Permanencia(gracia_segundos=5.0)
+    p.ver([7], 1000.0)
+    p.ver([7, 9], 1050.0)
+    assert p.desde_de(7, 1050.0) == 1000.0
+    assert p.desde_de(9, 1050.0) == 1050.0, "el que recién llega no hereda el tiempo del otro"
+
+
+def test_de_un_cuerpo_que_no_se_vio_nunca_no_se_inventa_tiempo():
+    p = Permanencia(gracia_segundos=5.0)
+    assert p.desde_de(99, 1000.0) == 1000.0, "tiene que dar cero, no un tiempo cualquiera"
+
+
+def test_la_memoria_no_crece_con_los_que_ya_no_estan():
+    """En un lugar de paso, el seguidor reparte cientos de identificadores por hora."""
+    p = Permanencia(gracia_segundos=5.0)
+    for i in range(500):
+        p.ver([i], 1000.0 + i)
+    assert len(p) <= 6, f"quedaron {len(p)} cuerpos colgados"

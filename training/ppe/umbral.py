@@ -1,7 +1,23 @@
-"""Elige, con datos, cuánta confianza pedirle a una detección de AUSENCIA.
+"""Cuánta confianza aguanta cada clase de AUSENCIA, mirando caja por caja.
 
   python training/ppe/umbral.py
   python training/ppe/umbral.py --precision-minima 0.8
+
+── Ojo: esto NO es lo que calibra al módulo ────────────────────────────────
+
+Lo que sale de acá describe al detector: qué tan seguido una caja `NO-Hardhat`
+cae donde hay una cabeza descubierta anotada. Sirve para comparar dos modelos y
+para saber si un reentrenamiento sirvió de algo.
+
+Los umbrales con los que el módulo decide salen de otro lado:
+
+    python training/ppe/evaluar_personas.py --calibrar
+
+porque el módulo no emite cajas sino veredictos sobre personas, y las dos
+métricas no coinciden. Dos cajas mal puestas sobre la misma persona son dos
+errores acá y una sola alerta —correcta— en pantalla. Calibrando con esta vara,
+el chaleco quedaba silenciado por no llegar a 0,70 de precisión, cuando medido
+por persona da 0,83 y ve 3 de cada 4 faltas reales.
 
 ── Por qué no se elige a ojo ───────────────────────────────────────────────
 
@@ -121,6 +137,15 @@ def main() -> int:
     else:
         print("  Ninguna clase de ausencia está para alertar. Hay que entrenar más.")
 
+    print("  Estos números describen al DETECTOR. Los umbrales con los que el")
+    print("  módulo decide salen de medir el veredicto por persona:")
+    print("      python training/ppe/evaluar_personas.py --calibrar\n")
+
+    # Se guarda aparte de `umbrales`, que es lo que lee el módulo. Cuando esto
+    # escribía ahí, calibraba la cámara con la métrica equivocada: por caja, el
+    # chaleco no llegaba a la precisión pedida y quedaba silenciado, mientras
+    # que por persona —que es lo que el módulo emite— da 0,83 y ve 3 de cada 4
+    # faltas reales.
     ficha = MODELOS / "epp.json"
     datos = {}
     if ficha.is_file():
@@ -128,7 +153,7 @@ def main() -> int:
             datos = json.loads(ficha.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             datos = {}
-    datos["umbrales"] = {
+    datos["curvaDetector"] = {
         "precisionMinima": args.precision_minima,
         "porElemento": elegidos,
     }

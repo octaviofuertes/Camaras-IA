@@ -47,12 +47,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from reglas import (  # noqa: E402
     ELEMENTOS,
+    IMGSZ,
+    IMGSZ_RECORTE,
+    MIRAR_CADA,
+    PISO_DEL_DETECTOR,
     POR_CLAVE,
     ConfigEpp,
     VigiladorEpp,
     calibracion,
     de_quien_es,
     evaluar_cuadro,
+    huella_de_pesos,
+    piso_de_ausencia,
 )
 
 log = logging.getLogger("ppe-detection")
@@ -64,32 +70,109 @@ PESOS_POR_OMISION = "training/models/epp.pt"
 CLASE_PERSONA = "Person"
 
 
-def _medido(pesos: Path) -> dict[str, float]:
-    """Los umbrales que midió `training/ppe/umbral.py` para ESTE modelo.
+#: Cómo se vuelve a medir la calibración. Se nombra en cada aviso, porque un
+#: módulo callado sin decir qué correr es un módulo roto.
+COMO_CALIBRAR = "python training/ppe/evaluar_personas.py --calibrar"
 
-    Vive al lado del .pt, en `epp.json`, porque es una propiedad del modelo y no
-    de la cámara: cuando se reentrena y se vuelve a medir, todas las cámaras
+
+def _medido(pesos: Path) -> tuple[dict[str, float], dict[str, float]]:
+    """Los umbrales medidos para ESTE modelo: (directos, corroborados).
+
+    Viven al lado del .pt, en `epp.json`, porque son una propiedad del modelo y
+    no de la cámara: cuando se reentrena y se vuelve a medir, todas las cámaras
     quedan bien calibradas sin que nadie edite nada.
 
-    Si no está el archivo se devuelve vacío, y eso significa "no se midió
-    nada". La consecuencia es deliberada: sin medición no se alerta. Un módulo
-    que avisa con umbrales inventados acusa gente por nada, y es exactamente lo
-    que pasaba antes de esto.
+    Si no están, se devuelve vacío, y eso significa "no se midió nada". La
+    consecuencia es deliberada: sin medición no se alerta. Un módulo que avisa
+    con umbrales inventados acusa gente por nada.
+
+    La medición se ata al archivo de pesos con una huella. Sin eso, reentrenar
+    dejaba los umbrales del modelo anterior aplicándose al nuevo —números que
+    no significan nada para él— o los borraba y el módulo se quedaba mudo para
+    siempre sin decir por qué.
     """
     ficha = pesos.with_suffix(".json")
     if not ficha.is_file():
         log.warning(
-            "no hay mediciones en %s: no se va a alertar de nada hasta correr "
-            "python training/ppe/umbral.py", ficha,
+            "no hay mediciones en %s: no se va a alertar de nada hasta correr %s",
+            ficha, COMO_CALIBRAR,
         )
-        return {}
+        return {}, {}
     try:
         datos = json.loads(ficha.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         log.error("no se pudo leer %s: %r", ficha, exc)
-        return {}
-    medidos = (datos.get("umbrales") or {}).get("porElemento") or {}
-    return {str(k): float(v) for k, v in medidos.items()}
+        return {}, {}
+
+    umbrales = datos.get("umbrales") or {}
+    if not umbrales:
+        log.warning(
+            "%s no tiene umbrales medidos: no se va a alertar de nada hasta correr %s",
+            ficha.name, COMO_CALIBRAR,
+        )
+        return {}, {}
+
+    sobre = umbrales.get("medidoSobre")
+    huella = huella_de_pesos(pesos)
+    if sobre != huella:
+        # Se prefiere el silencio al número equivocado: alertar con la
+        # calibración de otro modelo es exactamente el error que se quería
+        # evitar midiendo.
+        log.error(
+            "los umbrales de %s se midieron sobre otro modelo (%s, y este es %s): "
+            "no se alerta hasta volver a medir con %s",
+            ficha.name, sobre or "sin huella", huella, COMO_CALIBRAR,
+        )
+        return {}, {}
+
+    directos = {str(k): float(v) for k, v in (umbrales.get("porElemento") or {}).items()}
+    corroborados = {str(k): float(v) for k, v in (umbrales.get("corroborado") or {}).items()}
+    return directos, corroborados
+
+
+def _se_dibuja(clase: str, conf: float, cfg: ConfigEpp) -> bool:
+    """¿Esta caja se muestra en pantalla?
+
+    La vara es la misma que decide: si algo puede terminar en una alerta, tiene
+    que verse en la cámara, y si no llega para alertar tampoco tiene por qué
+    acusar a alguien en pantalla.
+    """
+    elem = next((e for e in ELEMENTOS if clase in (e.puesto, e.falta)), None)
+    if elem is None:
+        return False
+    if clase == elem.puesto:
+        return conf >= cfg.minConfianza
+    return conf >= piso_de_ausencia(elem.clave, cfg)
+
+
+def _sin_repetidos(
+    elementos: list[tuple[str, tuple[float, float, float, float], float]],
+    solape_minimo: float = 0.6,
+) -> list[tuple[str, tuple[float, float, float, float], float]]:
+    """Una caja por elemento real, la más confiable.
+
+    La segunda mirada vuelve a encontrar lo que ya había encontrado el cuadro
+    entero, así que el mismo casco llegaba dos veces y se dibujaba dos veces,
+    una encima de la otra y con dos rótulos. Para decidir daba igual —manda la
+    más confiable— pero en pantalla se veía como si hubiera dos cascos.
+    """
+    salida: list[tuple[str, tuple[float, float, float, float], float]] = []
+    for clase, caja, conf in sorted(elementos, key=lambda x: -x[2]):
+        if any(c == clase and _iou(caja, otra) >= solape_minimo
+               for c, otra, _cf in salida):
+            continue
+        salida.append((clase, caja, conf))
+    return salida
+
+
+def _iou(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> float:
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    ix = max(0.0, min(ax + aw, bx + bw) - max(ax, bx))
+    iy = max(0.0, min(ay + ah, by + bh) - max(ay, by))
+    inter = ix * iy
+    union = aw * ah + bw * bh - inter
+    return inter / union if union > 0 else 0.0
 
 
 class PpeDetectionModule(PerceptaModule):
@@ -108,9 +191,15 @@ class PpeDetectionModule(PerceptaModule):
         self._en_vivo: list[dict] = []
         self._en_vivo_personas: list[dict] = []
         self._en_vivo_ts: float = 0.0
-        # A quién le toca la segunda mirada. Ver abajo por qué es de a uno.
-        self._turno = 0
+        # Cuándo recibió cada persona su última mirada de cerca. Ver abajo por
+        # qué es de a una por cuadro.
+        self._visto_de_cerca: dict[int, int] = {}
         self._segundas = 0
+        # Segundas miradas que se dejaron pasar porque la máquina no llegaba.
+        self._salteadas = 0
+        # Cuánto tardó el último cuadro. Con esto se decide si hay margen para
+        # mirar de cerca o si conviene priorizar que las cajas lleguen a tiempo.
+        self._ultimo_ms = 0.0
         self._segunda_activa = True
 
     # ── ciclo de vida ────────────────────────────────────────────────
@@ -153,16 +242,19 @@ class PpeDetectionModule(PerceptaModule):
         # escribe una vez y no se vuelve a tocar: cuando después se midió que el
         # casco no estaba para alertar, las cámaras siguieron avisando igual.
         # Se puede pisar por cámara, para el caso raro de un encuadre propio.
-        umbrales, callados = calibracion(tuple(exigidos), _medido(ruta))
+        directos, corroborados = _medido(ruta)
+        umbrales, corro, callados = calibracion(tuple(exigidos), directos, corroborados)
         if cfg.get("umbralPorElemento"):
             umbrales = {k: float(v) for k, v in cfg["umbralPorElemento"].items()}
+        if cfg.get("umbralCorroborado"):
+            corro = {k: float(v) for k, v in cfg["umbralCorroborado"].items()}
         if cfg.get("sinAlertar") is not None and cfg.get("sinAlertar") != []:
             callados = tuple(cfg["sinAlertar"])
         if callados:
             log.warning(
                 "sin medición suficiente para alertar de: %s. Se detectan y se "
-                "dibujan, pero no generan eventos. Corré python training/ppe/umbral.py",
-                ", ".join(callados),
+                "dibujan, pero no generan eventos. Corré %s",
+                ", ".join(callados), COMO_CALIBRAR,
             )
 
         self._vigilador = VigiladorEpp(ConfigEpp(
@@ -170,6 +262,7 @@ class PpeDetectionModule(PerceptaModule):
             minConfianza=float(cfg.get("minConfianza", 0.45)),
             minConfianzaFalta=float(cfg.get("minConfianzaFalta", 0.45)),
             umbralPorElemento=umbrales,
+            umbralCorroborado=corro,
             sinAlertar=callados,
             verificarPosicion=bool(cfg.get("verificarPosicion", True)),
             solapeMinimo=float(cfg.get("solapeMinimo", 0.55)),
@@ -193,7 +286,8 @@ class PpeDetectionModule(PerceptaModule):
         # Una inferencia en vacío deja los kernels listos: sin esto el primer
         # cuadro real tarda varios segundos y se pierde.
         self._modelo.predict(
-            np.zeros((640, 640, 3), dtype=np.uint8), verbose=False, device="cpu",
+            np.zeros((IMGSZ, IMGSZ, 3), dtype=np.uint8), verbose=False,
+            device="cpu", imgsz=IMGSZ,
         )
 
     def release(self) -> None:
@@ -216,7 +310,7 @@ class PpeDetectionModule(PerceptaModule):
         # mezcle cuando dos se cruzan.
         for r in self._modelo.track(
             frame.image, persist=True, tracker="bytetrack.yaml",
-            conf=0.25, verbose=False, device="cpu",
+            conf=PISO_DEL_DETECTOR, imgsz=IMGSZ, verbose=False, device="cpu",
         ):
             cajas = getattr(r, "boxes", None)
             if cajas is None:
@@ -227,9 +321,16 @@ class PpeDetectionModule(PerceptaModule):
                 x1, y1, x2, y2 = (float(v) for v in b.xyxy[0].tolist())
                 caja = (x1 / w, y1 / h, (x2 - x1) / w, (y2 - y1) / h)
                 if clase == CLASE_PERSONA:
-                    tid = int(b.id.item()) if getattr(b, "id", None) is not None else -1
                     personas.append(caja)
-                    ids.append(tid)
+                    # Sin seguimiento —el primer cuadro, o un tracker que se
+                    # perdió— se usa un número propio de cada posición en vez de
+                    # un -1 para todos. Con el -1 compartido, tres personas
+                    # pasaban a ser una sola para el vigilador: sus cuadros
+                    # seguidos se sumaban entre sí y el aviso por una silenciaba
+                    # a las otras dos por dos minutos.
+                    ids.append(int(b.id.item())
+                               if getattr(b, "id", None) is not None
+                               else -len(personas))
                 else:
                     elementos.append((clase, caja, conf))
 
@@ -252,8 +353,14 @@ class PpeDetectionModule(PerceptaModule):
         # pipeline no llegaría. Como el EPP no cambia de un cuadro al otro,
         # turnarse alcanza: con tres personas cada una se revisa una vez por
         # segundo, y el estado se sostiene entre medio.
-        if personas and self._segunda_activa:
-            elementos += self._segunda_mirada(frame.image, personas)
+        # La segunda mirada cuesta casi lo mismo que el cuadro entero. Cuando la
+        # máquina no llega, ese tiempo se paga en retraso: las cajas empiezan a
+        # quedar atrás de la persona, que es peor que no mirar de cerca. Con
+        # margen se hace; sin margen se saltea y se retoma sola cuando lo haya.
+        if personas and self._segunda_activa and self._hay_margen():
+            elementos += self._segunda_mirada(frame.image, personas, ids)
+        elif personas and self._segunda_activa:
+            self._salteadas += 1
 
         # Lo que va a dibujar la pantalla: cada elemento con su nombre en
         # castellano y si está puesto o falta. Va TODO lo detectado, no sólo lo
@@ -283,23 +390,61 @@ class PpeDetectionModule(PerceptaModule):
                 },
             ))
 
+        self._ultimo_ms = (time.perf_counter() - t0) * 1000.0
         return InferenceResult(
             detections=detecciones,
-            inference_ms=(time.perf_counter() - t0) * 1000.0,
+            inference_ms=self._ultimo_ms,
         )
+
+    def _hay_margen(self) -> bool:
+        """¿Toca mirar de cerca en este cuadro?
+
+        La segunda mirada es lo que hace que se vea a los tres de la escena y no
+        sólo al que está adelante, así que apagarla no es una opción: sin ella
+        el módulo vuelve a informar de a una persona. Pero cuesta otra
+        inferencia, y en una máquina que no llega ese tiempo se paga en cajas
+        que quedan atrás del cuerpo.
+
+        Entonces no se apaga: se espacia. Si el cuadro anterior entró dentro del
+        presupuesto del pipeline, se mira de cerca siempre —máquina holgada, no
+        hay nada que ahorrar—. Si no entró, se mira una vez cada
+        `MIRAR_CADA` cuadros: la ronda sigue avanzando, cada persona tarda más
+        en llegarle el turno, y entre medio los recuadros se mueven al ritmo del
+        cuadro completo.
+        """
+        if self._ultimo_ms <= 0:
+            return True
+        objetivo_ms = 1000.0 / max(float(getattr(self._ctx, "target_fps", 0) or 3.0), 0.5)
+        if self._ultimo_ms < objetivo_ms * 0.55:
+            return True
+        return self._cuadros % MIRAR_CADA == 0
 
     def _segunda_mirada(
         self,
         imagen: Any,
         personas: list[tuple[float, float, float, float]],
+        ids: list[int],
     ) -> list[tuple[str, tuple[float, float, float, float], float]]:
         """Mira de cerca a una persona y devuelve lo que encuentre, en
-        coordenadas del cuadro completo."""
+        coordenadas del cuadro completo.
+
+        Le toca a quien hace más tiempo no recibe una mirada de cerca, y no al
+        siguiente de la lista: el orden de las detecciones cambia entre cuadros
+        y la cantidad de gente también, así que ir por posición dejaba a alguien
+        sin revisar mientras otro se llevaba dos turnos seguidos.
+        """
         if self._modelo is None:
             return []
         h, w = imagen.shape[:2]
-        self._turno = (self._turno + 1) % len(personas)
-        px, py, pw, ph = personas[self._turno]
+        # Sólo se recuerda a los que están en cuadro: quien se fue y volvió pasa
+        # al frente de la cola, que es lo que corresponde.
+        self._visto_de_cerca = {i: self._visto_de_cerca.get(i, -1) for i in ids}
+        turno = min(range(len(personas)),
+                    key=lambda i: self._visto_de_cerca.get(ids[i], -1)
+                    if i < len(ids) else -1)
+        if turno < len(ids):
+            self._visto_de_cerca[ids[turno]] = self._cuadros
+        px, py, pw, ph = personas[turno]
 
         # Un poco de margen: un casco asoma por arriba de la caja del cuerpo, y
         # sin margen se recorta justo lo que se quiere ver.
@@ -314,7 +459,8 @@ class PpeDetectionModule(PerceptaModule):
         recorte = imagen[y1:y2, x1:x2]
         try:
             r = self._modelo.predict(
-                recorte, verbose=False, device="cpu", imgsz=384, conf=0.25,
+                recorte, verbose=False, device="cpu",
+                imgsz=IMGSZ_RECORTE, conf=PISO_DEL_DETECTOR,
             )[0]
         except Exception as exc:  # noqa: BLE001
             log.error("falló la segunda mirada: %r", exc)
@@ -350,16 +496,20 @@ class PpeDetectionModule(PerceptaModule):
     ) -> tuple[list[dict], list[dict]]:
         """Lo que hay que dibujar: los elementos y el estado de cada persona.
 
-        Se descartan las detecciones por debajo de `minConfianza`, la misma vara
-        con la que se decide alertar. Antes se dibujaba todo lo que saliera del
-        detector (que corre a 0,25) y eso pintaba de rojo a gente con el casco
-        puesto: una caja floja de "NO-Hardhat" no alcanza para avisar, así que
-        tampoco tiene por qué alcanzar para acusar en pantalla.
+        Se dibuja exactamente lo que puede llegar a decidir: a la presencia se
+        le pide `minConfianza` y a cada ausencia su propio umbral, que es la
+        misma vara con la que se alerta. Con una sola vara para las dos cosas la
+        pantalla mentía en los dos sentidos: pintaba de rojo a gente con el
+        casco puesto cuando estaba floja, y —desde que los umbrales medidos
+        bajaron— se comía faltas que sí generaban alerta, así que en Eventos
+        aparecía un "sin chaleco" que en la cámara no estaba marcado.
         """
         cfg = self._vigilador.cfg if self._vigilador else ConfigEpp()
 
-        dibujables = [(c, caja, conf) for c, caja, conf in elementos
-                      if conf >= cfg.minConfianza]
+        dibujables = _sin_repetidos([
+            (c, caja, conf) for c, caja, conf in elementos
+            if _se_dibuja(c, conf, cfg)
+        ])
 
         salida: list[dict] = []
         for clase, caja, conf in dibujables:
@@ -384,7 +534,11 @@ class PpeDetectionModule(PerceptaModule):
         # las que detecta el módulo de ingreso, que es otro modelo y las
         # encuentra en otro orden, así que el "le falta el casco" del EPP caía
         # sobre la persona equivocada apenas había más de una en cuadro.
-        sabido = evaluar_cuadro(personas, dibujables, cfg, solo_exigidos=False)
+        # El estado sale de TODAS las detecciones, no sólo de las dibujadas: es
+        # la misma entrada que recibe la alerta, así que la pantalla dice lo
+        # mismo que Eventos. Una caja floja de casco no se dibuja —no aporta— y
+        # sin embargo cuenta, porque es lo que desactiva la corroboración.
+        sabido = evaluar_cuadro(personas, elementos, cfg, solo_exigidos=False)
         gente: list[dict] = []
         for i, caja in enumerate(personas):
             de_esta = sabido.get(i, {})
@@ -427,8 +581,12 @@ class PpeDetectionModule(PerceptaModule):
             "seAlerta": [k for k in (self._vigilador.cfg.exigidos if self._vigilador else ())
                          if k not in (self._vigilador.cfg.sinAlertar if self._vigilador else ())],
             "umbralesMedidos": dict(self._vigilador.cfg.umbralPorElemento) if self._vigilador else {},
+            "umbralesCorroborados": dict(self._vigilador.cfg.umbralCorroborado) if self._vigilador else {},
+            "comoCalibrar": COMO_CALIBRAR,
             "cuadrosProcesados": self._cuadros,
             "segundasMiradas": self._segundas,
+            "segundasSalteadasPorTiempo": self._salteadas,
+            "ultimoCuadroMs": round(self._ultimo_ms),
             "personasVistas": self._personas_vistas,
             "faltasAvisadas": self._faltas,
             **(self._vigilador.estado() if self._vigilador else {}),

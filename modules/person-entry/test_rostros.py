@@ -216,6 +216,53 @@ def test_una_cara_sin_cuerpo_no_se_asocia_a_cualquiera():
     assert asociar_a_cuerpo(lejos, cuerpos) is None
 
 
+def test_la_cara_tiene_que_estar_dentro_del_cuerpo():
+    """Que el centro caiga en la franja del cuerpo no alcanza.
+
+    Con dos personas cerca, el centro de una cara cae dentro de la caja del de
+    al lado sin ningún problema. Se pide que la cara esté ADENTRO.
+    """
+    cuerpos = [(0.05, 0.20, 0.20, 0.70)]
+    # Centro en x=0.245, dentro de la franja 0.05..0.25, pero la cara está casi
+    # toda afuera del cuerpo.
+    asomada = rostro(vector(1), x=0.19, y=0.22, w=0.11, h=0.13)
+    assert asociar_a_cuerpo(asomada, cuerpos) is None
+
+
+def test_la_cara_del_de_adelante_no_se_le_da_al_de_atras():
+    """El error que producía "gana el cuerpo más chico".
+
+    Alguien parado adelante ocupa una caja grande; alguien más lejos, detrás,
+    una chica. Con el criterio viejo la cara del de adelante caía dentro de la
+    caja del de atrás y se le atribuía a él, que es ponerle a una cara el nombre
+    de otra persona.
+    """
+    adelante = (0.30, 0.10, 0.30, 0.85)
+    atras = (0.42, 0.14, 0.16, 0.50)
+    cara = rostro(vector(1), x=0.40, y=0.12, w=0.10, h=0.13)
+
+    assert asociar_a_cuerpo(cara, [adelante, atras]) == 0
+
+
+def test_entre_dos_cuerpos_igual_de_plausibles_no_se_elige_ninguno():
+    """Preferir "sin identificar" antes que el nombre del de al lado.
+
+    Dos cajas prácticamente superpuestas —dos personas juntas, una apenas
+    detrás— dejan la cara igual de adentro de las dos. Elegir sería inventar.
+    """
+    uno = (0.30, 0.10, 0.30, 0.80)
+    otro = (0.31, 0.11, 0.30, 0.80)
+    cara = rostro(vector(1), x=0.40, y=0.13, w=0.10, h=0.13)
+
+    assert asociar_a_cuerpo(cara, [uno, otro]) is None
+
+
+def test_la_cara_a_la_altura_de_la_cintura_no_es_la_cabeza_de_ese_cuerpo():
+    cuerpos = [(0.05, 0.20, 0.30, 0.70)]
+    baja = rostro(vector(1), x=0.10, y=0.60, w=0.10, h=0.13)
+    assert asociar_a_cuerpo(baja, cuerpos) is None
+
+
 def test_el_parecido_coseno_se_comporta():
     v = vector(42)
     assert coseno(v, v) > 0.999, "un vector consigo mismo tiene que dar 1"

@@ -22,13 +22,60 @@ Por eso este módulo se apoya en que el dataset trae la ausencia ANOTADA: hay
 una clase `NO-Hardhat` que marca cabezas sin casco. Se avisa cuando el modelo
 VIO que falta, no cuando no encontró nada. Si no hay evidencia en ninguno de
 los dos sentidos, la respuesta es "no se sabe" y no pasa nada.
+
+── Y sin embargo, lo que NO aparece también dice algo ──────────────────────
+
+Pedirle a una sola caja de `NO-Hardhat` toda la evidencia dejaba al módulo casi
+mudo: para que 7 de cada 10 alertas fueran correctas había que exigirle tanta
+confianza que se veían 2 de cada 10 faltas reales.
+
+Lo que faltaba era mirar el contexto. El modelo encuentra el casco PUESTO mucho
+mejor de lo que encuentra una cabeza descubierta, así que "a esta persona no le
+vi ningún casco por ninguna parte" no es lo mismo que no haber mirado: es un
+dato. Una caja floja de ausencia sobre alguien a quien además se le encontró un
+casco es casi siempre un error; la misma caja sobre alguien a quien no se le
+encontró ninguno, no.
+
+Eso es `umbralCorroborado`, y NO afloja la regla de arriba: sigue haciendo
+falta una caja de `NO-*` para avisar. Lo único que cambia es cuánta confianza
+se le pide según haya o no algo que la contradiga. Los dos números salen de
+medir el veredicto por persona (`training/ppe/evaluar_personas.py`), no de
+razonar cuál suena prudente.
 """
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
+from pathlib import Path
 
 #: Caja normalizada: x, y, ancho, alto en fracciones de la imagen.
 Caja = tuple[float, float, float, float]
+
+# ── Cómo se mira el cuadro ──────────────────────────────────────────────
+#
+# Estos tres números viven acá, y no en `module.py`, porque los usan dos lados
+# que TIENEN que coincidir: la cámara y la calibración
+# (`training/ppe/evaluar_personas.py`). Los umbrales se eligen midiendo con
+# estos valores; si la cámara mirara con otros, las confianzas no significarían
+# lo mismo y los umbrales medidos dejarían de valer. Ya pasó: el módulo entraba
+# a 640 —el valor por omisión de ultralytics— mientras todo se medía a 512.
+
+#: Tamaño de entrada del cuadro completo. Es el mismo con el que se entrenó.
+IMGSZ: int = 512
+#: Tamaño de entrada del recorte de una persona. Más chico porque ya viene
+#: acotado, y así la segunda mirada cuesta menos.
+IMGSZ_RECORTE: int = 384
+#: Cada cuántos cuadros se mira de cerca cuando la máquina no da abasto.
+#: Con 3 y un cuadro por segundo, a cada persona de una escena de tres le toca
+#: su turno cada nueve segundos: tarde para un movimiento, pero de sobra para
+#: un casco, que no aparece y desaparece. Bajarlo devuelve precisión y saca
+#: fluidez a los recuadros; subirlo, al revés.
+MIRAR_CADA: int = 3
+
+#: Piso de confianza del detector. Por debajo no se junta nada, así que ningún
+#: umbral puede estar más abajo. Bajarlo no mejoró nada medido: sólo agrega
+#: cajas flojas que tapan la corroboración.
+PISO_DEL_DETECTOR: float = 0.25
 
 
 @dataclass(frozen=True)
@@ -88,7 +135,9 @@ class ConfigEpp:
     #: de cada 19 faltas detectadas: el módulo dejaba de avisar casi siempre. La
     #: confianza no significa lo mismo en todas las clases —el modelo está
     #: seguro de un casco y mucho menos de una cabeza descubierta— así que sale
-    #: de `training/ppe/umbral.py`, que lo deriva de la curva de precisión.
+    #: de medir: `training/ppe/evaluar_personas.py --calibrar`. Este valor es
+    #: sólo el que se usa mientras no haya medición, y sin medición no se
+    #: alerta, así que en una cámara andando nunca decide nada.
     minConfianzaFalta: float = 0.45
     #: Umbral propio de cada elemento, cuando se lo midió. Lo que no esté acá
     #: usa `minConfianzaFalta`.
@@ -96,6 +145,28 @@ class ConfigEpp:
     #: Existe porque un solo número para los cuatro obliga a elegir entre no
     #: avisar de lo que el modelo sí ve bien, o avisar de más con lo que ve mal.
     umbralPorElemento: dict[str, float] = field(default_factory=dict)
+    #: Umbral, más bajo, para la ausencia que ADEMÁS no tiene nada que la
+    #: contradiga: el detector no le vio ese elemento a esa persona por ningún
+    #: lado. Lo llena `training/ppe/evaluar_personas.py`.
+    #:
+    #: Existe porque el umbral de arriba, solo, dejaba al módulo casi mudo. Con
+    #: el modelo actual, para que 7 de cada 10 alertas de casco sean correctas
+    #: hay que pedirle 0,67 de confianza a un "NO-Hardhat", y a esa altura se
+    #: ven 15 de cada 100 cabezas descubiertas: el módulo mira todo el día y
+    #: avisa una vez.
+    #:
+    #: Lo que cambia el número es el contexto. Una caja floja de "sin casco"
+    #: sobre alguien a quien el modelo TAMBIÉN le encontró un casco es
+    #: probablemente un error; la misma caja floja sobre alguien a quien no le
+    #: encontró ningún casco por ninguna parte es otra cosa. El modelo acierta
+    #: el casco puesto mucho mejor que la cabeza descubierta (mAP50 0,85 contra
+    #: 0,28), así que "no le vi ninguno" es evidencia de verdad y no ausencia
+    #: de evidencia.
+    #:
+    #: Sigue haciendo falta que el modelo VEA la ausencia: sin una caja de
+    #: `NO-*` no se avisa nada, por más que no aparezca el elemento. La
+    #: diferencia con "no lo encontré, entonces falta" es justo esa.
+    umbralCorroborado: dict[str, float] = field(default_factory=dict)
     #: Elementos que NO se alertan aunque estén en `exigidos`.
     #:
     #: Sirve para el caso real de un modelo que ve bien unas cosas y mal otras:
@@ -152,7 +223,11 @@ def de_quien_es(elemento: Caja, personas: list[Caja], minimo: float) -> int | No
     mejor, mejor_valor = None, minimo
     for i, p in enumerate(personas):
         v = solape(elemento, p)
-        if v >= mejor_valor:
+        # `>= minimo` para entrar y `> mejor_valor` para desplazar al que ya
+        # estaba: con `>=` en las dos, dos personas con el mismo solape —el caso
+        # de una tapando a la otra, donde el casco cae entero dentro de ambas—
+        # se resolvía por el orden de la lista, que cambia entre cuadros.
+        if v >= minimo and (mejor is None or v > mejor_valor):
             mejor, mejor_valor = i, v
     return mejor
 
@@ -206,7 +281,35 @@ def evaluar_cuadro(
     ocultar un casco detectado porque en esa cámara no es obligatorio deja al
     operador sin saber si el módulo está mirando o está roto.
     """
+    evidencia = evidencia_por_persona(personas, detecciones, cfg, solo_exigidos)
     salida: dict[int, dict[str, tuple[bool, float]]] = {}
+    for quien, elementos in evidencia.items():
+        for clave, ev in elementos.items():
+            veredicto = decidir(clave, ev.get("tiene"), ev.get("falta"), cfg)
+            if veredicto is not None:
+                salida.setdefault(quien, {})[clave] = veredicto
+    return salida
+
+
+def evidencia_por_persona(
+    personas: list[Caja],
+    detecciones: list[tuple[str, Caja, float]],
+    cfg: ConfigEpp,
+    solo_exigidos: bool = True,
+) -> dict[int, dict[str, dict[str, float]]]:
+    """La evidencia cruda de cada persona: {persona: {elemento: {tiene, falta}}}.
+
+    Cada valor es la confianza de la mejor detección de ese signo. Está separado
+    de la decisión porque para elegir cuánta confianza pedirle a una ausencia
+    hay que saber antes si algo la contradice, y eso puede venir en una
+    detección posterior —así que primero se junta todo y después se decide.
+
+    Separarlo también es lo que permite barrer umbrales sin volver a correr el
+    modelo: `training/ppe/evaluar_personas.py` extrae esta evidencia una vez y
+    prueba miles de combinaciones contra `decidir`, que es la función de verdad
+    y no una copia suya.
+    """
+    evidencia: dict[int, dict[str, dict[str, float]]] = {}
     for clase, caja, conf in detecciones:
         elemento = next(
             (e for e in ELEMENTOS if clase in (e.puesto, e.falta)
@@ -216,27 +319,75 @@ def evaluar_cuadro(
         if elemento is None:
             continue
         lo_tiene = clase == elemento.puesto
-        # A la ausencia se le pide más confianza que a la presencia: un falso
-        # "sin casco" acusa a alguien, un falso "con casco" no le hace nada a
-        # nadie.
-        if lo_tiene:
-            minimo = cfg.minConfianza
-        else:
-            minimo = cfg.umbralPorElemento.get(elemento.clave, cfg.minConfianzaFalta)
-        if conf < minimo:
+        if not lo_tiene and conf < piso_de_ausencia(elemento.clave, cfg):
+            # Por debajo del umbral más bajo que este elemento pueda llegar a
+            # usar no hay nada que decidir.
             continue
         quien = de_quien_es(caja, personas, cfg.solapeMinimo)
         if quien is None:
             continue
         if cfg.verificarPosicion and not en_su_lugar(elemento, caja, personas[quien]):
             continue
-        previo = salida.setdefault(quien, {}).get(elemento.clave)
-        # Ante dos detecciones del mismo elemento para la misma persona manda la
-        # más confiable, y ante empate, la que dice que SÍ lo tiene: acusar de
-        # una falta pide más evidencia que descartarla.
-        if previo is None or conf > previo[1] or (conf == previo[1] and lo_tiene):
-            salida[quien][elemento.clave] = (lo_tiene, conf)
-    return salida
+        signo = "tiene" if lo_tiene else "falta"
+        de_este = evidencia.setdefault(quien, {}).setdefault(elemento.clave, {})
+        if conf > de_este.get(signo, -1.0):
+            de_este[signo] = conf
+    return evidencia
+
+
+def piso_de_ausencia(clave: str, cfg: ConfigEpp) -> float:
+    """La confianza más baja que una caja de ausencia puede llegar a necesitar.
+
+    Es también la vara con la que se decide qué se dibuja en pantalla: si algo
+    puede llegar a generar una alerta, tiene que verse. Que el operador reciba
+    en Eventos un "sin chaleco" que en la cámara no estaba marcado es la forma
+    más rápida de que deje de creerle al módulo.
+    """
+    directo = cfg.umbralPorElemento.get(clave, cfg.minConfianzaFalta)
+    corroborado = cfg.umbralCorroborado.get(clave)
+    return min(directo, corroborado) if corroborado is not None else directo
+
+
+def decidir(
+    clave: str,
+    tiene: float | None,
+    falta: float | None,
+    cfg: ConfigEpp,
+) -> tuple[bool, float] | None:
+    """El veredicto sobre un elemento de una persona, con toda la evidencia junta.
+
+    None es "no se sabe", que no es lo mismo que "lo tiene": el que no se sabe
+    no genera nada.
+    """
+    directo = cfg.umbralPorElemento.get(clave, cfg.minConfianzaFalta)
+    corroborado = cfg.umbralCorroborado.get(clave)
+
+    # 1) Ausencia por sí sola. Alcanza para acusar aunque el modelo también
+    #    haya creído ver el elemento puesto, si la ausencia es más confiable:
+    #    ante dos detecciones contradictorias manda la más segura, y ante
+    #    empate la que NO acusa.
+    if falta is not None and falta >= directo and (tiene is None or falta > tiene):
+        return (False, falta)
+
+    # 2) Ausencia corroborada por lo que no aparece. Confianza más baja, pero
+    #    sólo cuando el detector no le vio ese elemento a esa persona por
+    #    ningún lado —ni siquiera flojo—. Ese silencio es informativo: el
+    #    modelo encuentra el elemento puesto mucho mejor de lo que encuentra su
+    #    ausencia, así que no haberlo encontrado pesa.
+    if (
+        falta is not None
+        and corroborado is not None
+        and falta >= corroborado
+        and tiene is None
+    ):
+        return (False, falta)
+
+    # 3) Lo tiene puesto. Se le pide menos confianza que a la ausencia porque
+    #    equivocarse acá no acusa a nadie.
+    if tiene is not None and tiene >= cfg.minConfianza:
+        return (True, tiene)
+
+    return None
 
 
 class VigiladorEpp:
@@ -322,16 +473,42 @@ class VigiladorEpp:
         }
 
 
+def huella_de_pesos(ruta: Path) -> str:
+    """Identifica un archivo de pesos, para saber sobre cuál se midió un umbral.
+
+    Los umbrales son una propiedad del modelo: los de un modelo no valen para
+    otro. Sin una huella no había forma de notar que la medición había quedado
+    vieja, y el módulo alertaba con números de un modelo que ya no existía.
+
+    Se lee en bloques porque el .pt pesa varios megas y no hace falta tenerlo
+    entero en memoria para resumirlo.
+    """
+    h = hashlib.sha1()
+    with ruta.open("rb") as f:
+        for bloque in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(bloque)
+    return h.hexdigest()[:16]
+
+
 def calibracion(
     exigidos: tuple[str, ...],
     medidos: dict[str, float],
-) -> tuple[dict[str, float], tuple[str, ...]]:
-    """Qué se puede alertar y con qué umbral, según lo que se midió del modelo.
+    corroborados: dict[str, float] | None = None,
+) -> tuple[dict[str, float], dict[str, float], tuple[str, ...]]:
+    """Qué se puede alertar y con qué umbrales, según lo que se midió del modelo.
 
-    `medidos` sale de `training/ppe/umbral.py`: por cada elemento, la confianza
-    mínima con la que sus alertas alcanzan la precisión pedida. Un elemento que
-    no está en esa lista es uno que el modelo NO distingue lo bastante bien como
-    para acusar a nadie.
+    `medidos` y `corroborados` salen de `training/ppe/evaluar_personas.py`: por
+    cada elemento, la confianza con la que sus alertas alcanzan la precisión
+    pedida MIDIENDO EL VEREDICTO POR PERSONA, que es lo que el módulo emite. Un
+    elemento que no está en ninguna de las dos listas es uno que el modelo no
+    distingue lo bastante bien como para acusar a nadie.
+
+    Antes esto se calibraba con `umbral.py`, que mide caja por caja contra las
+    anotadas. Es la métrica del detector, no la del módulo, y castiga cosas que
+    al operador no le importan: dos cajas mal puestas sobre la misma persona
+    son dos errores para el detector y una sola alerta —correcta— en pantalla.
+    Con esa vara el chaleco daba 0,41 de precisión y quedaba silenciado, cuando
+    medido por persona da 0,83 y ve 3 de cada 4 faltas reales.
 
     La regla es simple y es la que hace que el módulo no invente: **sólo alerta
     lo que tiene un umbral medido**. Lo demás se sigue detectando y dibujando
@@ -346,5 +523,10 @@ def calibracion(
     modelo, no a la cámara.
     """
     umbrales = {e: u for e, u in medidos.items() if e in exigidos}
+    # El corroborado es un extra sobre el directo, nunca un reemplazo: sin
+    # umbral directo medido no hay nada que corroborar, y dejar que un elemento
+    # alertara sólo por el corroborado lo haría caer en `minConfianzaFalta`,
+    # que es un valor por omisión y no una medición.
+    corro = {e: u for e, u in (corroborados or {}).items() if e in umbrales}
     callados = tuple(e for e in exigidos if e not in umbrales)
-    return umbrales, callados
+    return umbrales, corro, callados

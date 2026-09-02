@@ -7,6 +7,7 @@ Expone:
   GET /cameras/{id}/snapshot.jpg        -> último frame
   GET /cameras/{id}/frame               -> último frame + metadatos (para ai-worker)
   POST /cameras/{id}/clip               -> arma el clip pre/post de un evento
+  POST /cameras/{id}/snapshot           -> guarda la foto del instante de un evento
 
 MJPEG en lugar de WebRTC para el MVP: se consume desde un <img> sin
 señalización ni STUN/TURN, y funciona igual con USB que con RTSP. WebRTC
@@ -18,6 +19,7 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -27,7 +29,7 @@ import numpy as np
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
-from .clips import PRE_ROLL_S, POST_ROLL_S, build_clip, info_clip
+from .clips import PRE_ROLL_S, POST_ROLL_S, build_clip, build_snapshot, info_clip
 from .registry import CameraRegistry
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -68,6 +70,47 @@ def health() -> dict:
         "connected": len(connected),
         "fuenteConfig": "device-service" if _registry.using_api else "cameras.json",
         "syncError": _registry.last_sync_error,
+    }
+
+
+@app.get("/storage")
+def storage() -> dict:
+    """Cuánto ocupan las evidencias y cuánto queda en el disco. Todo medido.
+
+    El panel mostraba un "2,45 TB de 10 TB" inventado. Un número de
+    almacenamiento que no se mide es peor que no mostrarlo: el día que el disco
+    se llene de verdad, la pantalla va a seguir diciendo que sobra lugar.
+
+    Se recorre el árbol de evidencias en vez de guardar un contador porque los
+    clips también se borran desde afuera —al resolver un evento, o a mano— y un
+    contador que no ve esos borrados se va despegando de la realidad.
+    """
+    usados = 0
+    archivos = 0
+    if EVIDENCE_DIR.exists():
+        for f in EVIDENCE_DIR.rglob("*"):
+            try:
+                if f.is_file():
+                    usados += f.stat().st_size
+                    archivos += 1
+            except OSError:
+                # Un archivo que desaparece mientras se lo recorre no es un
+                # error: lo acaba de borrar quien resolvió el evento.
+                continue
+
+    try:
+        du = shutil.disk_usage(EVIDENCE_DIR if EVIDENCE_DIR.exists() else Path("."))
+        total, libre = du.total, du.free
+    except OSError as exc:
+        log.warning("no se pudo medir el disco: %s", exc)
+        total, libre = 0, 0
+
+    return {
+        "evidenciasBytes": usados,
+        "evidenciasArchivos": archivos,
+        "discoTotalBytes": total,
+        "discoLibreBytes": libre,
+        "ruta": str(EVIDENCE_DIR.resolve()) if EVIDENCE_DIR.exists() else str(EVIDENCE_DIR),
     }
 
 
@@ -167,6 +210,44 @@ def make_clip(camera_id: str, body: dict) -> dict:
         # dato estaba mal.
         "preRollMs": int(PRE_ROLL_S * 1000),
         "postRollMs": int(POST_ROLL_S * 1000),
+    }
+
+
+@app.post("/cameras/{camera_id}/snapshot")
+def make_snapshot(camera_id: str, body: dict) -> dict:
+    """Guarda la FOTO de un evento: el frame del instante en que sonó la alerta.
+
+    Es la evidencia de lo que se contesta mirando un instante —alguien sin
+    casco, una cara desconocida—. A diferencia del clip, responde enseguida: no
+    hay post-roll que esperar, así que el operador ve la foto apenas aparece la
+    alerta en vez de tres segundos después.
+
+    `boxes` es opcional y son las cajas de la detección: si vienen, se dibujan
+    sobre la foto, para que quien la mire sepa de QUIÉN de los que están en el
+    cuadro habla la alerta.
+    """
+    src = _get(camera_id)
+    event_id = body.get("eventId") or f"ev-{int(time.time())}"
+    center = float(body.get("centerTs") or time.time())
+    cajas = body.get("boxes") or None
+    dest = EVIDENCE_DIR / camera_id / f"{event_id}.jpg"
+
+    ruta = build_snapshot(src, center, dest, boxes=cajas)
+    if ruta is None or not ruta.is_file():
+        raise HTTPException(status_code=503, detail="no se pudo sacar la foto (¿buffer vacío?)")
+
+    datos = ruta.read_bytes()
+    return {
+        "accepted": True,
+        "cameraId": camera_id,
+        "eventId": event_id,
+        "path": str(ruta),
+        "bytes": len(datos),
+        "sha256": hashlib.sha256(datos).hexdigest(),
+        # Qué tan lejos quedó la foto del instante pedido. Con la cámara
+        # entregando frames es de milésimas; si sale de segundos, la cámara
+        # estaba cortada y la foto es del último momento que sí se vio.
+        "desfasajeSegundos": round(float(info_clip(ruta).get("desfasajeSegundos", 0.0)), 3),
     }
 
 
@@ -294,7 +375,15 @@ def get_evidence(camera_id: str, nombre: str, request: Request) -> Response:
     if estado == 206:
         cabeceras["Content-Range"] = f"bytes {inicio}-{fin}/{total}"
 
-    return StreamingResponse(leer(), status_code=estado, media_type="video/mp4", headers=cabeceras)
+    # El tipo sale de la extensión y no está fijo en video/mp4: desde que las
+    # alertas de EPP y de cara desconocida guardan una FOTO, servirla como
+    # video hacía que el navegador no la mostrara —y la evidencia existía en
+    # disco pero no se podía mirar—.
+    tipo = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png"}.get(
+        ruta.suffix.lower().lstrip("."), "video/mp4"
+    )
+
+    return StreamingResponse(leer(), status_code=estado, media_type=tipo, headers=cabeceras)
 
 
 if __name__ == "__main__":

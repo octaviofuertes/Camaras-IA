@@ -32,7 +32,7 @@ import { CommonModule } from '@angular/common';
             <path d="m6 9 6 6 6-6" />
           </svg>
         </button>
-        <button class="select" *ngIf="showDateRange">
+        <button class="select" *ngIf="showDateRange && dateRange">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" />
           </svg>
@@ -94,5 +94,12 @@ export class PageHeaderComponent {
   @Input() title = '';
   @Input() subtitle = '';
   @Input() showDateRange = false;
-  @Input() dateRange = '01/05/2024 - 01/05/2024';
+  /**
+   * Qué período se está mostrando. Lo pasa cada pantalla.
+   *
+   * Sin valor por omisión: había uno fijo —"01/05/2024 - 01/05/2024"— que se
+   * leía como el rango de lo que había en pantalla y no lo era. Un filtro que
+   * dice una fecha que no es la de los datos es peor que no mostrar el filtro.
+   */
+  @Input() dateRange = '';
 }

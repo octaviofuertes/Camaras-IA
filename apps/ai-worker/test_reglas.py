@@ -323,3 +323,43 @@ if __name__ == "__main__":
             print(f"  ERROR {nombre}: {e!r}")
     print(f"\n{len(pruebas) - fallos}/{len(pruebas)} pruebas OK")
     sys.exit(1 if fallos else 0)
+
+
+# ── que una caída de device-service no tire los pipelines ────────────────
+
+
+def test_una_caida_de_la_api_no_manda_a_reconstruir(monkeypatch):
+    """Si device-service no contesta, no hay novedad: no se toca nada.
+
+    Leer el respaldo en ese momento daba una firma distinta y el worker
+    recargaba todos los modelos por una caída de un segundo. En pantalla eso
+    son las cámaras trabadas.
+    """
+    from ai_worker import main
+
+    monkeypatch.setattr(main, "_hubo_api", True)
+    monkeypatch.setattr(main, "_assignments_from_api", lambda: None)
+    monkeypatch.setattr(main, "_load_assignments", lambda: ["lo del respaldo"])
+
+    assert main._asignaciones_para_comparar() is None
+
+
+def test_sin_api_desde_siempre_el_respaldo_sigue_mandando(monkeypatch):
+    """En una instalación que corre sólo con el archivo, el archivo decide."""
+    from ai_worker import main
+
+    monkeypatch.setattr(main, "_hubo_api", False)
+    monkeypatch.setattr(main, "_assignments_from_api", lambda: None)
+    monkeypatch.setattr(main, "_load_assignments", lambda: ["lo del respaldo"])
+
+    assert main._asignaciones_para_comparar() == ["lo del respaldo"]
+
+
+def test_cuando_la_api_contesta_manda_la_api(monkeypatch):
+    from ai_worker import main
+
+    monkeypatch.setattr(main, "_hubo_api", False)
+    monkeypatch.setattr(main, "_assignments_from_api", lambda: ["lo de la api"])
+    monkeypatch.setattr(main, "_load_assignments", lambda: ["lo del respaldo"])
+
+    assert main._asignaciones_para_comparar() == ["lo de la api"]

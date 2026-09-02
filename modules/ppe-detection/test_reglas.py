@@ -338,18 +338,100 @@ def test_lo_no_silenciado_sigue_alertando():
     assert [x.elemento.clave for x in f] == ["chaleco"]
 
 
+# ── la ausencia corroborada por lo que no aparece ────────────────────
+#
+# El umbral que hace falta para acusar a alguien con una sola caja de "sin
+# casco" deja al módulo casi mudo: medido sobre el split de prueba, ve 2 de
+# cada 10 faltas reales. Lo que cambia el número es el contexto — si al mismo
+# cuerpo el detector TAMPOCO le encontró un casco por ningún lado, esa caja
+# floja pesa mucho más. Lo que sigue protege que el contexto se mire bien.
+
+def test_una_ausencia_floja_sola_no_alcanza():
+    # Sin corroboración configurada, el umbral directo manda y no llega.
+    c = cfg(minConfianzaFalta=0.6)
+    assert evaluar_cuadro([IZQ], [("NO-Hardhat", CASCO_IZQ, 0.4)], c) == {}
+
+
+def test_una_ausencia_floja_alerta_si_no_se_le_vio_el_casco():
+    c = cfg(minConfianzaFalta=0.6, umbralCorroborado={"casco": 0.3})
+    salida = evaluar_cuadro([IZQ], [("NO-Hardhat", CASCO_IZQ, 0.4)], c)
+    assert salida[0]["casco"] == (False, 0.4)
+
+
+def test_un_casco_aunque_sea_flojo_desactiva_la_corroboracion():
+    # El detector vio algo que parece un casco: ya no es "no apareció por
+    # ningún lado", y una caja floja de ausencia no alcanza para acusar.
+    c = cfg(minConfianzaFalta=0.6, umbralCorroborado={"casco": 0.3})
+    salida = evaluar_cuadro(
+        [IZQ],
+        [("NO-Hardhat", CASCO_IZQ, 0.4), ("Hardhat", CASCO_IZQ, 0.2)],
+        c,
+    )
+    assert "casco" not in salida.get(0, {}), "con evidencia en contra, no se sabe"
+
+
+def test_sin_ninguna_caja_de_ausencia_no_se_avisa_nada():
+    # La regla de siempre, que la corroboración NO afloja: no encontrar un
+    # casco no es ver una cabeza descubierta. Una persona de espaldas no
+    # genera nada.
+    c = cfg(minConfianzaFalta=0.6, umbralCorroborado={"casco": 0.25})
+    assert evaluar_cuadro([IZQ], [], c) == {}
+
+
+def test_el_casco_de_otro_no_corrobora_nada():
+    # El casco está sobre la persona de al lado: para ésta el detector no vio
+    # ninguno, así que su ausencia floja sigue valiendo.
+    c = cfg(minConfianzaFalta=0.6, umbralCorroborado={"casco": 0.3})
+    salida = evaluar_cuadro(
+        [IZQ, DER],
+        [("NO-Hardhat", CASCO_IZQ, 0.4), ("Hardhat", CASCO_DER, 0.9)],
+        c,
+    )
+    assert salida[0]["casco"] == (False, 0.4)
+    assert salida[1]["casco"] == (True, 0.9)
+
+
+def test_una_ausencia_confiable_gana_a_un_casco_menos_confiable():
+    c = cfg(minConfianzaFalta=0.4)
+    salida = evaluar_cuadro(
+        [IZQ],
+        [("NO-Hardhat", CASCO_IZQ, 0.8), ("Hardhat", CASCO_IZQ, 0.5)],
+        c,
+    )
+    assert salida[0]["casco"] == (False, 0.8)
+
+
+def test_ante_empate_manda_el_que_no_acusa():
+    c = cfg(minConfianzaFalta=0.4)
+    salida = evaluar_cuadro(
+        [IZQ],
+        [("NO-Hardhat", CASCO_IZQ, 0.6), ("Hardhat", CASCO_IZQ, 0.6)],
+        c,
+    )
+    assert salida[0]["casco"] == (True, 0.6)
+
+
+def test_la_corroboracion_no_se_saltea_la_posicion():
+    # Un "sin casco" a la altura de los pies es un error del detector, y
+    # corroborarlo con que tampoco hay casco no lo convierte en cierto.
+    c = cfg(minConfianzaFalta=0.6, umbralCorroborado={"casco": 0.3})
+    a_los_pies = (0.14, 0.80, 0.10, 0.08)
+    assert evaluar_cuadro([IZQ], [("NO-Hardhat", a_los_pies, 0.4)], c) == {}
+
+
 # ── la calibración sale de lo medido, no de la config de la cámara ───
 
 def test_solo_alerta_lo_que_tiene_umbral_medido():
     from reglas import calibracion
-    u, callados = calibracion(("casco", "chaleco"), {"chaleco": 0.35})
+    u, corro, callados = calibracion(("casco", "chaleco"), {"chaleco": 0.35})
     assert u == {"chaleco": 0.35}
+    assert corro == {}
     assert callados == ("casco",), "el casco no se midió: no puede alertar"
 
 
 def test_lo_que_no_se_exige_no_entra_en_la_calibracion():
     from reglas import calibracion
-    u, callados = calibracion(("chaleco",), {"chaleco": 0.35, "casco": 0.5})
+    u, _corro, callados = calibracion(("chaleco",), {"chaleco": 0.35, "casco": 0.5})
     assert u == {"chaleco": 0.35}
     assert callados == ()
 
@@ -357,13 +439,35 @@ def test_lo_que_no_se_exige_no_entra_en_la_calibracion():
 def test_sin_mediciones_no_se_alerta_nada():
     # Modelo recién entrenado y todavía sin medir: se dibuja, no se acusa.
     from reglas import calibracion
-    u, callados = calibracion(("casco", "chaleco", "guantes"), {})
+    u, corro, callados = calibracion(("casco", "chaleco", "guantes"), {})
     assert u == {}
+    assert corro == {}
     assert set(callados) == {"casco", "chaleco", "guantes"}
 
 
 def test_con_todo_medido_no_queda_nada_callado():
     from reglas import calibracion
-    u, callados = calibracion(("casco", "guantes"), {"casco": 0.4, "guantes": 0.55})
+    u, _corro, callados = calibracion(("casco", "guantes"), {"casco": 0.4, "guantes": 0.55})
     assert u == {"casco": 0.4, "guantes": 0.55}
     assert callados == ()
+
+
+def test_el_corroborado_acompana_al_directo():
+    from reglas import calibracion
+    u, corro, callados = calibracion(
+        ("casco", "chaleco"), {"casco": 0.4, "chaleco": 0.3},
+        {"casco": 0.25, "chaleco": 0.25},
+    )
+    assert u == {"casco": 0.4, "chaleco": 0.3}
+    assert corro == {"casco": 0.25, "chaleco": 0.25}
+    assert callados == ()
+
+
+def test_el_corroborado_solo_no_habilita_a_alertar():
+    # Sin umbral directo medido no hay nada que corroborar: dejarlo pasar haría
+    # que el elemento alertara con `minConfianzaFalta`, que no es una medición.
+    from reglas import calibracion
+    u, corro, callados = calibracion(("casco",), {}, {"casco": 0.25})
+    assert u == {}
+    assert corro == {}
+    assert callados == ("casco",)
